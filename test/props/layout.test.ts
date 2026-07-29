@@ -4,6 +4,7 @@ import {
   PROP_GAP_PX,
   dragResult,
   groundedPropsState,
+  settleDrag,
   PROP_KINDS,
   PROP_REACH_SPRITE,
   PROP_SCALE,
@@ -326,11 +327,17 @@ describe('挂件的高度', () => {
   });
 });
 
-describe('拖动：只动横向，永不重合', () => {
+describe('拖动：跟手，越过中心交换，松手补间隔', () => {
   const at = (bowlX: number, bedX: number): PropsState => ({
     bowl: { x: bowlX, y: 900, visible: true },
     bed: { x: bedX, y: 900, visible: true },
   });
+  const wOf = (k: PropKind): number => propWindowSize(k).w;
+  const centerOf = (k: PropKind, st: PropsState): number => st[k].x + wOf(k) / 2;
+  const gapBetween = (st: PropsState): number => {
+    const [l, r] = st.bowl.x < st.bed.x ? (['bowl', 'bed'] as const) : (['bed', 'bowl'] as const);
+    return st[r].x - (st[l].x + wOf(l));
+  };
 
   it('纵向一步都不动 - 挂件是放在地上的东西', () => {
     const s = at(400, 800);
@@ -339,54 +346,60 @@ describe('拖动：只动横向，永不重合', () => {
     expect(next.bed.y).toBe(s.bed.y);
   });
 
-  it('横向跟着走', () => {
-    const next = dragResult('bowl', 600, at(400, 1200), DESKTOP);
-    expect(next.bowl.x).toBe(600);
+  it('横向严格跟手 - 死区就是「卡顿」的来源', () => {
+    // 前一版在这里按间隔挡住，挂件停住而光标还在走，一百多像素不跟手，
+    // 走到尽头再突然交换。现在每一个位置都照给。
+    for (const want of [420, 600, 700, 740, 760]) {
+      const next = dragResult('bowl', want, at(400, 800), DESKTOP);
+      expect(next.bowl.x, `想去 ${want} 却停在 ${next.bowl.x}`).toBe(want);
+    }
+  });
+
+  it('拖动过程中允许重合 - 不跟手才是错的', () => {
+    // 想去的位置压在猫窝上（但中心还没越过），就该压上去。
+    const s = at(400, 800);
+    const want = 800 + wOf('bed') / 2 - wOf('bowl') / 2 - 4; // 中心差 4 像素没到
+    const next = dragResult('bowl', want, s, DESKTOP);
+    expect(next.bowl.x).toBe(Math.round(want));
+    expect(gapBetween(next)).toBeLessThan(0); // 真的重合了
+    expect(next.bed.x).toBe(s.bed.x); // 还没交换
+  });
+
+  it('中心交错的那一刻交换，此时两者正好各重叠一半左右', () => {
+    const s = at(400, 800);
+    const bedCenter = centerOf('bed', s);
+    // 让食盆中心刚好越过猫窝中心
+    const want = bedCenter - wOf('bowl') / 2 + 1;
+    const next = dragResult('bowl', want, s, DESKTOP);
+    expect(centerOf('bowl', next)).toBeGreaterThan(centerOf('bed', next));
+    // 交换之后立刻是分开的，间隔就是定好的那一段
+    expect(gapBetween(next)).toBe(PROP_GAP_PX);
+  });
+
+  it('交换之后继续同向拖，不会再来回换', () => {
+    let cur = at(400, 800);
+    const bedCenter = centerOf('bed', cur);
+    cur = dragResult('bowl', bedCenter - wOf('bowl') / 2 + 1, cur, DESKTOP);
+    const bedAfter = cur.bed.x;
+    for (let want = cur.bowl.x; want < cur.bowl.x + 200; want += 13) {
+      cur = dragResult('bowl', want, cur, DESKTOP);
+    }
+    expect(cur.bed.x).toBe(bedAfter);
+    expect(centerOf('bowl', cur)).toBeGreaterThan(centerOf('bed', cur));
+  });
+
+  it('反向也能换回来（交换不是单程票）', () => {
+    let s = at(400, 800);
+    s = dragResult('bowl', centerOf('bed', s) - wOf('bowl') / 2 + 1, s, DESKTOP);
+    expect(centerOf('bowl', s)).toBeGreaterThan(centerOf('bed', s));
+    s = dragResult('bowl', centerOf('bed', s) - wOf('bowl') / 2 - 1, s, DESKTOP);
+    expect(centerOf('bowl', s)).toBeLessThan(centerOf('bed', s));
   });
 
   it('拖不出工作区 - 出去了用户就再也拖不回来', () => {
     expect(dragResult('bowl', -9999, at(400, 1200), DESKTOP).bowl.x).toBe(DESKTOP.x);
     const far = dragResult('bowl', 99999, at(400, 1200), DESKTOP);
-    expect(far.bowl.x + propWindowSize('bowl').w).toBe(DESKTOP.x + DESKTOP.w);
-  });
-
-  it('中心越过另一件就交换，不是叠在一起', () => {
-    // 食盆在左、猫窝在右。把食盆一路拖到猫窝右边。
-    const s = at(400, 800);
-    const bedCenter = 800 + propWindowSize('bed').w / 2;
-    const next = dragResult('bowl', bedCenter + 100, s, DESKTOP);
-    // 食盆去了右边，猫窝接手食盆原来的位置
-    expect(next.bowl.x).toBeGreaterThan(next.bed.x);
-    const myOldCenter = 400 + propWindowSize('bowl').w / 2;
-    expect(next.bed.x + propWindowSize('bed').w / 2).toBe(myOldCenter);
-  });
-
-  it('交换之后两件仍然不重合', () => {
-    const s = at(400, 800);
-    const bedCenter = 800 + propWindowSize('bed').w / 2;
-    const next = dragResult('bowl', bedCenter + 5, s, DESKTOP);
-    const left = next.bowl.x < next.bed.x ? 'bowl' : 'bed';
-    const right = left === 'bowl' ? 'bed' : 'bowl';
-    expect(next[right].x).toBeGreaterThanOrEqual(next[left].x + propWindowSize(left).w);
-  });
-
-  it('没越过中心就不交换，而且被挡在间隔外 - 不许压在另一件上', () => {
-    const s = at(400, 800);
-    const bedCenter = 800 + propWindowSize('bed').w / 2;
-    // 想去的位置让中心差一点点才到对方中心：不交换，且被挡住
-    const next = dragResult('bowl', bedCenter - 1 - propWindowSize('bowl').w / 2, s, DESKTOP);
-    expect(next.bed.x).toBe(s.bed.x);
-    expect(next.bowl.x + propWindowSize('bowl').w).toBe(next.bed.x - PROP_GAP_PX);
-  });
-
-  it('一路往对方身上拖，停在间隔外一步都不越界', () => {
-    const s = at(400, 800);
-    let cur = s;
-    for (let want = 400; want < 800; want += 7) {
-      cur = dragResult('bowl', want, cur, DESKTOP);
-      const gap = cur.bed.x - (cur.bowl.x + propWindowSize('bowl').w);
-      expect(gap, `拖到 ${want} 时间隔只有 ${gap}`).toBeGreaterThanOrEqual(PROP_GAP_PX);
-    }
+    expect(far.bowl.x + wOf('bowl')).toBe(DESKTOP.x + DESKTOP.w);
   });
 
   it('藏起来的挂件不参与交换 - 看不见的东西突然跳一下更莫名', () => {
@@ -399,15 +412,29 @@ describe('拖动：只动横向，永不重合', () => {
     expect(next.bed.x).toBe(s.bed.x);
   });
 
-  it('反向也能换回来（交换不是单程票）', () => {
-    let s = at(400, 800);
-    const bedCenter = 800 + propWindowSize('bed').w / 2;
-    s = dragResult('bowl', bedCenter + 100, s, DESKTOP);
-    expect(s.bowl.x).toBeGreaterThan(s.bed.x);
-    // 再把食盆拖回猫窝左边
-    const bedCenter2 = s.bed.x + propWindowSize('bed').w / 2;
-    s = dragResult('bowl', bedCenter2 - propWindowSize('bowl').w - 50, s, DESKTOP);
-    expect(s.bowl.x).toBeLessThan(s.bed.x);
+  it('松手之后一定不重合，且推向更近的那一侧', () => {
+    // 压在猫窝左半边就松手 → 往左让开
+    const overlapLeft = dragResult('bowl', 760, at(400, 800), DESKTOP);
+    expect(gapBetween(overlapLeft)).toBeLessThan(PROP_GAP_PX);
+    const settledLeft = settleDrag('bowl', overlapLeft, DESKTOP);
+    expect(gapBetween(settledLeft)).toBe(PROP_GAP_PX);
+    expect(settledLeft.bowl.x).toBeLessThan(settledLeft.bed.x);
+  });
+
+  it('松手时本来就不重合的话，一动都不动', () => {
+    const s = at(400, 800);
+    expect(settleDrag('bowl', s, DESKTOP)).toBe(s);
+  });
+
+  it('屏幕窄到放不下两件时，宁可挨着也不推出屏幕外', () => {
+    const tiny: ScreenRect = { x: 0, y: 0, w: 150, h: 600 };
+    const s: PropsState = {
+      bowl: { x: 10, y: 500, visible: true },
+      bed: { x: 14, y: 500, visible: true },
+    };
+    const settled = settleDrag('bowl', s, tiny);
+    expect(settled.bowl.x).toBeGreaterThanOrEqual(tiny.x);
+    expect(settled.bowl.x + wOf('bowl')).toBeLessThanOrEqual(tiny.x + tiny.w);
   });
 });
 

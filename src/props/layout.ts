@@ -225,25 +225,23 @@ export function samePropsState(a: PropsState, b: PropsState): boolean {
 }
 
 /**
- * 拖动的结果：**只动横向**，而且两件家具永不重合。
+ * 拖动过程中的结果：**只动横向，跟手，允许暂时重合**。
  *
  * 纵向不给用户动，因为挂件是**放在地上的东西** - 纵向位置由地面线唯一决定
  * （groundedY）。放开纵向的代价立刻就能看见：食盆会被拖到猫脚下面的空处浮着，
  * 而猫走过去吃饭时仍然按地面线站，两者对不上。
  * 猫本身也只有 x、没有 y，永远走在同一条线上，所以「所有东西共用一条地面线」
- * 是这套空间模型的唯一不变量。这与「脚踩实地」是同一条约束的两面
- * （见 art-and-motion-decisions）。
+ * 是这套空间模型的唯一不变量（另一面见 art-and-motion-decisions 的脚踩实地）。
  *
- * 重合怎么避免：**拖的那件中心越过另一件中心时，两件互换位置。**
+ * **「不许重合」是静止状态的约束，不是拖动过程中的约束。**
+ * 被否决的前一版就是把它当成过程约束：拖动时按间隔挡住不许压上去。结果是挂件
+ * 停在间隔外不动、而光标还在往前走，中间有一百多像素的死区不跟手，走到尽头再
+ * 突然交换 - 产品负责人的原话是「交换的时候会感觉卡顿一下」，那个卡顿就是死区
+ * 末端的跳变。拖动是直接操作，东西不跟手才是错的。
+ * 静止时的间隔由 settleDrag 在松手时补上。
  *
- * 被否决的两个方案：
- * - 挡住不许越过。最简单，但代价是两件家具再也换不了位置 - 互相挡着，
- *   哪一件都过不去。产品负责人的问题「如果我想让 2 个挂件换位置，应该咋办」
- *   就是这个方案答不上来。
- * - 推开：拖着一件去顶另一件，被顶的跟着滑。手感像推家具，但顶到屏幕边就卡住，
- *   贴边摆放时（默认就是贴边）照样换不了。
- *
- * 交换是原子的：两件同时落到新位置，中间不存在重合的那一帧。
+ * 交换的触发点是**两者中心交错**，也就是「差不多各重叠一半」的那一刻。
+ * 被交换的那件直接落到我来的那一侧、留出间隔，于是交换之后两者立刻是分开的。
  */
 export function dragResult(
   kind: PropKind,
@@ -254,44 +252,62 @@ export function dragResult(
   const w = propWindowSize(kind).w;
   const inWork = (v: number, width: number): number =>
     clamp(Math.round(v), work.x, work.x + work.w - width);
-  // 用户「想去」的位置。判定要不要交换看的是它，而不是钳过之后的结果 -
-  // 钳过之后中心永远越不过对方，交换就永远不会发生。
-  const wantX = inWork(desiredX, w);
-  const wantCenter = wantX + w / 2;
-  const myCenterNow = state[kind].x + w / 2;
+  const x = inWork(desiredX, w);
+  const center = x + w / 2;
+  const centerNow = state[kind].x + w / 2;
 
-  let next = state;
-  let minX = work.x;
-  let maxX = work.x + work.w - w;
+  let next = { ...state, [kind]: { ...state[kind], x } } as PropsState;
 
   for (const other of PROP_KINDS) {
     if (other === kind) continue;
-    // 隐藏的挂件既不阻挡也不交换：看不见的东西挡手或者突然跳一下都很莫名。
+    // 隐藏的挂件不参与交换：看不见的东西突然跳一下更莫名。
     if (!state[other].visible) continue;
     const o = state[other];
     const ow = propWindowSize(other).w;
     const oCenter = o.x + ow / 2;
+    if (centerNow < oCenter === center < oCenter) continue;
 
-    if (myCenterNow < oCenter === wantCenter < oCenter) {
-      // 还在同一侧：挡住，留出间隔，绝不重合。
-      if (myCenterNow < oCenter) maxX = Math.min(maxX, o.x - PROP_GAP_PX - w);
-      else minX = Math.max(minX, o.x + ow + PROP_GAP_PX);
-      continue;
-    }
-
-    // 推过了对方的中心：交换。对方去我腾出来的位置（按中心对齐，免得宽度不同时
-    // 看起来偏一截），我落到另一侧，再按新的相对关系留出间隔。
-    const movedOther = { ...o, x: inWork(myCenterNow - ow / 2, ow) };
-    next = { ...next, [other]: movedOther } as PropsState;
-    const newOCenter = movedOther.x + ow / 2;
-    if (wantCenter < newOCenter) maxX = Math.min(maxX, movedOther.x - PROP_GAP_PX - w);
-    else minX = Math.max(minX, movedOther.x + ow + PROP_GAP_PX);
+    // 中心交错了。被交换的那件落到我来的那一侧，紧邻我并留出间隔 -
+    // 用「我现在在哪」算而不是「我原来在哪」，这样连续拖动时它的落点是稳定的。
+    const parked = center < oCenter ? x + w + PROP_GAP_PX : x - PROP_GAP_PX - ow;
+    next = { ...next, [other]: { ...o, x: inWork(parked, ow) } } as PropsState;
   }
 
-  // 屏幕窄到放不下两件家具时 min 会超过 max。此时只保证不出工作区 -
-  // 宁可两件挨着也不要把挂件推到屏幕外，推出去用户就再也拖不回来了。
-  const x = minX > maxX ? wantX : clamp(wantX, minX, maxX);
-  return { ...next, [kind]: { ...state[kind], x } } as PropsState;
+  return next;
+}
+
+/**
+ * 松手之后把间隔补上：**静止状态永不重合**。
+ *
+ * 拖动过程中允许重合（见 dragResult），所以松手的那一刻可能正压在另一件上。
+ * 往哪一侧推由中心的相对位置决定 - 推到「看起来更近」的那一侧，用户才不会觉得
+ * 东西自己跑了。两侧都放不下（屏幕太窄）就留在原地，宁可挨着也不要推出屏幕外。
+ */
+export function settleDrag(kind: PropKind, state: PropsState, work: ScreenRect): PropsState {
+  const w = propWindowSize(kind).w;
+  const minX = work.x;
+  const maxX = work.x + work.w - w;
+  let x = state[kind].x;
+
+  for (const other of PROP_KINDS) {
+    if (other === kind) continue;
+    if (!state[other].visible) continue;
+    const o = state[other];
+    const ow = propWindowSize(other).w;
+    const gap = x < o.x ? o.x - (x + w) : x - (o.x + ow);
+    if (gap >= PROP_GAP_PX) continue;
+
+    const toLeft = o.x - PROP_GAP_PX - w;
+    const toRight = o.x + ow + PROP_GAP_PX;
+    const leftOk = toLeft >= minX;
+    const rightOk = toRight <= maxX;
+    if (leftOk && rightOk) x = x + w / 2 < o.x + ow / 2 ? toLeft : toRight;
+    else if (leftOk) x = toLeft;
+    else if (rightOk) x = toRight;
+  }
+
+  if (x === state[kind].x) return state;
+  return { ...state, [kind]: { ...state[kind], x: clamp(x, minX, maxX) } } as PropsState;
 }
 
 /**

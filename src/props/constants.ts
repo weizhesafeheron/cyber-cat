@@ -171,6 +171,9 @@ export const PROP_EVENT_CLICKED = 'prop-clicked';
  */
 export const PROP_EVENT_DRAG = 'prop-drag';
 
+/** 用户松手了。宠物窗口据此把间隔补上（拖动过程中允许重合）。 */
+export const PROP_EVENT_DROP = 'prop-drop';
+
 /** 挂件回报自己被系统挪到了哪（换屏、分辨率变化）。拖拽不走这条。 */
 export const PROP_EVENT_MOVED = 'prop-moved';
 /** 宠物窗口下发给挂件的视图状态（目前只有碗里的份数）。 */

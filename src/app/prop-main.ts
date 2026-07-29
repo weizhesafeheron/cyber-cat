@@ -3,6 +3,7 @@ import {
   PROP_DRAG_THRESHOLD_PX,
   PROP_EVENT_CLICKED,
   PROP_EVENT_DRAG,
+  PROP_EVENT_DROP,
   PROP_EVENT_MOVED,
   PROP_EVENT_READY,
   PROP_EVENT_SYNC,
@@ -225,7 +226,12 @@ window.addEventListener('pointerup', (e) => {
   pressAt = null;
   dragging = false;
   grabOffset = null;
-  if (!start || wasDragging) return;
+  if (wasDragging) {
+    // 拖动过程中允许压在另一件上，松手才把间隔补上（见 props/layout.ts 的 settleDrag）。
+    void emitToWindow(PET_WINDOW_LABEL, PROP_EVENT_DROP, kind);
+    return;
+  }
+  if (!start) return;
   if (Math.hypot(e.clientX - start.x, e.clientY - start.y) >= PROP_DRAG_THRESHOLD_PX) return;
   // 点了挂件。**只发一个事件**：添粮是世界层的用户动作，必须走同一个 step。
   void emitToWindow(PET_WINDOW_LABEL, PROP_EVENT_CLICKED, kind);

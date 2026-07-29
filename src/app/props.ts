@@ -1,6 +1,7 @@
 import {
   PROP_EVENT_CLICKED,
   PROP_EVENT_DRAG,
+  PROP_EVENT_DROP,
   PROP_EVENT_MOVED,
   PROP_EVENT_READY,
   PROP_EVENT_SYNC,
@@ -9,6 +10,7 @@ import {
   clampPropsState,
   defaultPropsState,
   dragResult,
+  settleDrag,
   groundedPropsState,
   propWindowLabel,
   samePlacement,
@@ -87,6 +89,10 @@ export class PropsHost {
    */
   private applied: Partial<Record<PropKind, PropPlacement>> = {};
   private portions = 0;
+  /** 有一次窗口移动在飞。见 pump()。 */
+  private flushing = false;
+  /** 在飞的那次落地之后还欠一次下发。见 pump()。 */
+  private dirty = false;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * 摆放存档读完了没有。
@@ -162,14 +168,18 @@ export class PropsHost {
     void this.ports.listenEvent<PropKind>(PROP_EVENT_CLICKED, (kind) => {
       if (kind === 'bowl') onFeed();
     });
-    // 拖拽：挂件只报「我想去这个 x」，钳制在这边做 - 只有这里知道另一件挂件在哪。
+    // 拖拽：挂件只报「我想去这个 x」，其余判断在这边做 -
+    // 只有这里知道另一件挂件在哪。
     void this.ports.listenEvent<PropDragPayload>(PROP_EVENT_DRAG, (p) => {
       if (!this.booted) return; // 与 onMoved 同一条理由：读档完成前不接受位置
-      const next = dragResult(p.kind, p.x, this.state, this.work);
-      if (samePropsState(next, this.state)) return;
-      this.state = next;
-      // 交换位置时另一件也动了，所以两件都要下发一次。applyOne 自带去重。
-      void this.apply();
+      this.state = dragResult(p.kind, p.x, this.state, this.work);
+      this.pump();
+    });
+    // 松手：把间隔补上。拖动过程中是允许重合的（跟手优先），静止时不允许。
+    void this.ports.listenEvent<PropKind>(PROP_EVENT_DROP, (kind) => {
+      if (!this.booted) return;
+      this.state = settleDrag(kind, this.state, this.work);
+      this.pump();
       this.schedulePersist();
     });
     void this.ports.listenEvent<PropMovedPayload>(PROP_EVENT_MOVED, (p) => {
@@ -234,7 +244,34 @@ export class PropsHost {
   }
 
   private async apply(): Promise<void> {
-    for (const kind of PROP_KINDS) await this.applyOne(kind, false);
+    // 并行下发。串行等两次跨进程窗口移动，在拖动这种每帧都来的场景下会积压，
+    // 表现为挂件跟手发涩。
+    await Promise.all(PROP_KINDS.map((kind) => this.applyOne(kind, false)));
+  }
+
+  /**
+   * 把当前摆放推给窗口，**同一时刻最多只有一次在飞**。
+   *
+   * 拖动每一次 pointermove 都会到这里，而一次窗口移动是跨进程的。不做合并的话
+   * 事件会排队，挂件跟着光标一路追赶、松手之后还在动。做法是：有在飞的就只记一笔
+   * 「还欠一次」，等它落地再用**当时最新的**状态补发 - 中间那些位置本来就不需要
+   * 画出来，用户看到的只有最新那一个。
+   */
+  private pump(): void {
+    if (this.flushing) {
+      this.dirty = true;
+      return;
+    }
+    this.flushing = true;
+    void this.apply()
+      .catch(() => undefined)
+      .finally(() => {
+        this.flushing = false;
+        if (this.dirty) {
+          this.dirty = false;
+          this.pump();
+        }
+      });
   }
 
   /** 下发一个挂件的位置与可见性。`force` 用于挂件窗口重启后的补发。 */
