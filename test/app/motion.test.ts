@@ -15,7 +15,12 @@ import {
   settleStage,
   stepMotion,
 } from '../../src/app/motion.js';
-import type { MotionState, ScreenPoint, StageGeometry } from '../../src/app/motion.js';
+import type {
+  MotionState,
+  PerchSurface,
+  ScreenPoint,
+  StageGeometry,
+} from '../../src/app/motion.js';
 import { STAGE_H, STAGE_W } from '../../src/app/stage.js';
 import {
   ACTIONS,
@@ -24,6 +29,7 @@ import {
   MOTION_ONLY_ACTIONS,
   GROUND,
   H,
+  LEAP_CROUCH_S,
   W,
   makeCat,
   makeMicro,
@@ -111,6 +117,55 @@ function run(
       now,
       action: opts.action === undefined ? 'walk' : opts.action,
       anchorX: anchorOf(state),
+      cat,
+      geom: g,
+      rnd,
+    });
+    frames.push({ state, moved: Math.abs(state.x - before.x) });
+  }
+  return { end: state, frames, now };
+}
+
+interface PerchRunOpts extends RunOpts {
+  /**
+   * 这一帧交给运动层的表面。传函数是为了模拟窗口被拖动 / 切到别的窗口 /
+   * 前台窗口消失 - 那三件事在真机上分别是「猫跟着窗口走」「猫下来」「猫下来」。
+   */
+  perch?: PerchSurface | null | ((state: MotionState, frame: number) => PerchSurface | null);
+}
+
+/**
+ * 与 run 相同，但每帧还喂一条表面（ticket 12）。
+ *
+ * 单独一个驱动器而不是给 run 加参数：爬窗口的用例几乎都要按帧检查
+ * liftY / playing / perch.phase 的次序，与地面漫游那些用例读起来是两回事。
+ */
+function perchRun(
+  start: MotionState,
+  opts: PerchRunOpts,
+): { end: MotionState; frames: Frame[]; now: number } {
+  const dt = opts.dt ?? 1 / 60;
+  const cat = opts.cat ?? NORMAL;
+  const g = opts.g ?? geom();
+  const rnd = mulberry32(opts.seed ?? 1);
+  const fixedAnchor = typeof opts.anchorX === 'function' ? null : opts.anchorX ?? null;
+  const anchorOf =
+    typeof opts.anchorX === 'function' ? opts.anchorX : (): number | null => fixedAnchor;
+  const fixedPerch = typeof opts.perch === 'function' ? null : opts.perch ?? null;
+  const perchOf =
+    typeof opts.perch === 'function' ? opts.perch : (): PerchSurface | null => fixedPerch;
+  let state = start;
+  let now = opts.now ?? 0;
+  const frames: Frame[] = [];
+  for (let i = 0; i < opts.frames; i++) {
+    now += dt * 1000;
+    const before = state;
+    state = stepMotion(state, {
+      dt,
+      now,
+      action: opts.action === undefined ? 'walk' : opts.action,
+      anchorX: anchorOf(state),
+      perch: perchOf(state, i),
       cat,
       geom: g,
       rnd,
@@ -1113,6 +1168,42 @@ describe('拎起来、下落、落地反应', () => {
     expect(end.pose).toEqual({});
   });
 
+  it('拎起来会把猫从窗口上摘下来，松手之后落在地上而不是弹回窗台', () => {
+    const g = geom();
+    const surface = { id: 3, y: groundScreenY(g) - 300, min: 500, max: 1400 };
+    // 先站上去
+    const up = perchRun(createMotion(g, centeredStage(g)), { frames: 240, perch: surface });
+    expect(up.end.perch?.phase).toBe('on');
+    expect(up.end.liftY).toBeCloseTo(300, 6);
+
+    // 拎起来：表面关系当场清掉。
+    const held = hold(up.end, { x: up.end.x, y: groundScreenY(g) - 200 }, 2);
+    expect(held.perch).toBeNull();
+    expect(held.playing).toBe('held');
+
+    // 松手：落到**地面**上。窗口还在前台（继续给表面），但猫得先落地，
+    // 之后才可能重新走过去爬上去 - 不该在半空中被窗台接住。
+    let st = held;
+    const g2 = geom();
+    const rnd = mulberry32(5);
+    for (let i = 0; i < 30; i++) {
+      st = stepMotion(st, {
+        dt: 1 / 60,
+        now: 2000 + i * 16,
+        action: 'idle',
+        anchorX: null,
+        cat: NORMAL,
+        geom: g2,
+        rnd,
+        hold: null,
+        perch: surface,
+      });
+      if (st.liftY === 0) break;
+    }
+    expect(st.liftY).toBe(0);
+    expect(st.perch).toBeNull();
+  });
+
   it('猫已离开时，拎着的状态一并清干净', () => {
     const g = geom();
     const start = createMotion(g, centeredStage(g));
@@ -1130,5 +1221,379 @@ describe('拎起来、下落、落地反应', () => {
     expect(gone.held).toBe(false);
     expect(gone.liftY).toBe(0);
     expect(gone.reaction).toBeNull();
+  });
+});
+
+describe('爬到前台窗口上（ticket 12 的表面模型）', () => {
+  const g = geom();
+  const GROUND_Y = groundScreenY(g);
+  /** 猫头顶正上方一条 300 像素高的边，横向盖住它的起点。 */
+  const OVERHEAD: PerchSurface = { id: 3, y: GROUND_Y - 300, min: 500, max: 1400 };
+  const start = (): MotionState => createMotion(g, centeredStage(g));
+
+  /** 猫的脚这一刻在哪条屏幕 y 上。表面模型的可观察量就是它。 */
+  const footY = (s: MotionState): number => GROUND_Y - s.liftY;
+
+  it('给一条头顶的边，猫会跳上去并停在那条边上', () => {
+    const { end, frames } = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    // 站住了：脚正好踩在那条边上，不是差几像素。
+    expect(end.perch?.phase).toBe('on');
+    expect(footY(end)).toBeCloseTo(OVERHEAD.y, 6);
+    // 中间真的有一段腾空过程，不是一帧瞬移上去的。
+    const flying = frames.filter((f) => f.state.perch?.phase === 'up' && f.state.liftY > 0);
+    expect(flying.length).toBeGreaterThan(10);
+    // 起跳前先蓄力：离地之前有若干帧 liftY 还是 0。
+    const crouch = frames.filter((f) => f.state.playing === 'leapUp' && f.state.liftY === 0);
+    expect(crouch.length).toBeGreaterThan(5);
+  });
+
+  it('上升是减速的：越接近那条边升得越慢（不是匀速抬升）', () => {
+    const { frames } = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    const rises: number[] = [];
+    for (let i = 1; i < frames.length; i++) {
+      const d = frames[i]!.state.liftY - frames[i - 1]!.state.liftY;
+      if (frames[i]!.state.perch?.phase === 'up' && d > 0) rises.push(d);
+    }
+    expect(rises.length).toBeGreaterThan(8);
+    expect(rises[rises.length - 1]!).toBeLessThan(rises[0]!);
+  });
+
+  it('跳得越高飞得越久 - 腾空时长由高度算出来，不是一个固定值', () => {
+    const airborneFrames = (lift: number): number => {
+      const s: PerchSurface = { ...OVERHEAD, y: GROUND_Y - lift };
+      const { frames } = perchRun(start(), { frames: 600, perch: s });
+      return frames.filter((f) => f.state.perch?.phase === 'up' && f.state.liftY > 0).length;
+    };
+    expect(airborneFrames(700)).toBeGreaterThan(airborneFrames(200) * 1.4);
+  });
+
+  it('舞台跟着猫升高，而且升上去之后仍然整只在工作区里', () => {
+    const { end } = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    expect(end.stage.y).toBeLessThan(start().stage.y);
+    expect(end.stage.y).toBeGreaterThanOrEqual(g.work.y);
+    // 猫在舞台里的纵向位置是固定的（贴着舞台下沿），所以「站在 300 像素高处」
+    // 只能靠舞台整块上移这一个机制实现。
+    expect(start().stage.y - end.stage.y).toBeCloseTo(300, 6);
+  });
+
+  it('世界层说走路时，在窗口上换成边缘步态，而且比在地面上走得慢', () => {
+    const onEdge = perchRun(start(), { frames: 240, perch: OVERHEAD, seed: 4 });
+    const later = perchRun(onEdge.end, {
+      frames: 600,
+      perch: OVERHEAD,
+      seed: 4,
+      now: onEdge.now,
+    });
+    // 确实走起来了，而且播的是 edge 而不是 walk。
+    expect(later.frames.filter((f) => f.state.playing === 'edge').length).toBeGreaterThan(30);
+    expect(later.frames.some((f) => f.state.playing === 'walk')).toBe(false);
+
+    const speedOf = (fs: Frame[], key: ActionKey): number => {
+      const walking = fs.filter((f) => f.state.playing === key && f.moved > 0);
+      const dist = walking.reduce((sum, f) => sum + f.moved, 0);
+      return dist / (walking.length / 60);
+    };
+    const onEdgeSpeed = speedOf(later.frames, 'edge');
+    const ground = run(start(), { frames: 600, seed: 4 });
+    const groundSpeed = speedOf(ground.frames, 'walk');
+    expect(onEdgeSpeed).toBeGreaterThan(0);
+    expect(onEdgeSpeed).toBeLessThan(groundSpeed * 0.75);
+  });
+
+  it('在窗口上走不出那条边的两端', () => {
+    // 一条只比猫宽一点的边，走很久也不该越界。
+    const narrow: PerchSurface = { id: 4, y: GROUND_Y - 260, min: 900, max: 1020 };
+    const up = perchRun(start(), { frames: 240, perch: narrow, seed: 9 });
+    expect(up.end.perch?.phase).toBe('on');
+    const later = perchRun(up.end, { frames: 3000, perch: narrow, seed: 9, now: up.now });
+    for (const f of later.frames) {
+      if (f.state.perch?.phase !== 'on') continue;
+      expect(f.state.x).toBeGreaterThanOrEqual(narrow.min);
+      expect(f.state.x).toBeLessThanOrEqual(narrow.max);
+    }
+  });
+
+  it('世界层说趴下就在窗口上趴着 - 「趴在标题栏上」是这一条', () => {
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    const lying = perchRun(up.end, { frames: 300, perch: OVERHEAD, action: 'lie', now: up.now });
+    expect(lying.end.playing).toBe('lie');
+    expect(lying.end.perch?.phase).toBe('on');
+    expect(footY(lying.end)).toBeCloseTo(OVERHEAD.y, 6);
+    // 趴着不位移。
+    expect(Math.max(...lying.frames.map((f) => f.moved))).toBe(0);
+  });
+
+  it('一次性动作在窗口上照样只播一遍', () => {
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    const period = ACTIONS.yawn.period ?? 0;
+    const after = perchRun(up.end, {
+      frames: Math.ceil((period + 2) * 60),
+      perch: OVERHEAD,
+      action: 'yawn',
+      now: up.now,
+    });
+    expect(after.frames.some((f) => f.state.playing === 'yawn')).toBe(true);
+    expect(after.end.playing).toBe('idle');
+    expect(after.end.perch?.phase).toBe('on');
+  });
+
+  it('爪印落在窗口上沿那条线上，不是桌面的地面线', () => {
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD, seed: 4 });
+    // 上去之前留在地面上的那些先淡完，只看窗口上的。
+    const later = perchRun(up.end, {
+      frames: 1200,
+      perch: OVERHEAD,
+      seed: 4,
+      now: up.now + PAW_LIFE_MS,
+    });
+    expect(later.end.paws.length).toBeGreaterThan(0);
+    for (const paw of later.end.paws) {
+      expect(paw.y).toBeCloseTo(OVERHEAD.y, 6);
+    }
+  });
+
+  it('窗口被纵向拖动时猫跟着它走 - liftY 是表面推出来的，不是自由的 y', () => {
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    const raised: PerchSurface = { ...OVERHEAD, y: OVERHEAD.y - 120 };
+    const after = perchRun(up.end, { frames: 2, perch: raised, now: up.now });
+    expect(after.end.perch?.phase).toBe('on');
+    expect(footY(after.end)).toBeCloseTo(raised.y, 6);
+  });
+
+  it('表面被撤掉（窗口关了、不再是前台）：跳下来、落地压缩、交还世界层', () => {
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    expect(up.end.perch?.phase).toBe('on');
+    const down = perchRun(up.end, { frames: 300, perch: null, now: up.now });
+
+    const seen = down.frames.map((f) => f.state.playing);
+    expect(seen).toContain('leapDown');
+    expect(seen.indexOf('land')).toBeGreaterThan(seen.indexOf('leapDown'));
+    expect(down.end.perch).toBeNull();
+    expect(down.end.liftY).toBe(0);
+
+    // 下落是加速的，而且中间真的经过了空中，不是一帧掉下来。
+    const lifts = down.frames.map((f) => f.state.liftY).filter((v) => v > 0);
+    expect(lifts.length).toBeGreaterThan(10);
+    const drops: number[] = [];
+    for (let i = 1; i < lifts.length; i++) {
+      const d = lifts[i - 1]! - lifts[i]!;
+      if (d > 0) drops.push(d);
+    }
+    expect(drops[drops.length - 1]!).toBeGreaterThan(drops[0]!);
+  });
+
+  it('半空中窗口就没了：接着当前速度落回地面，不在空中僵一下', () => {
+    // 用户在猫起跳的半秒里把窗口关掉 / 切走。这时它已经离地了，
+    // 不该再播一遍「跳下来」的蓄力（那 0.22 秒里猫会悬在空中不动）。
+    const { frames, end } = perchRun(start(), {
+      frames: 300,
+      // 前 20 帧给表面（够它蓄力并离地），之后撤掉。
+      perch: (_s, i) => (i < 20 ? OVERHEAD : null),
+    });
+    const gone = frames[20]!;
+    expect(gone.state.liftY).toBeGreaterThan(0);
+    expect(gone.state.perch?.phase).toBe('down');
+    // 撤销之后每一帧都在往下掉，没有停顿。
+    for (let i = 21; i < frames.length; i++) {
+      const prev = frames[i - 1]!.state;
+      const cur = frames[i]!.state;
+      if (prev.liftY <= 0) break;
+      expect(cur.liftY, `第 ${i} 帧悬在空中没动`).toBeLessThan(prev.liftY);
+    }
+    expect(end.liftY).toBe(0);
+    expect(end.perch).toBeNull();
+  });
+
+  it('前台换成另一个窗口时先下来，不在两个窗口之间横向瞬移', () => {
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    const other: PerchSurface = { id: 99, y: GROUND_Y - 500, min: 200, max: 400 };
+    const after = perchRun(up.end, { frames: 60, perch: other, now: up.now });
+    // 立刻开始往下，而不是被新窗口接住。
+    expect(after.frames[0]!.state.perch?.phase).toBe('down');
+    expect(after.frames[0]!.state.perch?.surface.id).toBe(OVERHEAD.id);
+    // 落回地面之前不会跑到新窗口的横向范围里去。
+    for (const f of after.frames) {
+      if (f.state.liftY > 0) expect(f.state.x).toBeGreaterThan(other.max);
+    }
+  });
+
+  it('窗口被拖到猫站不住的地方：跳下来', () => {
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    // 同一个窗口（id 不变）被拖到左边，猫已经不在它的横向范围里。
+    const moved: PerchSurface = { ...OVERHEAD, min: 200, max: 300 };
+    const after = perchRun(up.end, { frames: 5, perch: moved, now: up.now });
+    expect(after.end.perch?.phase).not.toBe('on');
+    expect(after.end.playing).toBe('leapDown');
+  });
+
+  it('窗口在旁边时先走到起跳点，再跳上去', () => {
+    const aside: PerchSurface = { id: 5, y: GROUND_Y - 280, min: 300, max: 520 };
+    const { frames, end } = perchRun(start(), { frames: 900, perch: aside, seed: 6 });
+    const climbAt = frames.findIndex((f) => f.state.playing === 'leapUp');
+    expect(climbAt).toBeGreaterThan(30);
+    // 起跳之前一直在走，而且是朝左走（那条边在猫左边）。
+    expect(frames[climbAt - 1]!.state.playing).toBe('walk');
+    expect(frames[climbAt - 1]!.state.dir).toBe(-1);
+    // 起跳点落在那条边上 - 在边外起跳会在落顶那一帧被判「站不住」而弹回来。
+    expect(frames[climbAt]!.state.x).toBeGreaterThanOrEqual(aside.min);
+    expect(frames[climbAt]!.state.x).toBeLessThanOrEqual(aside.max);
+    expect(end.perch?.phase).toBe('on');
+    expect(footY(end)).toBeCloseTo(aside.y, 6);
+  });
+
+  it('要吃饭就先跳下来再走过去 - 食盆在桌面那条地面线上', () => {
+    // 「上去了就得先下来才能吃饭」在运动层的一侧：判断层看到 anchor 就撤销表面
+    // （app/perch.ts 的 perchAllowed），运动层于是先落地，落地之后才走向食盆。
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    const bowlX = up.end.x + 300;
+    const after = perchRun(up.end, {
+      frames: 1200,
+      perch: null,
+      anchorX: bowlX,
+      action: 'eat',
+      now: up.now,
+    });
+    // 落地之前一步都没朝食盆挪。
+    for (const f of after.frames) {
+      if (f.state.liftY > 0) expect(f.moved).toBe(0);
+    }
+    expect(after.end.liftY).toBe(0);
+    expect(after.end.x).toBeCloseTo(bowlX, 6);
+    expect(after.end.playing).toBe('eat');
+  });
+
+  it('猫已离开时表面关系一并清干净', () => {
+    const up = perchRun(start(), { frames: 240, perch: OVERHEAD });
+    const gone = perchRun(up.end, { frames: 1, perch: OVERHEAD, action: null, now: up.now });
+    expect(gone.end.perch).toBeNull();
+    expect(gone.end.liftY).toBe(0);
+    expect(gone.end.playing).toBeNull();
+  });
+
+  it('落地反应（刚被放下）不会被一次爬窗口打断', () => {
+    // issue #10 的蹭回来/走开是用户刚松手的回应，那三秒里不该改去爬窗口。
+    const s = start();
+    let st = s;
+    const rnd = mulberry32(3);
+    for (let i = 0; i < 3; i++) {
+      st = stepMotion(st, {
+        dt: 1 / 60,
+        now: i * 16,
+        action: 'idle',
+        anchorX: null,
+        cat: NORMAL,
+        geom: g,
+        rnd,
+        hold: { x: s.x, y: GROUND_Y - 100 },
+      });
+    }
+    const dropped = perchRun(st, { frames: 90, perch: OVERHEAD, action: 'idle', now: 1000 });
+    // 对照组：这段时间里确实有落地反应在跑。
+    expect(dropped.frames.some((f) => f.state.reaction !== null)).toBe(true);
+    for (const f of dropped.frames) {
+      if (f.state.reaction !== null) expect(f.state.perch).toBeNull();
+    }
+  });
+
+  it('纯函数：爬窗口不改动传进来的状态', () => {
+    const s = start();
+    const snapshot = JSON.stringify(s);
+    perchRun(s, { frames: 300, perch: OVERHEAD });
+    expect(JSON.stringify(s)).toBe(snapshot);
+  });
+});
+
+describe('三个新动作：跳上高处、从高处跳下、窄边缘行走', () => {
+  const renderer = new CatRenderer();
+  const BREEDS = ['orange', 'black', 'cow', 'ragdoll', 'devon', 'amshort', 'aby'] as const;
+
+  /** 这一帧最低的那个猫像素落在哪一行。 */
+  function lowestRow(cat: Cat, pose: Parameters<CatRenderer['render']>[1]): number {
+    const res = renderer.render(cat, pose);
+    let lowest = -1;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) if (res.alphaMask[y * W + x] === 255) lowest = y;
+    }
+    return lowest;
+  }
+
+  it('腾空段四脚离地 - 少了 airborne 腿会被拉长贴回地面线', () => {
+    // 与扑跳那条守卫同一个理由（art-and-motion-decisions 的「腾空时四脚必须离地」）：
+    // 跳上/跳下高处时身体的纵向位移由运动层驱动（整块舞台升降），精灵缓冲里的脚
+    // 仍然画在地面线上，所以必须靠 airborne 把腿收起来。
+    const mi = makeMicro(1);
+    const FOOT_ROW = GROUND - 1;
+    let checked = 0;
+    for (const key of ['leapUp', 'leapDown'] as const) {
+      const period = ACTIONS[key].period ?? 1;
+      for (const breed of BREEDS) {
+        const cat = makeCat(breed, 7);
+        for (let i = 0; i <= 8; i++) {
+          // 只取蓄力之后的时间点：那之后猫已经离开了脚下那条边。
+          const t = LEAP_CROUCH_S + 0.1 + (i / 8) * (period - LEAP_CROUCH_S);
+          const pose = ACTIONS[key].make(t, cat, stepMicro(mi, 0, {}));
+          expect(pose.airborne ?? 0, `${key} t=${t.toFixed(2)} 没抬腿`).toBeGreaterThan(0);
+          for (const dir of [1, -1] as const) {
+            expect(
+              lowestRow(cat, faceDir(pose, dir)),
+              `${key} ${breed} dir=${dir} 腾空时还有像素贴着地`,
+            ).toBeLessThan(FOOT_ROW);
+          }
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
+  });
+
+  it('蓄力段脚还在地上 - 起跳前有一下压低，不是瞬间起飞', () => {
+    const mi = makeMicro(1);
+    for (const key of ['leapUp', 'leapDown'] as const) {
+      const pose = ACTIONS[key].make(LEAP_CROUCH_S * 0.5, NORMAL, stepMicro(mi, 0, {}));
+      expect(pose.airborne ?? 0, `${key} 蓄力时就抬腿了`).toBe(0);
+      expect(pose.squashY ?? 1, `${key} 蓄力时没压低身体`).toBeLessThan(1);
+    }
+  });
+
+  it('窄边缘行走：四条腿几乎踩在一条线上，尾巴高举配平', () => {
+    // 这是它与地面走路唯一一眼能分辨的差别（腿的细节在 72×56 上太小）。
+    const mi = makeMicro(1);
+    for (let i = 0; i < 40; i++) {
+      const t = i * 0.05;
+      const onEdge = ACTIONS.edge.make(t, NORMAL, stepMicro(mi, 0, {}));
+      const onGround = ACTIONS.walk.make(t, NORMAL, stepMicro(mi, 0, {}));
+      const spread = (ox: readonly number[] | undefined): number =>
+        Math.max(...(ox ?? []).map((v) => Math.abs(v)), 0);
+      expect(spread(onEdge.legOx)).toBeLessThanOrEqual(spread(onGround.legOx));
+      expect(onEdge.tailAng ?? 0).toBeGreaterThan(onGround.tailAng ?? 0);
+      expect(onEdge.tailWave ?? 0).toBeGreaterThan(onGround.tailWave ?? 0);
+    }
+  });
+
+  it('窄边缘行走的步幅与地面走路相同 - 只慢，不滑步', () => {
+    // 速度与步频必须同比例（与 motion.ts 的 walkSpeedFor 是同一条约束）：
+    // 只降速度不降步频就是滑步。步幅 = travel / 步频，两者必须相等。
+    const walkTravel = ACTIONS.walk.travel ?? 0;
+    const edgeTravel = ACTIONS.edge.travel ?? 0;
+    expect(edgeTravel).toBeGreaterThan(0);
+    expect(edgeTravel).toBeLessThan(walkTravel);
+
+    // 从动作产出的腿相位反推步频：数 legLift 落回 0 的间隔。
+    const hzOf = (key: 'walk' | 'edge'): number => {
+      const mi = makeMicro(1);
+      const zeros: number[] = [];
+      let prev = 0;
+      for (let i = 1; i < 4000; i++) {
+        const t = i * 0.002;
+        const lift = ACTIONS[key].make(t, NORMAL, stepMicro(mi, 0, {})).legLift?.[0] ?? 0;
+        if (prev > 0 && lift === 0) zeros.push(t);
+        prev = lift;
+      }
+      expect(zeros.length, `${key} 的腿没有周期性抬起`).toBeGreaterThan(2);
+      return 1 / (zeros[1]! - zeros[0]!);
+    };
+    const strideWalk = walkTravel / hzOf('walk');
+    const strideEdge = edgeTravel / hzOf('edge');
+    expect(strideEdge).toBeCloseTo(strideWalk, 1);
   });
 });

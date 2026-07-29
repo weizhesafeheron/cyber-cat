@@ -1,4 +1,4 @@
-import { ACTIONS, W } from '../render/index.js';
+import { ACTIONS, LEAP_CROUCH_S, W } from '../render/index.js';
 import type { ActionKey, WorldActionKey, Cat, MicroOpts, Pose } from '../render/index.js';
 import { clamp } from '../render/rng.js';
 import { GROUND_FROM_BOTTOM } from './stage.js';
@@ -23,6 +23,13 @@ import { GROUND_FROM_BOTTOM } from './stage.js';
  *   那条路径不存在，两边就会算出不同结果。
  * - **状态不进存档。** 重启后猫出现在一个合理位置即可，没人记得它昨晚站在哪。
  * - 纯函数：dt、时间戳、随机源全部注入，因此不需要 DOM 也能测（test/app/motion.test.ts）。
+ *
+ * **表面模型**（ticket 12 引入，见 [ADR 0012](../../docs/adr/0012-surfaces-and-perching.md)）：
+ * 猫任何时刻站在某一个**表面**上。桌面的地面线是其中一个表面，前台窗口的上沿是
+ * 另一个。`liftY`（离地面线多高）由所在表面推出来，**不是一个自由的 y** -
+ * 这是「猫可以离开地面，但不会停在半空」这条口径在代码里的形状：
+ * 被拎着与下落时没有表面，所以必然落回地面；站在窗口上时有表面，所以停得住。
+ * 食盆与猫窝仍然只摆在地面线上（props/layout.ts），因此猫要吃饭或睡觉必须先跳下来。
  *
  * 三个坐标系，混用是这一层最容易出的错，所以字段名都带单位含义：
  * - **屏幕逻辑坐标**（CSS 像素，桌面左上角为原点）：`MotionState.x`、`stage`、爪印。
@@ -55,6 +62,39 @@ export interface StageGeometry {
   /** 桌面可用区（避开程序坞/任务栏），CSS 像素。猫的活动范围由它决定。 */
   readonly work: ScreenRect;
 }
+
+/**
+ * 猫可以站上去的一条**表面**（ticket 12）。目前只有一个来源：前台窗口的可见上沿。
+ *
+ * 运动层刻意只收这四个数，与锚点只收一个 `anchorX` 是同一条纪律（ADR 0009）：
+ * 它不需要知道那是哪个应用的窗口、窗口有多高、在哪个显示器上、DPI 是多少。
+ * 那些是平台层与 app/perch.ts 的事 - 塞进来只会让这一层跟着窗口 API 一起变。
+ */
+export interface PerchSurface {
+  /**
+   * 表面来源的标识（macOS 的 windowID / Windows 的 HWND）。
+   *
+   * 运动层只用它判断「还是同一条表面吗」：换了一个窗口就得先下来再上去，
+   * 不能让猫在两个窗口之间横向瞬移。
+   */
+  readonly id: number;
+  /** 表面的屏幕 y。猫站上去之后脚就踩在这条线上。 */
+  readonly y: number;
+  /** 猫在这条表面上可站的屏幕 x 区间（锚点是精灵的横向中心）。 */
+  readonly min: number;
+  readonly max: number;
+}
+
+/** 猫与某条表面的关系。四个阶段各自对应一个动作。 */
+export type PerchPhase =
+  /** 蓄力 + 腾空上升。 */
+  | 'up'
+  /** 站在表面上（走边沿、或者就在上面趴着）。 */
+  | 'on'
+  /** 蓄力 + 自由下落。 */
+  | 'down'
+  /** 落地压缩。播完就把控制交还给世界层。 */
+  | 'land';
 
 /**
  * 一枚爪印。**按屏幕坐标记录**，每帧换算成舞台内坐标再画。
@@ -94,10 +134,14 @@ export interface MotionState {
   /**
    * 猫的脚离地面线多高，CSS 像素。0 = 踩在地上。
    *
-   * **这是猫唯一的纵向位置，而且只在被拎着与下落时非零。**
-   * 平时猫没有 y：所有东西共用一条地面线，这是这套空间模型的不变量
-   * （挂件的纵向也由它决定，见 props/layout.ts）。松手之后必然落回 0 -
-   * 猫可以离开地面，但**不会停在**那里。
+   * **这是猫唯一的纵向位置，而且它永远由「猫站在哪条表面上」推出来，不是自由变量。**
+   * 三种非零的情况，都不是「猫自己飞起来了」：
+   *   - 被拎着（`held`）：高度由光标决定，没有表面，所以松手必然落回 0；
+   *   - 下落中：同上，正在回到某条表面；
+   *   - 站在窗口上沿（`perch.phase === 'on'`）：高度 = 地面线 - 表面的 y。
+   *
+   * 表面之外的一切（食盆、猫窝、爪印的落线）仍然共用桌面那条地面线
+   * （见 props/layout.ts），所以猫要吃饭或睡觉必须先跳下来。
    */
   readonly liftY: number;
   /** 正在被拎着。 */
@@ -125,6 +169,21 @@ export interface MotionState {
    * 因此归运动层（ADR 0007）。
    */
   readonly shot: { readonly action: ActionKey; readonly t: number } | null;
+  /**
+   * 猫与某条表面的关系（ticket 12）。null = 站在桌面的地面线上。
+   *
+   * 有它才谈得上「停在别的高度」：`liftY` 在 `phase === 'on'` 时由 `surface.y`
+   * 每帧重新推出来，所以窗口被拖动时猫跟着走，而窗口一没了就没有表面可站 -
+   * 状态机随即进入 'down'，猫跳回地面。
+   */
+  readonly perch: {
+    readonly phase: PerchPhase;
+    readonly surface: PerchSurface;
+    /** 当前阶段已进行的秒数。 */
+    readonly t: number;
+    /** 纵向速度，CSS 像素每秒，**向上为正**。只在腾空的两个阶段有意义。 */
+    readonly v: number;
+  } | null;
   /**
    * 舞台客户区原点。画布偏移与爪印换算都按它算。
    *
@@ -180,6 +239,23 @@ export interface MotionInput {
    * 落地反应要用：粘人的猫朝光标蹭回去，高冷的猫朝反方向走开。
    */
   readonly cursorX?: number | null;
+  /**
+   * 这一帧允许猫待的表面（前台窗口的上沿）。null = 没有表面可待。
+   *
+   * 语义刻意是**每帧续约**而不是「上去/下来」两个命令：
+   * - 从 null 变成一条表面 = 邀请（猫会先走到起跳点，再跳上去）；
+   * - 一直给同一条（`id` 相同）= 续约，几何可以每帧变，猫跟着窗口走；
+   * - 变回 null 或换了 `id` = 撤销，猫跳下来。
+   *
+   * 这么定的理由是**失效方向**：任何一处出问题（轮询停了、窗口读不到、
+   * 世界层说该去吃饭了、上层忘了调用），猫都会回到桌面地面线上 -
+   * 那是唯一一条永远存在的表面。反过来（「上去/下来」两个命令）漏掉一次
+   * 「下来」就会把猫永久留在半空。
+   *
+   * 要不要邀请、邀请多久由 app/perch.ts 决定（那里有性格与冷却），
+   * 窗口几何与 DPI 的换算在 src-tauri/src/platform.rs。这一层只管把猫送上去。
+   */
+  readonly perch?: PerchSurface | null;
 }
 
 /**
@@ -235,6 +311,32 @@ const FALL_ACCEL = 2600;
 
 /** 落地反应持续多久，秒。之后交回世界层的意图。 */
 const REACTION_S = 3.2;
+
+/**
+ * 跳上一条高 `lift` 的表面所需的初速度，CSS 像素每秒。
+ *
+ * `v0 = sqrt(2 g lift)`，也就是**刚好够到**那条边的速度，重力用的是与下落同一个
+ * `FALL_ACCEL`。于是「跳得高就飞得久」是算出来的（270 像素 ≈ 0.46 秒，
+ * 900 像素 ≈ 0.83 秒），不需要给跳跃动作定一个时长。
+ *
+ * 被否决的做法：固定 0.4 秒的腾空时间，高度用 easing 插值。那样跳一层楼与跳
+ * 一个书架的速度感完全一样，而这两种高度在真实桌面上都会遇到（窗口位置任意）。
+ */
+function climbSpeed(lift: number): number {
+  return Math.sqrt(2 * FALL_ACCEL * Math.max(0, lift));
+}
+
+/**
+ * 在窗口上沿走动的速度，CSS 像素每秒。
+ *
+ * 与地面走路共用同一个性格倍率，只换基准 travel - 两者的**步幅因此相同**，
+ * 只有频率变慢（见 render/actions.ts 里 edge 的 hz）。速度与步频必须同比例，
+ * 否则是滑步，这与 walkSpeedFor 是同一条约束。
+ */
+function edgeSpeed(cat: Cat, geom: StageGeometry): number {
+  const base = ACTIONS.edge.travel ?? 13;
+  return base * geom.spriteScale * (SPEED_BASE + cat.personality.active * SPEED_ACTIVE_SPAN);
+}
 
 /** 粘人度高于此值算「粘人」：落地后蹭回光标边。低于它是高冷，走开去别处趴下。 */
 const CLINGY_THRESHOLD = 0.5;
@@ -344,6 +446,7 @@ export function createMotion(geom: StageGeometry, stageAt: ScreenPoint): MotionS
     fallV: 0,
     reaction: null,
     shot: null,
+    perch: null,
     stage: stageAt,
     paws: [],
     strideLeft: PAW_STRIDE_SPRITE * geom.spriteScale,
@@ -435,6 +538,10 @@ interface PawTrail {
  *
  * 按路程而不是按时间，所以走得快的猫脚印不会变密；
  * 单帧最多落 8 枚是掉帧兜底 - dt 异常大时一帧可能跨过好几个步距。
+ *
+ * `atY` 是**脚下那条表面**的屏幕 y，默认桌面地面线。猫走在窗口上沿时要传那条边 -
+ * 爪印记的是屏幕坐标（舞台滚动时要留在原地），落线错了就会在猫脚下方几百像素
+ * 的桌面上出现一排脚印（mvp-scope 3.5 的「经过前台窗口时尤其明显」正是指这些）。
  */
 function dropPaws(
   trail: PawTrail,
@@ -442,10 +549,11 @@ function dropPaws(
   moved: number,
   geom: StageGeometry,
   now: number,
+  atY?: number,
 ): PawTrail {
   if (moved <= 0) return trail;
   const stride = PAW_STRIDE_SPRITE * geom.spriteScale;
-  const y = groundScreenY(geom);
+  const y = atY ?? groundScreenY(geom);
   let strideLeft = trail.strideLeft - moved;
   let pawSide = trail.pawSide;
   const dropped: PawPrint[] = [];
@@ -456,6 +564,221 @@ function dropPaws(
   }
   if (dropped.length === 0) return { ...trail, strideLeft };
   return { paws: [...trail.paws, ...dropped], strideLeft, pawSide };
+}
+
+/**
+ * 猫与表面的状态机（ticket 12）。走到起跳点、跳上去、在上面待着、跳下来、落地。
+ *
+ * 单独一个函数、并且每条路径各自 return 完整状态，是刻意的：猫在窗口上时的可站
+ * 范围、播的动作、爪印落线全都不一样，与地面上的锚点/漫游分支混在一起会让那些
+ * 既有分支每一处都要多问一句「现在是不是在窗口上」。
+ * 代价是走向起跳点那几行与锚点分支长得像，接受它 - 那两处的抵达之后要做的事
+ * 完全不同（一个开始吃饭，一个起跳）。
+ *
+ * `offered` 是这一帧续约的表面（见 MotionInput.perch）。它随时可能变成 null，
+ * 于是每个阶段都要能优雅退场 - **失效方向一律是「回到地面」**。
+ */
+function stepPerch(
+  state: MotionState,
+  input: MotionInput,
+  action: WorldActionKey,
+  offered: PerchSurface | null,
+): MotionState {
+  const { now, cat, geom } = input;
+  const dt = Math.max(0, input.dt);
+  const bounds = roamBounds(state, geom);
+  const groundY = groundScreenY(geom);
+
+  let x = clamp(state.x, bounds.min, bounds.max);
+  let dir = state.dir;
+  let targetX = state.targetX;
+  let restS = state.restS;
+  let trail: PawTrail = { paws: state.paws, strideLeft: state.strideLeft, pawSide: state.pawSide };
+
+  /** 收尾：把这一帧的结果拼成完整状态。舞台跟着 liftY 一起升降。 */
+  const out = (
+    playing: ActionKey,
+    liftY: number,
+    perch: MotionState['perch'],
+    shot: MotionState['shot'] = null,
+  ): MotionState => ({
+    ...state,
+    x,
+    dir,
+    targetX,
+    restS,
+    playing,
+    pose: {},
+    liftY,
+    held: false,
+    fallV: 0,
+    reaction: null,
+    shot,
+    perch,
+    stage: nextStage(state.stage, geom, x, dir, liftY),
+    paws: prune(trail.paws, now),
+    strideLeft: trail.strideLeft,
+    pawSide: trail.pawSide,
+  });
+
+  /** 朝 goal 走一步，返回这一帧走了多远。 */
+  const walkToward = (goal: number, speed: number, atY: number): number => {
+    dir = goal > x ? 1 : -1;
+    const step = speed * dt;
+    if (step <= 0) return 0;
+    const next = clamp(x + dir * Math.min(step, Math.abs(goal - x)), bounds.min, bounds.max);
+    const moved = Math.abs(next - x);
+    x = next;
+    trail = dropPaws(trail, x, moved, geom, now, atY);
+    return moved;
+  };
+
+  const p = state.perch;
+
+  // --- 还在地上：先走到起跳点，站定了才起跳 ---
+  //
+  // 起跳点取「猫当前位置钳进表面的横向范围」：窗口就在头顶时它原地起跳，
+  // 窗口在旁边时它先走到最近的那一端。走过去的路上世界层要什么动作都先放一放，
+  // 与锚点分支同一条理由（原地播吃饭 / 原地起跳都是假的）。
+  if (p === null) {
+    // 按调用条件走不到这儿（没有表面关系又没有邀请就不会进这个函数）。
+    // 留着是因为放宽那个条件的人不一定会读到这里：兜底是「什么都不做」，
+    // 代价是这一帧猫站着不动，而不是位置或高度出错。
+    if (offered === null) return out(action, 0, null);
+    const spot = clamp(clamp(x, offered.min, offered.max), bounds.min, bounds.max);
+    const begin = { phase: 'up' as PerchPhase, surface: offered, t: 0, v: 0 };
+    // 起跳点必须真的落在表面上。**够不到就先别跳**：舞台被工作区钳在别处时
+    // `spot` 会被 bounds 拉出表面范围，在那儿起跳会在落顶的同一帧被判「站不住」
+    // 而弹回来 - 屏幕上是猫原地跳了一下。舞台会跟着猫滚动，够得到的那一帧再跳。
+    const onSurface = spot >= offered.min - ARRIVE_EPS && spot <= offered.max + ARRIVE_EPS;
+    if (onSurface && Math.abs(spot - x) <= ARRIVE_EPS) return out('leapUp', 0, begin);
+    targetX = spot;
+    restS = 0;
+    if (dt > 0 && walkToward(spot, walkSpeed(cat, geom), groundY) <= 0) {
+      // 一步也走不动（撞上工作区或舞台的钳制）：够得着就地起跳，
+      // 够不着就当没这回事、照常听世界层的 - 别在墙边一直播走路。
+      return onSurface ? out('leapUp', 0, begin) : out(action, 0, null);
+    }
+    return out('walk', 0, null);
+  }
+
+  /** 从表面上跳下来：先蓄力（t 从 0 起），再自由落体。 */
+  const hopOff = (): MotionState =>
+    out('leapDown', state.liftY, { phase: 'down', surface: p.surface, t: 0, v: 0 });
+
+  // --- 上升：蓄力 → 腾空 ---
+  if (p.phase === 'up') {
+    // 表面被撤了、或者前台换成了另一个窗口：中途放弃，落回地面。
+    // 不追新窗口是有意的 - 半空中改道等于横向瞬移。
+    //
+    // 已经离地的话**跳过下落前的蓄力**（t 直接给到蓄力结束），并接着当前速度落 -
+    // 不这么做的话猫会在半空中先僵住 0.22 秒再开始掉。
+    if (offered === null || offered.id !== p.surface.id) {
+      if (state.liftY <= 0) return hopOff();
+      return out('leapDown', state.liftY, {
+        phase: 'down',
+        surface: p.surface,
+        t: LEAP_CROUCH_S,
+        v: Math.min(0, p.v),
+      });
+    }
+    const lift = Math.max(0, groundY - offered.y);
+    const t = p.t + dt;
+    if (t < LEAP_CROUCH_S) {
+      return out('leapUp', 0, { phase: 'up', surface: offered, t, v: 0 });
+    }
+    // 初速度只在离地那一帧算一次。每帧重算的话窗口一动速度就跟着跳，
+    // 猫会在半空中忽快忽慢。
+    const v0 = p.v > 0 ? p.v : climbSpeed(lift);
+    const next = state.liftY + v0 * dt;
+    const v = v0 - FALL_ACCEL * dt;
+    if (next >= lift) {
+      // 到了。直接钉在表面上，不留浮点残差 - 差半个像素会让脚看起来陷进那条边。
+      targetX = null;
+      restS = 0;
+      return out('edge', lift, { phase: 'on', surface: offered, t: 0, v: 0 });
+    }
+    // 上升到顶还没够着（窗口在腾空期间又往上跑了）：认输往下落。
+    if (v <= 0) return out('leapDown', next, { phase: 'down', surface: offered, t: LEAP_CROUCH_S, v });
+    return out('leapUp', next, { phase: 'up', surface: offered, t, v });
+  }
+
+  // --- 站在表面上 ---
+  if (p.phase === 'on') {
+    if (offered === null || offered.id !== p.surface.id) return hopOff();
+    // 猫站得住的范围 = 表面 ∩ 这一帧能走到的范围（舞台不能被拖出工作区）。
+    const min = Math.max(bounds.min, offered.min);
+    const max = Math.min(bounds.max, offered.max);
+    // 窗口缩到猫站不住了（被拖走、变窄）：跳下来。
+    if (max < min) return hopOff();
+
+    // **liftY 每帧由表面重新推出来**，所以窗口被拖动时猫跟着它上下走。
+    const lift = Math.max(0, groundY - offered.y);
+    x = clamp(x, min, max);
+
+    // 世界层要走路 → 换成边缘步态；其余动作原样播 - 「趴在标题栏上」就是这一条。
+    if (action !== 'walk') {
+      targetX = null;
+      restS = 0;
+      const def = ACTIONS[action];
+      if (def.loop) return out(action, lift, { ...p, surface: offered, t: 0 });
+      // 一次性动作（打哈欠、伸懒腰）在窗台上照样只播一遍，播完站着。
+      // **不推进 leap 的位移**：扑跳那 16 个精灵像素会把猫顶到边缘钳制上，
+      // 读起来是「扑了但没动」；窄边上本来也不该扑。
+      const wasT = state.shot?.action === action ? state.shot.t : null;
+      const t = wasT === null ? 0 : wasT + dt;
+      const done = t >= (def.period ?? 0);
+      return out(done ? 'idle' : action, lift, { ...p, surface: offered, t: 0 }, {
+        action,
+        t,
+      });
+    }
+
+    // 边缘行走：与地面漫游同一套「走一段、歇一会」，只是范围窄、步子慢。
+    if (restS > 0) {
+      restS = Math.max(0, restS - dt);
+      targetX = null;
+      return out('idle', lift, { ...p, surface: offered, t: 0 });
+    }
+    let goal = targetX;
+    if (goal == null || goal < min || goal > max) {
+      goal = pickTarget(x, cat.personality.active, { min, max }, geom, input.rnd);
+    }
+    targetX = goal;
+    if (Math.abs(goal - x) <= ARRIVE_EPS) {
+      targetX = null;
+      restS = restAfterLeg(cat.personality.active, input.rnd);
+      return out('idle', lift, { ...p, surface: offered, t: 0 });
+    }
+    if (dt > 0 && walkToward(goal, edgeSpeed(cat, geom), offered.y) <= 0) {
+      // 走不动了：交还控制，歇一会再挑目标。
+      targetX = null;
+      restS = restAfterLeg(cat.personality.active, input.rnd);
+      return out('idle', lift, { ...p, surface: offered, t: 0 });
+    }
+    return out('edge', lift, { ...p, surface: offered, t: 0 });
+  }
+
+  // --- 跳下来：蓄力 → 自由落体 ---
+  if (p.phase === 'down') {
+    const t = p.t + dt;
+    if (t < LEAP_CROUCH_S) return out('leapDown', state.liftY, { ...p, t });
+    // 竖直落下，不带横向位移：猫落在它跳下来的那一点。
+    // 带一点前扑会更好看，但那要保证落点仍在工作区内，留给手感调优。
+    const v = p.v - FALL_ACCEL * dt;
+    const next = state.liftY + v * dt;
+    if (next <= 0) {
+      targetX = null;
+      restS = 0;
+      return out('land', 0, { phase: 'land', surface: p.surface, t: 0, v: 0 });
+    }
+    return out('leapDown', next, { ...p, t, v });
+  }
+
+  // --- 落地压缩。播完把控制交还给世界层 ---
+  const t = p.t + dt;
+  if (t < (ACTIONS.land.period ?? 0)) return out('land', 0, { ...p, t });
+  return out('idle', 0, null);
 }
 
 /**
@@ -490,6 +813,8 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
       held: false,
       fallV: 0,
       reaction: null,
+      // 表面也一起清：没有猫了，也就没有谁站在窗口上。
+      perch: null,
       paws: prune(state.paws, now),
     };
   }
@@ -532,9 +857,30 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
       restS: 0,
       shot: null,
       reaction: null,
+      // 也包括「站在窗口上」：被拎起来之后猫就不在那条表面上了，
+      // 松手会让它落回地面（下面那段自由落体），不是弹回窗台。
+      perch: null,
       stage: nextStage(state.stage, geom, hx, state.dir, hy),
       paws: prune(state.paws, now),
     };
+  }
+
+  // --- 爬到前台窗口上（ticket 12）------------------------------------------
+  //
+  // 整段状态机在 stepPerch 里，条件写在这儿是为了让分支的先后一目了然：
+  // 它必须排在**被拎着之后**（手里的猫不站在任何表面上）、**自由落体之前**
+  // （站在窗口上时 liftY > 0，会被下面那段误判成「正在往下掉」）。
+  //
+  // `liftY <= 0` 那一半就是这个意思：刚松手、还在空中的猫不接受新邀请，
+  // 让它先落地。少了这个条件，从手里松开的猫会在半空中改播走路走向起跳点。
+  // 同理让位给落地反应（issue #10 的蹭回来/走开）：那三秒是用户刚放下手的回应，
+  // 被一次爬窗口打断的话性格就白分化了。反过来，已经在窗口上的猫不可能有反应在跑
+  // （拎起来会清掉 perch，落地反应只在从手里落地时产生）。
+  if (
+    state.perch !== null ||
+    (input.perch != null && liftY <= 0 && state.reaction === null)
+  ) {
+    return stepPerch(state, input, input.action, input.perch ?? null);
   }
 
   // --- 松手之后自由下落。落地那一刻挑好反应 ---

@@ -55,6 +55,7 @@ npm run harness     # 渲染核心的人工验证页，每个品种 × 每个动
 - [0008](docs/adr/0008-behaviour-beat-separate-from-need-tick.md) 行为节拍与需求步长分离，各用一条随机流
 - [0009](docs/adr/0009-prop-anchors-across-layers.md) 世界层用挂件名表达空间诉求，抵达判定归运动层
 - [0010](docs/adr/0011-return-bubble-in-stage.md) 回归气泡是舞台里的覆盖层，命中区是一个矩形
+- [0012](docs/adr/0012-surfaces-and-perching.md) 表面模型：猫可以停在前台窗口上沿，但纵向永远不是自由变量
 
 ## 原型
 

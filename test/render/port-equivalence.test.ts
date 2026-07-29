@@ -169,18 +169,34 @@ describe('端口保真性：与 prototype 参照实现比对', () => {
       expect('bowl' in ACTIONS.eat.make(0, cat, mi)).toBe(false);
     });
 
-    it('原型里没有的动作只有这两个 - 清单是封闭的', () => {
+    it('原型里没有的动作是封闭的一小撮，而且正好是「运动层专属」那些', () => {
       // 有这条才能保证上面那个 return 不会被顺手扩大成「有差异就跳过」。
       const missing = ACTION_KEYS.filter((k) => proto.ACTIONS[k] === undefined);
       expect([...missing].sort()).toEqual([...MOTION_ONLY_ACTIONS].sort());
-      // 而且它们必须正是「运动层专属」那两个：桌面宠物需要「被拎起来」与「落地」，
-      // 原型里没有拖拽这回事。
-      expect([...MOTION_ONLY_ACTIONS].sort()).toEqual(['held', 'land']);
+      // 逐个说得出理由：原型里没有拖拽（held / land），也没有桌面窗口可爬
+      // （leapUp / leapDown / edge，ticket 12 的三个新动作）。
+      expect([...MOTION_ONLY_ACTIONS].sort()).toEqual([
+        'edge',
+        'held',
+        'land',
+        'leapDown',
+        'leapUp',
+      ]);
     });
 
     it('一次性动作的清单是封闭的，且每个都给出了播完所需的时长', () => {
       const oneShot = ACTION_KEYS.filter((k) => !ACTIONS[k].loop);
-      expect([...oneShot].sort()).toEqual(['land', 'pounce', 'stretch', 'yawn']);
+      // 跳上/跳下高处也是一次性的：**真实腾空时长由高度决定**（运动层按
+      // 「刚好够到那条边」的初速算），period 只是名义时长，动作会停在最后一帧
+      // 继续腾空 - 与 pounce 用 Math.min 停在末帧同理。
+      expect([...oneShot].sort()).toEqual([
+        'land',
+        'leapDown',
+        'leapUp',
+        'pounce',
+        'stretch',
+        'yawn',
+      ]);
       // 少了 period 运动层就不知道什么时候算播完，会当成循环动作一直播。
       for (const k of oneShot) expect(ACTIONS[k].period, k).toBeGreaterThan(0);
     });

@@ -30,6 +30,348 @@ pub struct StageMetrics {
     pub work_h: f64,
 }
 
+/// 前台窗口的一次读数（ticket 12，特效 3.1）。
+///
+/// 坐标一律是**逻辑像素**（点），与 `StageMetrics` 同一个坐标系 - 前端要拿它和
+/// 舞台、猫的位置做减法，混单位会让猫整体错位。两个平台的换算差异全部关在本模块里：
+/// - macOS：`kCGWindowBounds` 本来就是点（主显示器左上角为原点、Y 向下，
+///   与 tao 的 `LogicalPosition` 同一套），原样返回。
+/// - Windows：DWM 的矩形是物理像素，按 `GetDpiForWindow` 给的**目标窗口所在显示器**
+///   的 DPI 换算。用宠物窗口自己的 DPI 会在混合 DPI 多屏上整体错位。
+#[derive(serde::Serialize, Clone, Copy)]
+pub struct ForegroundWindow {
+    /// macOS 的 `kCGWindowNumber` / Windows 的 HWND。前端只用它判断「还是同一个窗口吗」。
+    pub id: u64,
+    /// 拥有者进程。宠物自身的窗口已在这一层排除，返回它只为排查问题。
+    pub pid: i32,
+    /// 可见矩形。**不含** Windows 的不可见拖拽边框。
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// 目标窗口所在显示器的缩放。前端用它挡住跨 DPI 的情况（见 src/app/perch.ts）。
+    pub scale: f64,
+}
+
+/// 当前前台窗口的可见矩形。`None` = 此刻没有可用的目标。
+///
+/// **两个平台都不需要任何用户授权**，这是 ADR 0005 的核心结论，也是这里没有任何
+/// 权限探测或引导代码的原因。实测证据见 docs/research/2026-07-29-window-position-apis.md。
+///
+/// 失效方向一律是 `None`：读不到就等于「没有窗口可爬」，猫留在桌面上。
+/// 前端（app/perch.ts）还会再过一遍能不能站的闸门，这一层只负责给出一个诚实的矩形。
+pub fn foreground_window(window: &WebviewWindow) -> Result<Option<ForegroundWindow>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        mac::foreground(window)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        win::foreground(window)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // Linux 上没有统一的窗口几何接口（X11 与各 Wayland 合成器各不相同），
+        // 而 MVP 只验收 macOS 与 Windows。返回 None 的后果是猫只在桌面上活动。
+        let _ = window;
+        Ok(None)
+    }
+}
+
+/// macOS：`NSWorkspace.frontmostApplication` + `CGWindowListCopyWindowInfo`。
+///
+/// 免授权的那条路径（ADR 0005）。**不要迁移到 ScreenCaptureKit** -
+/// `SCShareableContent` 强制要屏幕录制授权，那会把一个零摩擦的特性变成需要用户去
+/// 系统设置手动勾选并重启应用的特性。Apple 废弃的是**读像素**
+/// （`CGWindowListCreateImage`，macOS 14 弃用、15 废除），不是读几何：
+/// `CGWindowListCopyWindowInfo` 在最新 SDK 里只有 `API_AVAILABLE`，没有任何
+/// deprecation 注解。
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::ForegroundWindow;
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::{CFString, CFStringRef};
+    use core_graphics::window::{
+        kCGNullWindowID, kCGWindowBounds, kCGWindowLayer, kCGWindowListExcludeDesktopElements,
+        kCGWindowListOptionOnScreenOnly, kCGWindowNumber, kCGWindowOwnerPID,
+        create_description_from_array, CGWindowID, CGWindowListCopyWindowInfo,
+    };
+    use objc2_app_kit::NSWorkspace;
+    use std::sync::Mutex;
+    use tauri::WebviewWindow;
+
+    /// 一个窗口的信息字典。
+    type Info = CFDictionary<CFString, CFType>;
+
+    /// 上一次锁定的前台窗口：`(拥有者 PID, windowID)`。
+    ///
+    /// 有它才谈得上「稳态下不做全量枚举」（验收项）：实测全量枚举 0.369 ms，
+    /// 而 `CGWindowListCreateDescriptionFromArray([id])` 只要 0.072 ms，快五倍。
+    /// 10 Hz 下这是 3.7 ms/s 与 0.7 ms/s 的差别 - 对一只 24 小时常驻的挂件值得区分。
+    ///
+    /// 放模块级 static 而不是 Tauri 的 managed state：它是**这条平台路径的实现细节**，
+    /// 命令签名与前端都不该知道有这么一个缓存。
+    static LOCKED: Mutex<Option<(i32, CGWindowID)>> = Mutex::new(None);
+
+    /// 读一个数值字段。`key` 是 CoreGraphics 导出的常量字符串，只借不放（get rule）。
+    fn number(info: &Info, key: CFStringRef) -> Option<f64> {
+        let key = unsafe { CFString::wrap_under_get_rule(key) };
+        info.find(&key)?.downcast::<CFNumber>()?.to_f64()
+    }
+
+    /// `kCGWindowBounds` 是个内嵌字典（X / Y / Width / Height），单位是点。
+    ///
+    /// 这里不能用 `downcast`：那个方法要求 `ConcreteCFType`，而泛型的
+    /// `CFDictionary<K, V>` 没有（也不该有）这个实现 - 它无法保证键值的实际类型。
+    /// 所以自己比一次 CFTypeID 再按 get rule 包装，语义等价而且检查一样严。
+    fn bounds(info: &Info) -> Option<(f64, f64, f64, f64)> {
+        let key = unsafe { CFString::wrap_under_get_rule(kCGWindowBounds) };
+        let value = info.find(&key)?;
+        if value.type_of() != <Info as TCFType>::type_id() {
+            return None;
+        }
+        let rect: Info =
+            unsafe { Info::wrap_under_get_rule(value.as_CFTypeRef() as CFDictionaryRef) };
+        let get = |name: &'static str| -> Option<f64> {
+            let k = CFString::from_static_string(name);
+            rect.find(&k)?.downcast::<CFNumber>()?.to_f64()
+        };
+        Some((get("X")?, get("Y")?, get("Width")?, get("Height")?))
+    }
+
+    /// 一条窗口信息 → 读数。**`kCGWindowLayer != 0` 一律拒绝**。
+    ///
+    /// 层级不为 0 的是菜单栏图标、Dock、输入法候选框这类浮层（实测 layer 24 / 25）。
+    /// 猫爬到输入法候选框上是个很好笑但完全不能接受的画面：那东西一敲键盘就消失。
+    fn read(info: &Info, scale: f64) -> Option<ForegroundWindow> {
+        if number(info, unsafe { kCGWindowLayer })? as i64 != 0 {
+            return None;
+        }
+        let pid = number(info, unsafe { kCGWindowOwnerPID })? as i32;
+        let id = number(info, unsafe { kCGWindowNumber })? as u64;
+        let (x, y, w, h) = bounds(info)?;
+        Some(ForegroundWindow {
+            id,
+            pid,
+            x,
+            y,
+            w,
+            h,
+            scale,
+        })
+    }
+
+    /// 只查一个已知的 windowID。窗口已关闭或已最小化时返回 None。
+    fn describe(id: CGWindowID) -> Option<Info> {
+        let list = create_description_from_array(CFArray::from_copyable(&[id]))?;
+        let item = list.get(0)?;
+        Some((*item).clone())
+    }
+
+    /// 全量枚举一次，取属于 `pid` 的、z 序最前的那个普通窗口。
+    ///
+    /// 列表本身就是从前到后排序的，所以「第一个命中的」就是最前面那个。
+    /// 用 `OnScreenOnly | ExcludeDesktopElements` 而不是 `optionAll`：后者慢 3.2 倍，
+    /// 还会把大量离屏窗口与桌面元素混进来。
+    fn find_front(pid: i32, own: i32, scale: f64) -> Option<ForegroundWindow> {
+        let list: CFArray<Info> = unsafe {
+            let raw = CGWindowListCopyWindowInfo(
+                kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+                kCGNullWindowID,
+            );
+            if raw.is_null() {
+                return None;
+            }
+            TCFType::wrap_under_create_rule(raw)
+        };
+        for item in list.iter() {
+            let win = match read(&item, scale) {
+                Some(w) => w,
+                None => continue,
+            };
+            // 排除宠物自己：否则猫会试图趴到自己头上。
+            if win.pid == own || win.pid != pid {
+                continue;
+            }
+            return Some(win);
+        }
+        None
+    }
+
+    fn frontmost_pid() -> Option<i32> {
+        let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+        Some(app.processIdentifier())
+    }
+
+    pub fn foreground(window: &WebviewWindow) -> Result<Option<ForegroundWindow>, String> {
+        // 用宠物窗口自己那块屏的缩放。
+        //
+        // macOS 上这个值只用于前端的跨 DPI 闸门，**不参与坐标换算** -
+        // kCGWindowBounds 已经是点，与 tao 的逻辑坐标同一套单位（这一点在
+        // 4K@2x 屏上实测过：全屏窗口是 1920x1002 而不是 3840x2004）。
+        // 代价是目标窗口在另一块**不同缩放**的屏上时这个值会偏乐观；那种情况由前端
+        // 的「表面必须与猫的工作区相交」挡住（跨屏漫游是 MVP 之后的事，
+        // mvp-scope 第 10 节）。届时这里要改成查目标屏的 backingScaleFactor。
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let own = std::process::id() as i32;
+        let front = frontmost_pid();
+
+        // 前台是宠物自己时**不换目标**（`None` 表示「不知道该跟谁」）。
+        // 用户点一下猫就可能把我们变成前台 app，那时清掉目标等于每摸一次猫
+        // 就把它从窗口上赶下来。
+        let target = match front {
+            Some(pid) if pid != own => Some(pid),
+            _ => None,
+        };
+
+        let mut locked = LOCKED.lock().map_err(|_| "前台窗口缓存被污染".to_string())?;
+
+        // 稳态：只刷新已锁定的那一个 windowID。
+        if let Some((pid, id)) = *locked {
+            if target.is_none() || target == Some(pid) {
+                if let Some(info) = describe(id) {
+                    if let Some(win) = read(&info, scale) {
+                        return Ok(Some(win));
+                    }
+                }
+            }
+        }
+
+        // 前台换了 app、或者锁定的窗口没了（关闭 / 最小化）：全量枚举一次。
+        let pid = match target {
+            Some(pid) => pid,
+            None => {
+                *locked = None;
+                return Ok(None);
+            }
+        };
+        match find_front(pid, own, scale) {
+            Some(win) => {
+                *locked = Some((pid, win.id as CGWindowID));
+                Ok(Some(win))
+            }
+            None => {
+                // 前台 app 没有普通窗口（只有菜单栏图标、或全屏在别的 Space）。
+                *locked = None;
+                Ok(None)
+            }
+        }
+    }
+}
+
+/// Windows：`GetForegroundWindow` + `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`。
+///
+/// **未在真机验证过**（本项目的开发机是 macOS）。写法逐条照着实机调研的结论来：
+/// docs/research/2026-07-29-window-position-apis.md 的 2.3 / 2.4。
+///
+/// 三条硬结论：
+/// 1. **不能用 `GetWindowRect`。** 它对最大化窗口的顶边偏差 11 像素（Windows 11
+///    25H2 实测），而顶边正是猫要站的那条线 - 猫会浮空 11 像素。只在 DWM 调用
+///    失败时才退回它（社区做法，也是 active-win-pos-rs 的写法）。
+/// 2. **必须过滤 `DWMWA_CLOAKED != 0`。** 「设置」应用同时存在一个 cloaked 的
+///    `SystemSettings` 窗口与一个可见的 `ApplicationFrameHost` 窗口。主路径用
+///    `GetForegroundWindow` 通常拿到可见的那个，但这道过滤是免费的保险。
+/// 3. **坐标按 `GetDpiForWindow` 换算。** DWM 返回的永远是物理像素
+///    （文档原话 "not adjusted for DPI"），而 Tauri 默认已经是 Per-Monitor-V2，
+///    所以物理像素是跨屏统一的（左侧屏为负值）。**不要关掉 tao 的 dpi_aware**，
+///    否则这里所有坐标结论失效。
+#[cfg(target_os = "windows")]
+mod win {
+    use super::ForegroundWindow;
+    use tauri::WebviewWindow;
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Graphics::Dwm::{
+        DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
+    };
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    };
+
+    /// DWM 把这个窗口藏起来了吗。读不到属性时当作「没藏」- 失效方向是继续用它，
+    /// 而顶边偏差比「猫完全不爬窗口」轻。
+    fn cloaked(hwnd: HWND) -> bool {
+        let mut flag: u32 = 0;
+        let ok = unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                (&mut flag as *mut u32).cast(),
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+        ok.is_ok() && flag != 0
+    }
+
+    /// 可见矩形，物理像素。先试 DWM，失败退回 GetWindowRect。
+    fn frame(hwnd: HWND) -> Option<RECT> {
+        let mut r = RECT::default();
+        let ok = unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                (&mut r as *mut RECT).cast(),
+                std::mem::size_of::<RECT>() as u32,
+            )
+        };
+        if ok.is_ok() {
+            return Some(r);
+        }
+        let mut fallback = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut fallback) }.is_ok() {
+            return Some(fallback);
+        }
+        None
+    }
+
+    pub fn foreground(window: &WebviewWindow) -> Result<Option<ForegroundWindow>, String> {
+        let hwnd = unsafe { GetForegroundWindow() };
+        if hwnd.is_invalid() {
+            return Ok(None);
+        }
+        let mut pid: u32 = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        // 排除宠物自己：否则猫会试图趴到自己头上。
+        if pid == 0 || pid == std::process::id() {
+            return Ok(None);
+        }
+        if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+            return Ok(None);
+        }
+        // 最小化的窗口仍然是「前台」，但它的矩形在屏幕外。
+        if unsafe { IsIconic(hwnd) }.as_bool() {
+            return Ok(None);
+        }
+        if cloaked(hwnd) {
+            return Ok(None);
+        }
+        let rect = match frame(hwnd) {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+        // 目标窗口所在显示器的 DPI。跨屏时它会跟着变（实测 144 → 96），
+        // 而窗口的**逻辑**尺寸不变 - 猫与窗口的比例就是靠这一步对上的。
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        let scale = if dpi == 0 {
+            window.scale_factor().map_err(|e| e.to_string())?
+        } else {
+            f64::from(dpi) / 96.0
+        };
+        Ok(Some(ForegroundWindow {
+            id: hwnd.0 as usize as u64,
+            pid: pid as i32,
+            x: f64::from(rect.left) / scale,
+            y: f64::from(rect.top) / scale,
+            w: f64::from(rect.right - rect.left) / scale,
+            h: f64::from(rect.bottom - rect.top) / scale,
+            scale,
+        }))
+    }
+}
+
 /// 应用启动时的一次性平台设置。
 ///
 /// 取 `&mut App` 是因为 macOS 的激活策略需要可变借用。
