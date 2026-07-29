@@ -34,8 +34,64 @@ pub fn configure_pet_window(window: &WebviewWindow) {
     // 实测无从观测、也不构成问题。
     let _ = window.set_shadow(false);
 
+    // 穿透的初值必须是「开」。
+    //
+    // 窗口在前端做出第一次命中判定之前不该截获桌面上的点击 - 那等于在用户桌面上
+    // 挖了一块 216x168 的死区，是 ADR 0006 明确不接受的。前端的
+    // PollingPassthrough 也把这个初值写进了它的去重逻辑，两处必须一致。
+    // 顺带保证了失效方向：前端挂掉的后果是「猫点不动」，而不是「桌面被挡住」。
+    if let Err(e) = set_pass_through(window, true) {
+        eprintln!("[cyber-cat] 初始化点击穿透失败，宠物窗口可能挡住桌面的点击：{e}");
+    }
+
     // 待办（ticket 14 让开规则）：
     // macOS 上还应设置 NSWindowCollectionBehavior 让猫跟随用户切换 Space，
     // 以及调整窗口层级以决定要不要盖在全屏应用之上。
     // 这两项需要 objc2-app-kit，与「让开规则」是同一件事的两面，一起做更合适。
+}
+
+/// 整窗点击穿透开关。true = 点击落到下层窗口。
+///
+/// **这个开关是整窗一刀切的，没有区域粒度** - 两个平台都已实机确认
+/// （macOS 的 `NSWindow.ignoresMouseEvents`、Windows 的 `WS_EX_TRANSPARENT`）。
+/// 「猫身上可点、其余穿透」是靠前端逐帧对 alpha 掩膜做命中测试、再调用这里实现的。
+///
+/// **调用方必须提前于光标抵达切换。** macOS 上赋值不是同步生效的，实测有最长约
+/// 5ms 的传播延迟；在光标压到边界的那一刻才切，窗口服务器可能仍在用旧状态处理
+/// 这次点击。前端的 hit.ts 用「按速度沿运动方向前探的外扩边距」来满足这一点。
+///
+/// 目前两个平台的实现相同，所以没有条件编译。**后续替换点在这里**：
+/// Windows 上更稳的做法是原生 `WM_NCHITTEST` 或 `SetWindowRgn`，由系统逐次回调
+/// 命中测试，彻底消除轮询竞争。届时在本模块里加 `set_hit_mask(window, mask)`
+/// 把掩膜下推，前端只需换掉 `PassthroughController` 的实现，
+/// 判定逻辑（hit.ts）与帧循环都不用动。
+pub fn set_pass_through(window: &WebviewWindow, on: bool) -> Result<(), String> {
+    window
+        .set_ignore_cursor_events(on)
+        .map_err(|e| e.to_string())
+}
+
+/// 光标相对宠物窗口客户区左上角的位置，单位是**逻辑像素**（点）。
+///
+/// 相减在 Rust 侧做完，不让前端分两次 IPC 各取一半：两次调用之间窗口可能已经
+/// 移动（猫会自己走，用户也会拖），错位会让命中判定整体偏移。
+///
+/// 返回逻辑像素而不是物理像素，是为了让前端能直接跟 canvas 的 CSS 尺寸做换算 -
+/// 那是同一个坐标系。走物理像素就得让前端再乘一次 `devicePixelRatio`，
+/// 而 webview 的 dpr 与窗口的 `scale_factor` 并不保证相等（混合 DPI 多屏尤其）。
+///
+/// `cursor_position()` 给的确实是**物理像素**（等于「桌面左上角为原点的逻辑坐标」
+/// 乘 scale_factor），所以这里除以 scale_factor 才对。这一点在 macOS 15.5、
+/// 单屏 1920x1080@2x 上用独立的 AppKit 读数（`NSEvent.mouseLocation`）逐点对照
+/// 过，两者按位相等；不要凭 `PhysicalPosition` 这个类型名想当然。
+pub fn cursor_in_window(window: &WebviewWindow) -> Result<(f64, f64), String> {
+    let cursor = window.cursor_position().map_err(|e| e.to_string())?;
+    // inner_position 是客户区原点，也就是 webview 的 (0, 0)。无边框窗口下它通常
+    // 与 outer_position 相同，但不保证，所以不能用后者。
+    let origin = window.inner_position().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    Ok((
+        (cursor.x - f64::from(origin.x)) / scale,
+        (cursor.y - f64::from(origin.y)) / scale,
+    ))
 }

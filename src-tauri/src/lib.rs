@@ -25,10 +25,29 @@ fn pet_ready(window: WebviewWindow) {
     }
 }
 
+/// 光标相对宠物窗口客户区左上角的位置，逻辑像素。返回 `[x, y]`。
+///
+/// 前端每 16 到 64ms 调一次（见 src/app/cursor.ts）。**穿透开启期间 webview
+/// 收不到任何鼠标事件**，所以这是那段时间里唯一的光标位置来源。
+#[tauri::command]
+fn cursor_probe(window: WebviewWindow) -> Result<(f64, f64), String> {
+    platform::cursor_in_window(&window)
+}
+
+/// 切换整窗点击穿透。语义与约束见 `platform::set_pass_through`。
+#[tauri::command]
+fn set_pass_through(window: WebviewWindow, on: bool) -> Result<(), String> {
+    platform::set_pass_through(&window, on)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![pet_ready])
+        .invoke_handler(tauri::generate_handler![
+            pet_ready,
+            cursor_probe,
+            set_pass_through
+        ])
         .setup(|app| {
             platform::configure_app(app);
 
