@@ -1132,3 +1132,183 @@ describe('拎起来、下落、落地反应', () => {
     expect(gone.reaction).toBeNull();
   });
 });
+
+describe('逗猫扑跳', () => {
+  /** 让运动层执行一次「扑到 landingX」，跑够帧数，记下每一帧。 */
+  function teaseRun(
+    start: MotionState,
+    landingX: number,
+    frames: number,
+    who: Cat = NORMAL,
+  ): { end: MotionState; seen: (ActionKey | null)[]; xs: number[] } {
+    let st = start;
+    const g = geom();
+    const rnd = mulberry32(11);
+    const seen: (ActionKey | null)[] = [];
+    const xs: number[] = [];
+    for (let i = 0; i < frames; i++) {
+      st = stepMotion(st, {
+        dt: 1 / 60,
+        now: i * 16,
+        action: 'idle',
+        anchorX: null,
+        cat: who,
+        geom: g,
+        rnd,
+        // 只在第一帧下命令：之后运动层自己把这次扑跳走完
+        teaseLandingX: i === 0 ? landingX : null,
+      });
+      seen.push(st.playing);
+      xs.push(st.x);
+    }
+    return { end: st, seen, xs };
+  }
+
+  it('先走到起跳点，再播扑跳 - 不是走到落点再原地跳一下', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const { seen } = teaseRun(start, start.x + 260, 300);
+    const firstPounce = seen.indexOf('pounce');
+    expect(firstPounce, '整段里没有扑跳').toBeGreaterThan(0);
+    // 起跳之前都在走
+    expect(seen.slice(0, firstPounce).every((k) => k === 'walk')).toBe(true);
+  });
+
+  it('扑完落在落点附近，不是落在光标位置上', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const landing = start.x + 260;
+    const { end } = teaseRun(start, landing, 400);
+    expect(end.tease).toBeNull();
+    // 落点误差不超过一步的距离
+    expect(Math.abs(end.x - landing)).toBeLessThan(20);
+  });
+
+  it('腾空那一段真的把猫送过去了 - 位移不是靠走路走完的', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const leap = ACTIONS.pounce.leap!;
+    const { seen, xs } = teaseRun(start, start.x + 260, 400);
+    const firstPounce = seen.indexOf('pounce');
+    const atLaunch = xs[firstPounce - 1]!;
+    const afterPounceEnd = xs[seen.lastIndexOf('pounce')]!;
+    // 起跳到落地之间前进的距离，约等于动作库声明的 leap
+    const leaped = afterPounceEnd - atLaunch;
+    expect(leaped).toBeGreaterThan(leap.px * g.spriteScale * 0.8);
+  });
+
+  it('只在第一帧接命令 - 之后每帧再给会让猫追着光标滑行', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    let st = stepMotion(start, {
+      dt: 1 / 60,
+      now: 0,
+      action: 'idle',
+      anchorX: null,
+      cat: NORMAL,
+      geom: g,
+      rnd: mulberry32(5),
+      teaseLandingX: start.x + 200,
+    });
+    const firstTarget = st.tease?.landingX;
+    // 第二帧给一个完全不同的落点：正在进行的这次不该被改掉
+    st = stepMotion(st, {
+      dt: 1 / 60,
+      now: 16,
+      action: 'idle',
+      anchorX: null,
+      cat: NORMAL,
+      geom: g,
+      rnd: mulberry32(5),
+      teaseLandingX: start.x - 500,
+    });
+    expect(st.tease?.landingX).toBe(firstTarget);
+  });
+
+  it('扑的过程里世界层说什么都不管，扑完才交还控制', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    let st = start;
+    const rnd = mulberry32(9);
+    const during: (ActionKey | null)[] = [];
+    // 帧数要够走完「走到起跳点 + 扑跳」：走 200 像素约 3 秒，扑跳 3.4 秒。
+    for (let i = 0; i < 500; i++) {
+      st = stepMotion(st, {
+        dt: 1 / 60,
+        now: i * 16,
+        action: 'sleep', // 世界层一直在说睡觉
+        anchorX: null,
+        cat: NORMAL,
+        geom: g,
+        rnd,
+        teaseLandingX: i === 0 ? start.x + 200 : null,
+      });
+      during.push(st.playing);
+    }
+    // 扑的过程里不该出现睡觉
+    const pounceEnd = during.lastIndexOf('pounce');
+    expect(pounceEnd).toBeGreaterThan(0);
+    expect(during.slice(0, pounceEnd).includes('sleep')).toBe(false);
+    // 扑完之后交还给世界层
+    expect(during[during.length - 1]).toBe('sleep');
+  });
+
+  it('被拎起来会打断正在进行的扑跳', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    let st = stepMotion(start, {
+      dt: 1 / 60,
+      now: 0,
+      action: 'idle',
+      anchorX: null,
+      cat: NORMAL,
+      geom: g,
+      rnd: mulberry32(3),
+      teaseLandingX: start.x + 300,
+    });
+    expect(st.tease).not.toBeNull();
+    st = stepMotion(st, {
+      dt: 1 / 60,
+      now: 16,
+      action: 'idle',
+      anchorX: null,
+      cat: NORMAL,
+      geom: g,
+      rnd: mulberry32(3),
+      hold: { x: start.x, y: groundScreenY(g) - 100 },
+    });
+    expect(st.tease).toBeNull();
+    expect(st.playing).toBe('held');
+  });
+
+  it('落地反应期间不接逗猫命令 - 刚被扔下来的猫不该立刻去追光标', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    // 拎起来再松手，进入落地反应
+    let st = stepMotion(start, {
+      dt: 1 / 60,
+      now: 0,
+      action: 'idle',
+      anchorX: null,
+      cat: NORMAL,
+      geom: g,
+      rnd: mulberry32(3),
+      hold: { x: start.x, y: groundScreenY(g) - 60 },
+    });
+    for (let i = 0; i < 60; i++) {
+      st = stepMotion(st, {
+        dt: 1 / 60,
+        now: 100 + i * 16,
+        action: 'idle',
+        anchorX: null,
+        cat: NORMAL,
+        geom: g,
+        rnd: mulberry32(3),
+        hold: null,
+        teaseLandingX: start.x + 300,
+      });
+    }
+    expect(st.reaction, '没有进入落地反应，这条测试没测到东西').not.toBeNull();
+    expect(st.tease).toBeNull();
+  });
+});

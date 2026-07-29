@@ -86,6 +86,23 @@ export async function probeStage(): Promise<StageMetricsDto | null> {
 }
 
 /**
+ * 距用户上一次按键多少秒。逗猫棒的「打字免打扰」闸门要用它。
+ *
+ * 返回 null 表示探测不出来。**调用方必须把 null 当成「用户正在打字」** -
+ * 宁可让猫安静，也不要在用户打字时扑光标（Rust 侧 platform::input_idle 有同样的注释）。
+ * 浏览器里调试时同样返回 null，所以那边猫不会追光标 - 这是对的，没有平台探测就没有依据。
+ */
+export async function inputIdle(): Promise<number | null> {
+  if (!inTauri) return null;
+  try {
+    const invoke = await invoker();
+    return await invoke<number | null>('input_idle');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 读**调用方自己那个窗口**的位置、尺寸与工作区。
  *
  * 与 probeStage 是同一个 Rust 命令 - 那边取的本来就是发起调用的窗口

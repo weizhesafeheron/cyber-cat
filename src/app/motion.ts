@@ -118,6 +118,21 @@ export interface MotionState {
     readonly goalX: number | null;
   } | null;
   /**
+   * 正在进行的逗猫扑跳。null = 没在扑。
+   *
+   * 与落地反应、锚点一样是**帧级的决定**：走到起跳点、起跳、落地都要帧时钟。
+   * 六道闸门的判定不在这一层 - 那是纯逻辑，在 src/tease/gates.ts。
+   * 这一层只接一个「扑到这个 x」的命令。
+   */
+  readonly tease: {
+    /** 落点，屏幕 x。**不是光标位置** - 落点在光标旁边（见 tease/pounce.ts）。 */
+    readonly landingX: number;
+    /** approach = 走向起跳点，pounce = 已经起跳。 */
+    readonly phase: 'approach' | 'pounce';
+    /** pounce 阶段的局部时间，秒。 */
+    readonly t: number;
+  } | null;
+  /**
    * 正在播的一次性动作与它已播的秒数。null = 当前不是一次性动作。
    *
    * 世界层给一个动作分配的时长是十几秒起，而打个哈欠只要三秒、扑一下四秒 -
@@ -180,6 +195,14 @@ export interface MotionInput {
    * 落地反应要用：粘人的猫朝光标蹭回去，高冷的猫朝反方向走开。
    */
   readonly cursorX?: number | null;
+  /**
+   * 这一帧要不要开始一次逗猫扑跳，以及落点在哪（屏幕 x）。
+   *
+   * 只在**开始**那一帧给值，之后运动层自己把这次扑跳走完 - 每帧都给的话，
+   * 用户挥着光标时落点会一直变，猫会追着光标滑行而不是扑一下。
+   * 六道闸门的判定在 src/tease/gates.ts，这一层只接命令。
+   */
+  readonly teaseLandingX?: number | null;
 }
 
 /**
@@ -343,6 +366,7 @@ export function createMotion(geom: StageGeometry, stageAt: ScreenPoint): MotionS
     held: false,
     fallV: 0,
     reaction: null,
+    tease: null,
     shot: null,
     stage: stageAt,
     paws: [],
@@ -490,6 +514,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
       held: false,
       fallV: 0,
       reaction: null,
+      tease: null,
       paws: prune(state.paws, now),
     };
   }
@@ -506,6 +531,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
   let liftY = state.liftY;
   let fallV = state.fallV;
   let reaction = state.reaction;
+  let tease = state.tease;
   let pose: Pose = {};
 
   const groundY = groundScreenY(geom);
@@ -532,6 +558,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
       restS: 0,
       shot: null,
       reaction: null,
+      tease: null,
       stage: nextStage(state.stage, geom, hx, state.dir, hy),
       paws: prune(state.paws, now),
     };
@@ -554,6 +581,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
         restS: 0,
         shot: null,
         reaction: null,
+        tease: null,
         stage: nextStage(state.stage, geom, x, dir, liftY),
         paws: prune(state.paws, now),
       };
@@ -579,6 +607,108 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
     };
     targetX = null;
     restS = 0;
+  }
+
+  // --- 逗猫扑跳：接管走向直到这一次扑完 ---
+  //
+  // 优先级排在落地反应之后、世界层意图之前：刚被扔到地上的猫不该立刻去追光标，
+  // 但一旦开始扑，世界层说想干什么都得等。
+  //
+  // 六道闸门不在这一层（那是 src/tease/gates.ts 的纯逻辑）。这里只负责把
+  // 「扑到这个 x」走完：先走到起跳点，再播扑跳，让动作库声明的 leap 把猫送过去。
+  if (reaction === null) {
+    if (tease === null && input.teaseLandingX != null) {
+      tease = { landingX: input.teaseLandingX, phase: 'approach', t: 0 };
+    }
+    if (tease !== null) {
+      const leap = ACTIONS.pounce.leap;
+      const leapPx = (leap?.px ?? 0) * geom.spriteScale;
+      // 起跳点：落点往回退一个腾空距离。这样扑完刚好落在落点上，
+      // 而不是「走到落点再原地跳一下」- 那读起来不是扑。
+      const toRight = tease.landingX >= x;
+      const launchX = clamp(
+        tease.landingX - (toRight ? leapPx : -leapPx),
+        bounds.min,
+        bounds.max,
+      );
+
+      if (tease.phase === 'approach') {
+        dir = launchX >= x ? 1 : -1;
+        const stepLenT = walkSpeed(cat, geom) * Math.max(0, dt);
+        const gap = Math.abs(launchX - x);
+        if (gap <= ARRIVE_EPS || (stepLenT > 0 && gap <= stepLenT)) {
+          // 到了起跳点：起跳。朝向由落点决定，不由这一步的走向决定 -
+          // 起跳点可能被工作区钳住，那时猫要朝落点跳，不是朝墙跳。
+          x = launchX;
+          dir = tease.landingX >= x ? 1 : -1;
+          tease = { ...tease, phase: 'pounce', t: 0 };
+        } else if (stepLenT > 0) {
+          const next = clamp(x + dir * stepLenT, bounds.min, bounds.max);
+          const moved = Math.abs(next - x);
+          x = next;
+          trail = dropPaws(trail, x, moved, geom, now);
+          if (moved <= 0) tease = null; // 走不动了（贴墙），这次扑作罢
+        }
+        if (tease !== null && tease.phase === 'approach') {
+          return {
+            ...state,
+            x,
+            dir,
+            playing: 'walk',
+            pose: {},
+            liftY: 0,
+            held: false,
+            fallV: 0,
+            reaction: null,
+            tease,
+            targetX: null,
+            restS: 0,
+            shot: null,
+            stage: nextStage(state.stage, geom, x, dir),
+            paws: prune(trail.paws, now),
+            strideLeft: trail.strideLeft,
+            pawSide: trail.pawSide,
+          };
+        }
+      }
+
+      if (tease !== null && tease.phase === 'pounce') {
+        const period = ACTIONS.pounce.period ?? 0;
+        const wasT = tease.t;
+        const t = wasT + Math.max(0, dt);
+        // 腾空那一段把猫真的送过去。与世界层自己的扑跳走同一套 leap 逻辑 -
+        // 位移永远归运动层，动作库只管形体（见 ACTIONS 的 leap 注释）。
+        if (leap !== undefined) {
+          const from = Math.max(wasT, leap.startS);
+          const to = Math.min(t, leap.endS);
+          if (to > from && leap.endS > leap.startS) {
+            const advance = dir * leapPx * ((to - from) / (leap.endS - leap.startS));
+            x = clamp(x + advance, bounds.min, bounds.max);
+          }
+        }
+        const done = t >= period;
+        tease = done ? null : { ...tease, t };
+        return {
+          ...state,
+          x,
+          dir,
+          playing: done ? 'idle' : 'pounce',
+          pose: {},
+          liftY: 0,
+          held: false,
+          fallV: 0,
+          reaction: null,
+          tease,
+          targetX: null,
+          restS: 0,
+          shot: null,
+          stage: nextStage(state.stage, geom, x, dir),
+          paws: prune(trail.paws, now),
+          strideLeft: trail.strideLeft,
+          pawSide: trail.pawSide,
+        };
+      }
+    }
   }
 
   // --- 落地反应：这几秒里由它接管走向，世界层的意图先放一放 ---
@@ -610,6 +740,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
           held: false,
           fallV: 0,
           reaction,
+          tease: null,
           targetX: null,
           restS: 0,
           shot,
@@ -647,6 +778,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
         held: false,
         fallV: 0,
         reaction,
+        tease: null,
         targetX: null,
         restS: 0,
         shot: null,
@@ -767,6 +899,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
     held: false,
     fallV,
     reaction,
+    tease,
     shot,
     stage,
     paws,

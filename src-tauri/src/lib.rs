@@ -68,6 +68,15 @@ fn set_pass_through(window: WebviewWindow, on: bool) -> Result<(), String> {
     platform::set_pass_through(&window, on)
 }
 
+/// 距用户上一次按键多少秒。逗猫棒的「打字免打扰」闸门要用它。
+///
+/// 返回 null 表示探测失败。**前端必须把 null 当成「用户正在打字」** -
+/// 探测不出来时宁可让猫安静（见 platform::input_idle）。
+#[tauri::command]
+fn input_idle() -> Option<f64> {
+    platform::input_idle()
+}
+
 /// 舞台窗口的几何与桌面工作区，逻辑像素。见 `platform::stage_metrics`。
 #[tauri::command]
 fn stage_metrics(window: WebviewWindow) -> Result<platform::StageMetrics, String> {
@@ -114,6 +123,7 @@ pub fn run() {
             cursor_probe,
             set_pass_through,
             stage_metrics,
+            input_idle,
             move_stage,
             adopt::open_adoption,
             adopt::close_adoption,

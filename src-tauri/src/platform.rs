@@ -239,3 +239,88 @@ pub fn place_prop(window: &WebviewWindow, x: f64, y: f64, visible: bool) -> Resu
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// 键盘活跃探测（逗猫棒的「打字免打扰」闸门，issue #11）
+// ---------------------------------------------------------------------------
+
+/// macOS：距上一次按键过了多少秒。
+///
+/// 用 `CGEventSourceSecondsSinceLastEventType` 而不是事件监听（CGEventTap）：
+/// **这是查询，不需要辅助功能授权**，已实测确认（未签名的命令行程序也能拿到真实值）。
+/// 事件监听那条路要授权，会破坏 ADR 0005 的「两个平台都不需要任何用户授权」。
+///
+/// 用裸 FFI 而不是引 `core-graphics` crate：只用一个函数，为它拖进一整棵依赖树不值得。
+#[cfg(target_os = "macos")]
+fn keyboard_idle_seconds() -> Option<f64> {
+    /// kCGEventSourceStateCombinedSessionState = 0。整个登录会话的合并状态，
+    /// 不是本进程的 - 我们要知道的是「用户在别的应用里打字」。
+    const COMBINED_SESSION_STATE: u32 = 0;
+    /// kCGEventKeyDown = 10。
+    const EVENT_KEY_DOWN: u32 = 10;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceSecondsSinceLastEventType(state: u32, event_type: u32) -> f64;
+    }
+
+    // SAFETY: 纯查询，两个参数都是常量枚举值，没有指针也没有所有权转移。
+    let secs = unsafe { CGEventSourceSecondsSinceLastEventType(COMBINED_SESSION_STATE, EVENT_KEY_DOWN) };
+    if secs.is_finite() && secs >= 0.0 {
+        Some(secs)
+    } else {
+        None
+    }
+}
+
+/// Windows：距上一次**任何输入**过了多少秒。
+///
+/// `GetLastInputInfo` 不区分键盘与鼠标，所以这边的语义比 macOS 粗：鼠标动了也算
+/// 「用户在忙」。**失效方向是安全的** - 猫会更安静，而不是更烦人。
+/// 想精确区分就得装键盘钩子，那属于「拦截键盘输入」，是 mvp-scope 第 9 节明确不做的事。
+///
+/// **未在真机验证**（开发机是 macOS）。
+#[cfg(target_os = "windows")]
+fn keyboard_idle_seconds() -> Option<f64> {
+    #[repr(C)]
+    struct LastInputInfo {
+        cb_size: u32,
+        d_w_time: u32,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetLastInputInfo(plii: *mut LastInputInfo) -> i32;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetTickCount() -> u32;
+    }
+
+    let mut info = LastInputInfo {
+        cb_size: std::mem::size_of::<LastInputInfo>() as u32,
+        d_w_time: 0,
+    };
+    // SAFETY: cb_size 按文档填好，指针指向栈上一个存活的结构体。
+    let ok = unsafe { GetLastInputInfo(&mut info) };
+    if ok == 0 {
+        return None;
+    }
+    // SAFETY: 无参数查询。
+    let now = unsafe { GetTickCount() };
+    // 计数器 49.7 天回绕一次，用 wrapping_sub 才不会在回绕那一刻算出巨大值。
+    Some(f64::from(now.wrapping_sub(info.d_w_time)) / 1000.0)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn keyboard_idle_seconds() -> Option<f64> {
+    None
+}
+
+/// 距用户上一次按键多少秒。探测失败返回 None。
+///
+/// 调用方（前端）必须把 None 当成「用户正在打字」而不是「用户闲着」：
+/// 探测不出来时宁可让猫安静，不要让它在用户打字时扑光标。
+pub fn input_idle() -> Option<f64> {
+    keyboard_idle_seconds()
+}

@@ -44,6 +44,15 @@ export const POLL_BACKOFF_MS = 1000;
 
 export class CursorTracker {
   private sample: CursorSample | null = null;
+  /**
+   * 最近一次采样的**客户区**坐标，CSS 像素。
+   *
+   * `sample` 是精灵坐标（命中判定要的），但逗猫的运动特征闸门要的是屏幕坐标 -
+   * 客户区加上舞台原点就是屏幕坐标，而精灵坐标反推回去要重新知道画布的布局矩形。
+   * 两条采样路（DOM 事件与 Rust 轮询）都会更新它，**这一点是必需的**：
+   * 穿透开着时 webview 收不到任何鼠标事件，而那正是逗猫开始的时刻 - 猫在远处。
+   */
+  private client: { x: number; y: number } | null = null;
   private vel: Velocity = ZERO_VELOCITY;
   private lastMoveAt: number | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -66,6 +75,11 @@ export class CursorTracker {
     return this.vel;
   }
 
+  /** 最近一次采样的客户区坐标，CSS 像素。null = 位置未知。 */
+  get latestClient(): { x: number; y: number } | null {
+    return this.client;
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
@@ -80,6 +94,7 @@ export class CursorTracker {
 
   /** 接受一个来自 DOM 事件的采样。坐标是客户区 CSS 像素，与探测结果同一坐标系。 */
   observe(clientX: number, clientY: number): void {
+    this.client = { x: clientX, y: clientY };
     const s = this.toSprite(clientX, clientY);
     this.push(s.x, s.y, this.now());
   }
@@ -97,6 +112,7 @@ export class CursorTracker {
   /** 位置未知。速度一并清掉 - 拿失效前的速度去前探等于凭空猜测。 */
   private forget(): void {
     this.sample = null;
+    this.client = null;
     this.vel = ZERO_VELOCITY;
   }
 
@@ -107,6 +123,7 @@ export class CursorTracker {
       const p = await this.probe();
       const t = this.now();
       if (p) {
+        this.client = { x: p.x, y: p.y };
         const s = this.toSprite(p.x, p.y);
         this.push(s.x, s.y, t);
       } else {

@@ -191,3 +191,35 @@ describe('采样内容', () => {
     expect(tracker.latest).toEqual({ x: 20, y: 10, t: expect.any(Number) });
   });
 });
+
+describe('客户区坐标也要留一份', () => {
+  it('DOM 事件与轮询两条路都会更新它', async () => {
+    // 逗猫的运动特征闸门要的是屏幕坐标，而精灵坐标反推回去要重新知道画布的布局矩形。
+    // **两条路都必须更新**：穿透开着时 webview 收不到任何鼠标事件，
+    // 而那正是逗猫开始的时刻 - 猫在远处，穿透是开着的。
+    let probed: { x: number; y: number } | null = { x: 77, y: 88 };
+    const t = new CursorTracker(
+      () => Promise.resolve(probed),
+      (cx, cy) => ({ x: cx / 3, y: cy / 3 }),
+      () => 0,
+    );
+    // DOM 事件那条路
+    t.observe(30, 60);
+    expect(t.latestClient).toEqual({ x: 30, y: 60 });
+
+    // 轮询那条路
+    t.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    t.stop();
+    expect(t.latestClient).toEqual({ x: 77, y: 88 });
+
+    // 位置未知时一并清掉 - 拿失效前的位置去判定运动特征等于凭空猜
+    probed = null;
+    t.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    t.stop();
+    expect(t.latestClient).toBeNull();
+  });
+});

@@ -51,6 +51,7 @@ import { CatDisplay } from './display.js';
 import { FarewellHost, tauriFarewellPorts } from './farewell.js';
 import {
   contentReady,
+  inputIdle,
   inTauri,
   moveStage,
   onAdoptAnother,
@@ -85,6 +86,17 @@ import {
 } from '../say/index.js';
 import { HeartCanvas, burstHearts, heartsInStage, stepHearts } from './hearts.js';
 import { SayCanvas } from './say.js';
+import {
+  INITIAL_TEASE,
+  afterPounce,
+  interruptTease,
+  pounceLandingX,
+  quotaFor,
+  reactDelayMs,
+  refreshTease,
+  teaseVerdict,
+} from '../tease/index.js';
+import type { CursorPoint, TeaseState } from '../tease/index.js';
 import type { Heart } from './hearts.js';
 import { PawCanvas } from './paws.js';
 import { loadWorld, onTrayAction, pushTrayStatus, saveWorld } from './persist.js';
@@ -427,6 +439,9 @@ function frame(now: number): void {
   const r = step(world, elapsed, { actions: drain() });
   world = r.world;
   const intent = r.renderIntent;
+  // 刚吃饱犯困那条闸门要知道上次进食是什么时候。用帧时钟而不是世界时钟：
+  // 它和爪印寿命、点猫的即时反馈同一族，都是 UI 时间。
+  if (r.events.some((e) => e.kind === 'ate' || e.kind === 'ateGreedy')) lastMealAtMs = now;
 
   // 运动层读 intent，**不写回去**。世界是状态的唯一权威（ADR 0007）。
   //
@@ -450,12 +465,29 @@ function frame(now: number): void {
     action: effective,
     hold: holdAt,
     cursorX: cursorScreenX,
+    teaseLandingX: teaseThisFrame(intent, now, g),
     anchorX,
     cat,
     geom: g,
     rnd: Math.random,
   });
   requestStageMove();
+  probeKeyboardIdle(now);
+  // 从**轮询**那条路也喂光标轨迹：穿透开着时 webview 收不到 pointermove，
+  // 而那正是逗猫开始的时刻 - 猫在远处，穿透是开着的。
+  // 客户区坐标加舞台原点就是屏幕坐标（两者都是逻辑像素，同一个坐标系）。
+  const rawCursor = tracker.latestClient;
+  if (rawCursor !== null) {
+    observeTrail(motion.stage.x + rawCursor.x, motion.stage.y + rawCursor.y, now);
+  }
+  // 一次逗猫扑跳刚刚走完：记账。玩腻与全局节流都靠这一笔。
+  if (teasing && motion.tease === null) {
+    tease = afterPounce(tease, now);
+  }
+  teasing = motion.tease !== null;
+  // 被拎起来、睡着、生病都算「被别的事打断」，连续计数归零 -
+  // 睡一觉起来又扑三次是两串，不是六次。
+  if (motion.held || intent.status !== 'ok') tease = interruptTease(tease);
   // 碗里的份数变了就推给食盆窗口。「视觉上能看到碗里有粮」就是这个数的投影。
   props.onBowlPortions(world.bowl);
 
@@ -674,6 +706,118 @@ let holdAt: { x: number; y: number } | null = null;
 /** 最近一次知道的光标屏幕 x。落地反应要用它决定蹭回来还是走开。 */
 let cursorScreenX: number | null = null;
 
+// --- 逗猫棒（issue #11）-----------------------------------------------------
+//
+// 六道闸门的判定全在 src/tease/gates.ts（纯函数、有测试）。这里只做三件事：
+// 攒一段光标轨迹、把快照喂给闸门、把「扑到这个 x」交给运动层。
+//
+// **状态不进存档也不进 World**：它们由帧级事件驱动（扑了几次、上次是什么时候），
+// 而世界层不能被帧级数据驱动（ADR 0001、0007）。重启后玩腻与每小时上限从头算，
+// 这是可接受的 - 那两条防的是连续骚扰，重启本身就打断了连续性。
+let tease: TeaseState = INITIAL_TEASE;
+/** 最近一段光标轨迹（屏幕坐标）。运动特征闸门要看它。 */
+let cursorTrail: CursorPoint[] = [];
+/** 距用户上次按键多少秒。**探测失败时留 0**，也就是当成「正在打字」。 */
+let keyboardIdleS = 0;
+let lastIdleProbeMs = 0;
+/** 闸门放行的时刻。到了性格决定的反应延迟才真的起跳。 */
+let noticedAt: number | null = null;
+/** 这次运行里最近一次进食的时刻（帧时钟）。刚吃饱犯困那条闸门要用。 */
+let lastMealAtMs: number | null = null;
+/** 上一帧运动层是否正在扑。用来在扑完那一帧记一笔账。 */
+let teasing = false;
+
+/** 光标轨迹最多留这么多点。420ms 的窗口按 16ms 采样最多 27 个，留 40 有余量。 */
+const TRAIL_MAX = 40;
+
+/** 键盘活跃探测的间隔，毫秒。它是一次 IPC，不值得每帧问。 */
+const IDLE_PROBE_MS = 400;
+
+/**
+ * 记一个光标采样点，屏幕坐标。
+ *
+ * 两条路都会喂到这里：穿透关着时是 webview 的 pointermove，穿透开着时是 Rust 侧
+ * 的轮询（那段时间 webview 收不到任何鼠标事件）。**运动特征闸门必须两条都要** -
+ * 只用 pointermove 的话，猫在远处（穿透开着）时永远采不到样，而那正是逗猫开始的时候。
+ */
+function observeTrail(x: number, y: number, t: number): void {
+  const last = cursorTrail[cursorTrail.length - 1];
+  // 同一个位置重复采样对方向判定是噪声，丢掉。
+  if (last !== undefined && last.x === x && last.y === y) return;
+  cursorTrail.push({ x, y, t });
+  if (cursorTrail.length > TRAIL_MAX) cursorTrail = cursorTrail.slice(-TRAIL_MAX);
+}
+
+/**
+ * 探一次键盘活跃度。
+ *
+ * **探不出来就当成「用户正在打字」**（保持 keyboardIdleS = 0）：宁可让猫安静，
+ * 也不要在用户打字时扑光标。这与 Rust 侧那条注释是同一个约定。
+ */
+function probeKeyboardIdle(now: number): void {
+  if (now - lastIdleProbeMs < IDLE_PROBE_MS) return;
+  lastIdleProbeMs = now;
+  void inputIdle()
+    .then((secs) => {
+      keyboardIdleS = secs ?? 0;
+    })
+    .catch(() => {
+      keyboardIdleS = 0;
+    });
+}
+
+/**
+ * 这一帧要不要开始一次逗猫扑跳，落点在哪。
+ *
+ * 六道闸门的判定在 src/tease/gates.ts。这里只负责组装快照，以及在闸门放行之后
+ * **再等一个性格决定的反应延迟** - 零延迟的追逐读起来是程序在响应事件，
+ * 不是一只猫动了心（见 tease/pounce.ts 的 reactDelayMs）。
+ *
+ * 返回 null 表示这一帧不下命令。运动层只在**开始**那一帧接命令，之后自己走完。
+ */
+function teaseThisFrame(intent: RenderIntent, now: number, g: StageGeometry): number | null {
+  tease = refreshTease(tease, now);
+  // 已经在扑了、或者正被拎着：不下新命令。
+  if (motion.tease !== null || holdAt !== null) {
+    noticedAt = null;
+    return null;
+  }
+
+  const verdict = teaseVerdict({
+    status: intent.status,
+    mood: world.needs.mood,
+    hunger: world.needs.hunger,
+    lastMealAt: lastMealAtMs,
+    keyboardIdleS,
+    catX: motion.x,
+    catY: groundScreenY(g),
+    trail: cursorTrail,
+    pouncesInARow: tease.pouncesInARow,
+    boredUntil: tease.boredUntil,
+    lastPounceAt: tease.lastPounceAt,
+    recentChases: tease.recentChases,
+    quotaPerHour: quotaFor(cat.personality.active),
+    now,
+  });
+
+  if (!verdict.ok) {
+    // 闸门一关就把「注意到」清掉：用户中途停手了，猫不该在几百毫秒后突然扑出去。
+    noticedAt = null;
+    return null;
+  }
+  if (noticedAt === null) {
+    noticedAt = now;
+    return null;
+  }
+  if (now - noticedAt < reactDelayMs(cat.personality.active)) return null;
+
+  noticedAt = null;
+  const last = cursorTrail[cursorTrail.length - 1];
+  if (last === undefined) return null;
+  // 落点在光标旁边，不在光标上 - 不压住用户要点的东西。
+  return pounceLandingX(last.x, motion.x);
+}
+
 window.addEventListener('pointerdown', (e) => {
   const p = toSprite(e.clientX, e.clientY);
   // 气泡先判。它在猫头顶、与猫的掩膜不重叠（diary/constants.ts 的
@@ -693,6 +837,7 @@ window.addEventListener('pointermove', (e) => {
   // 穿透开启时收不到任何鼠标事件，那段时间只有 Rust 侧的轮询有数据。
   tracker.observe(e.clientX, e.clientY);
   cursorScreenX = e.screenX;
+  observeTrail(e.screenX, e.screenY, performance.now());
 
   if (pressAt === null) return;
   if (holdAt === null) {
