@@ -100,15 +100,50 @@ describe('端口保真性：与 prototype 参照实现比对', () => {
     for (const key of ACTION_KEYS) {
       it(`${key}`, () => {
         const cat = makeCat('orange', 20260728);
+        const def = ACTIONS[key];
         for (const t of TIMES) {
-          // 用同一份微动作输出喂给两边，隔离出动作库本身的差异
+          // 一次性动作播完就停在最后一帧，prototype 里是循环重播。
+          // 这是桌面宠物刻意的偏离（见 docs/art-and-motion-decisions.md）：
+          // 世界层给的时长十几秒起，循环重播就是「连着打十个哈欠」。
+          // 播放期内两边必须仍然逐帧一致 - 形体本身没有改。
+          if (!def.loop && t >= (def.period ?? 0)) continue;
+
           const mi = { eyeOpen: 0.8, earFlickL: 1, earFlickR: 0, tilt: 0.5 };
           const mine = ACTIONS[key].make(t, cat, mi, { tailSweep: true });
           const theirs = proto.ACTIONS[key]!.make(t, cat, mi, { tailSweep: true });
+
+          if (key === 'pounce') {
+            // 扑跳另有一处刻意偏离：精灵内的粗位移 dx 全部移交给运动层。
+            // 除 dx 之外的形体必须仍然一致。
+            expect(mine, `t=${t}`).toEqual({ ...theirs, dx: undefined });
+            expect(mine.dx, `t=${t} 的 dx 应当已经交给运动层`).toBeUndefined();
+            continue;
+          }
           expect(mine, `t=${t}`).toEqual(theirs);
         }
       });
     }
+
+    it('刻意偏离的清单是封闭的 - 只有这三个一次性动作与 prototype 不同', () => {
+      // 有这条才能保证上面的 continue 不会被顺手扩大成「有差异就跳过」。
+      const oneShot = ACTION_KEYS.filter((k) => !ACTIONS[k].loop);
+      expect([...oneShot].sort()).toEqual(['pounce', 'stretch', 'yawn']);
+      // 每个一次性动作都必须给出播完所需的时长，否则运动层不知道什么时候算完。
+      for (const k of oneShot) expect(ACTIONS[k].period, k).toBeGreaterThan(0);
+    });
+
+    it('扑跳的位移改由运动层驱动，动作库不再产出任何 dx', () => {
+      const cat = makeCat('orange', 20260728);
+      const mi = { eyeOpen: 1, earFlickL: 0, earFlickR: 0, tilt: 0 };
+      for (let t = 0; t <= 3.4; t += 0.05) {
+        expect(ACTIONS.pounce.make(t, cat, mi).dx, `t=${t.toFixed(2)}`).toBeUndefined();
+      }
+      // prototype 里确实是靠 dx 位移的 - 证明上面这条不是空断言。
+      const protoDx = [0, 1.5, 2.0, 3.0].map((t) => proto.ACTIONS.pounce!.make(t, cat, mi).dx);
+      expect(protoDx.some((v) => typeof v === 'number' && v !== 0)).toBe(true);
+      // 位移改用 leap 声明：腾空那一段前进 16 个精灵像素。
+      expect(ACTIONS.pounce.leap).toEqual({ startS: 1.3, endS: 1.85, px: 16 });
+    });
   });
 
   describe('渲染输出逐像素一致', () => {

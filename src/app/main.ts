@@ -39,7 +39,6 @@ import {
 import type { MicroSwitches, MotionState, ScreenRect, StageGeometry } from './motion.js';
 import { PollingPassthrough } from './passthrough.js';
 import { PawCanvas } from './paws.js';
-import { NO_SETTLE, beginSettle, centroidY, settleOffset } from './settle.js';
 import { loadWorld, onTrayAction, pushTrayStatus, saveWorld } from './persist.js';
 import { TARGET_SCALE } from './stage.js';
 import { trayStatus } from './status.js';
@@ -173,12 +172,6 @@ let lastMetricsMs = 0;
 
 /** 最近画出去的那一帧。命中测试必须用当前帧的掩膜（ADR 0006）。 */
 let lastFrame: RenderResult | null = null;
-/** 换动作时的落位过渡，见 app/settle.ts。 */
-let settle = NO_SETTLE;
-/** 上一帧猫在屏幕上的垂直重心（已含当时未走完的偏移）。null = 上一帧没有猫。 */
-let lastScreenCy: number | null = null;
-/** 这一帧刚换了动作。由 frame() 置位、draw() 消费。 */
-let justSwitched = false;
 /** 即时反馈的截止时刻（performance.now 时间轴）。0 = 没在反应。 */
 let reactionUntilMs = 0;
 
@@ -217,8 +210,6 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
     display.clear();
     paws.clear();
     lastFrame = null;
-    lastScreenCy = null;
-    settle = NO_SETTLE;
     return null;
   }
   // 播什么动作只看 motion.playing - 即时反馈已经在 frame() 里作为动作喂给
@@ -233,18 +224,8 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
   const res = renderer.render(cat, posed);
   lastFrame = res;
   display.paint(res);
-
-  // 换动作时的落位过渡：新姿态先画在旧姿态的位置上，再滑到自己的位置。
-  // 不做的话猫的轮廓会在一帧里上下跳十几个精灵像素 - 那就是「换动作时闪一下」
-  // 的全部来源（见 app/settle.ts）。
-  const cy = centroidY(res.alphaMask);
-  if (justSwitched) settle = beginSettle(lastScreenCy, cy, nowMs);
-  justSwitched = false;
-  const settleDY = settleOffset(settle, nowMs);
-  lastScreenCy = cy === null ? null : cy + settleDY;
-
   // 猫在舞台内的位置与爪印每帧都要跟着走，否则猫会站在原地「走路」。
-  display.place(catInStage(motion), settleDY * display.spriteScale);
+  display.place(catInStage(motion));
   paws.paint(pawsInStage(motion, nowMs), display.scale, display.pixelRatio);
   return res;
 }
@@ -285,7 +266,6 @@ function frame(now: number): void {
   if (motion.playing !== currentAction) {
     currentAction = motion.playing;
     animT = 0;
-    justSwitched = true;
   } else {
     animT += animDt * intent.timeScale;
   }

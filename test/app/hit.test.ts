@@ -278,13 +278,15 @@ describe('命中形状跟随当前帧的掩膜', () => {
   it('动作过程中掩膜在变，判定也随之变化', () => {
     const cat = makeCat('cow', 20260728);
     const seen = new Set<boolean>();
-    // 扑跳的猫横向移动很大，固定一点上的判定必然在过程中翻转。
-    const p = { x: 20.5, y: 40.5 };
-    for (const t of [0, 0.5, 1.0, 1.5, 1.7, 2.0, 2.5, 3.0, 3.6, 4.0]) {
-      const f = frameOf(renderer.render(cat, ACTIONS.pounce.make(t, cat, MI)));
+    // 取身体上方的一点：伸懒腰会把身体压低又抬起，固定一点上的判定必然翻转。
+    // 原先用的是扑跳的横向位移，那个位移已经移交给运动层了（动作库不再产出 dx），
+    // 所以这里改用同样明显、但完全由形体本身产生的纵向变化。
+    const p = { x: 40.5, y: 17.5 };
+    for (const t of [0, 0.3, 0.7, 1.2, 1.9, 2.6, 3.2, 3.7]) {
+      const f = frameOf(renderer.render(cat, ACTIONS.stretch.make(t, cat, MI)));
       seen.add(passThrough(f, p));
     }
-    expect(seen.size, '整个扑跳过程中判定一成不变，说明命中形状退化成了静态矩形').toBe(2);
+    expect(seen.size, '整个伸懒腰过程中判定一成不变，说明命中形状退化成了静态矩形').toBe(2);
   });
 });
 

@@ -12,11 +12,28 @@ export interface ActionOpts {
 
 export interface ActionDef {
   label: string;
+  /**
+   * 循环动作（站立呼吸、走路、趴着）会一直播下去；
+   * **一次性动作（打哈欠、伸懒腰、扑跳）播一遍就完**，之后由调用方决定接什么。
+   *
+   * 这个区分不是装饰。世界层给一个动作分配的时长是十几秒起，而打个哈欠只要
+   * 三秒 - 当成循环播的话就是「一只猫连着打十次哈欠」，扑跳更明显：
+   * 蓄力、跳、落地、得意地坐、再滑回原点，一轮接一轮。
+   */
   loop: boolean;
   /** 走路的位移速度，px/s。由调用方驱动实际位置，动作本身只负责腿的相位。 */
   travel?: number;
-  /** 一个完整循环的时长，秒。仅非等速循环的动作需要。 */
+  /** 一个完整循环的时长，秒。一次性动作则是它播完所需的时长。 */
   period?: number;
+  /**
+   * 跳跃类动作的真实位移：局部时间落在 [startS, endS) 之间时，
+   * 猫在地面上前进 px 个精灵像素，**由调用方驱动**（与 travel 同一个契约）。
+   *
+   * 不在姿态里用 dx 做粗位移。精灵缓冲只有 72 像素宽，在里面跳出去就必须再滑
+   * 回来，而滑回来的那一段没有腿的动作 - 屏幕上就是一只猫平移着倒退。
+   * 桌面宠物有一整个舞台可走，猫跳完就该待在新位置上。
+   */
+  leap?: { startS: number; endS: number; px: number };
   make(t: number, cat: Cat, mi: MicroOut, opts?: ActionOpts): Pose;
 }
 
@@ -187,10 +204,10 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
 
   yawn: {
     label: '打哈欠',
-    loop: true,
+    loop: false,
     period: 3.4,
     make(t, _cat, mi) {
-      const k = (t % 3.4) / 3.4;
+      const k = Math.min(t, 3.4) / 3.4;
       let m = 0;
       if (k < 0.2) m = ease(k / 0.2);
       else if (k < 0.55) m = 1;
@@ -210,10 +227,10 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
 
   stretch: {
     label: '伸懒腰',
-    loop: true,
+    loop: false,
     period: 3.8,
     make(t, _cat, mi) {
-      const k = (t % 3.8) / 3.8;
+      const k = Math.min(t, 3.8) / 3.8;
       let s = 0;
       if (k < 0.25) s = ease(k / 0.25);
       else if (k < 0.7) s = 1 + Math.sin(t * 18) * 0.015; // 保持时微微颤
@@ -239,10 +256,14 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
 
   pounce: {
     label: '扑跳',
-    loop: true,
-    period: 4.2,
+    loop: false,
+    // 蓄力 1.3 + 腾空 0.55 + 落地 0.3 + 得意地坐 1.25。
+    period: 3.4,
+    // 腾空那 0.55 秒里猫在地面上真的前进 16 个精灵像素。
+    leap: { startS: 1.3, endS: 1.85, px: 16 },
     make(t, _cat, mi) {
-      const T = t % 4.2;
+      // 停在最后一帧而不是回到蓄力 - 一次性动作没有下一轮。
+      const T = Math.min(t, 3.4);
       const base: Pose = {
         form: 'stand',
         eyeOpen: 1,
@@ -259,7 +280,6 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
           squashY: 0.82,
           dy: 2,
           legScale: 0.6,
-          dx: -6,
           headDY: 2,
           tailAng: 1.3 + wig * 0.12,
           pupilDX: 1,
@@ -274,7 +294,6 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
           ...base,
           stretchX: 1.22,
           squashY: 0.85,
-          dx: Math.round(-6 + k * 16),
           dy: Math.round(-arc * 9) + 2,
           airborne: arc * 9 - 1,
           legScale: 0.5,
@@ -291,26 +310,20 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
           ...base,
           squashY: 0.72 + k * 0.2,
           stretchX: 1.08,
-          dx: 10,
           dy: 1,
           legScale: 0.7,
           dust: k,
         };
       }
-      if (T < 3.4) {
-        // 得意地坐下环顾
-        return {
-          form: 'sit',
-          dx: 10,
-          breath: 0.02,
-          eyeOpen: mi.eyeOpen,
-          tailWave: 1.3,
-          tailPhase: t * 3.5,
-        };
-      }
-      // 走回原位
-      const k = (T - 3.4) / 0.8;
-      return { ...base, dx: Math.round(10 - 16 * k), eyeOpen: mi.eyeOpen };
+      // 落地之后得意地坐下环顾。**没有「走回原位」那一段** -
+      // 猫跳到哪儿就待在哪儿，位移是运动层记在真实位置上的（见 leap）。
+      return {
+        form: 'sit',
+        breath: 0.02,
+        eyeOpen: mi.eyeOpen,
+        tailWave: 1.3,
+        tailPhase: t * 3.5,
+      };
     },
   },
 };

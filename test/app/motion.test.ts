@@ -161,11 +161,48 @@ describe('位置随时间推进', () => {
 
   it('原地动作不改变位置', () => {
     const start = createMotion(geom(), centeredStage());
-    const still = ACTION_KEYS.filter((k) => k !== 'walk');
+    // 走路与扑跳是唯二会真的移动猫的动作。扑跳的位移由动作库的 leap 声明、
+    // 运动层驱动 - 早先它是在精灵缓冲里用 dx 做的，跳完还得滑回原点。
+    const still = ACTION_KEYS.filter((k) => k !== 'walk' && k !== 'pounce');
     for (const action of still) {
       const { end } = run(start, { frames: 120, action });
       expect(end.x, `${action} 改变了位置`).toBe(start.x);
-      expect(end.playing).toBe(action);
+    }
+  });
+
+  it('扑跳会把猫真的往前送一段，且只在腾空那一段推进', () => {
+    const leap = ACTIONS.pounce.leap;
+    if (leap === undefined) throw new Error('扑跳应当声明 leap');
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+
+    // 蓄力阶段（腾空之前）一动不动 - 猫不该滑着助跑。
+    const crouch = run(start, { frames: Math.floor(leap.startS * 60) - 2, action: 'pounce' });
+    expect(crouch.end.x).toBe(start.x);
+
+    // 播完整个动作，前进的距离就是 leap 声明的那么多。
+    const done = run(start, { frames: 60 * 4, action: 'pounce' });
+    expect(done.end.x - start.x).toBeCloseTo(leap.px * g.spriteScale * start.dir, 6);
+
+    // 落地之后不再继续前进 - 位移只发生在腾空窗口内。
+    const later = run(done.end, { frames: 120, action: 'pounce', now: done.now });
+    expect(later.end.x).toBeCloseTo(done.end.x, 6);
+  });
+
+  it('一次性动作播一遍就停下来站着，不会一轮接一轮地循环', () => {
+    // 用户实测：「跳完固定是蹲下的动作，然后会循环好几轮」。
+    // 根因是世界层给一个动作分配十几秒，而扑跳只有 3.4 秒，被当成循环播了四五轮。
+    for (const action of ACTION_KEYS.filter((k) => !ACTIONS[k].loop)) {
+      const period = ACTIONS[action].period ?? 0;
+      expect(period, `${action} 没有声明时长`).toBeGreaterThan(0);
+      const g = geom();
+      const start = createMotion(g, centeredStage(g));
+      // 播放期内确实在播这个动作
+      const during = run(start, { frames: Math.floor(period * 60) - 4, action });
+      expect(during.end.playing, `${action} 播放期内没在播`).toBe(action);
+      // 播完之后即使世界层还在说这个动作，画面也已经换成站立
+      const after = run(start, { frames: Math.ceil(period * 60) + 30, action });
+      expect(after.end.playing, `${action} 播完了还在循环`).toBe('idle');
     }
   });
 

@@ -79,6 +79,14 @@ export interface MotionState {
   /** 这一帧真正该播的动作。null = 猫已离开，什么都不画。 */
   readonly playing: ActionKey | null;
   /**
+   * 正在播的一次性动作与它已播的秒数。null = 当前不是一次性动作。
+   *
+   * 世界层给一个动作分配的时长是十几秒起，而打个哈欠只要三秒、扑一下四秒 -
+   * 播完之后接什么需要帧时钟，和「走完一段路就地歇一会」是同一类判断，
+   * 因此归运动层（ADR 0007）。
+   */
+  readonly shot: { readonly action: ActionKey; readonly t: number } | null;
+  /**
    * 舞台客户区原点。画布偏移与爪印换算都按它算。
    *
    * 决定滚动的那一帧就在这里改掉，不等窗口真的挪到位 - 猫的屏幕位置是
@@ -216,6 +224,7 @@ export function createMotion(geom: StageGeometry, stageAt: ScreenPoint): MotionS
     targetX: null,
     restS: 0,
     playing: null,
+    shot: null,
     stage: stageAt,
     paws: [],
     strideLeft: PAW_STRIDE_SPRITE * geom.spriteScale,
@@ -292,7 +301,14 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
 
   if (input.action === null) {
     // 猫已离开。位置不再推进，爪印自然淡完（告别页是 ticket 12 的事）。
-    return { ...state, playing: null, targetX: null, restS: 0, paws: prune(state.paws, now) };
+    return {
+      ...state,
+      playing: null,
+      targetX: null,
+      restS: 0,
+      shot: null,
+      paws: prune(state.paws, now),
+    };
   }
 
   const active = cat.personality.active;
@@ -305,6 +321,31 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
   let pawSide = state.pawSide;
   let paws = state.paws;
   let playing: ActionKey = input.action;
+  let shot = state.shot;
+
+  // 一次性动作：播一遍就完，之后站着等世界层改主意。
+  const def = ACTIONS[input.action];
+  if (!def.loop) {
+    const wasT = shot?.action === input.action ? shot.t : null;
+    const t = wasT === null ? 0 : wasT + Math.max(0, dt);
+    shot = { action: input.action, t };
+    const done = t >= (def.period ?? 0);
+    playing = done ? 'idle' : input.action;
+
+    // 跳跃的位移记在真实位置上，不在姿态的 dx 里 - 见 ACTIONS 的 leap 注释。
+    // 只推进落在腾空窗口内的那部分 dt，所以帧率高低不影响跳的距离。
+    if (def.leap !== undefined && wasT !== null) {
+      const { startS, endS, px } = def.leap;
+      const from = Math.max(wasT, startS);
+      const to = Math.min(t, endS);
+      if (to > from && endS > startS) {
+        const advance = dir * px * ((to - from) / (endS - startS)) * geom.spriteScale;
+        x = clamp(x + advance, bounds.min, bounds.max);
+      }
+    }
+  } else {
+    shot = null;
+  }
 
   if (input.action !== 'walk') {
     targetX = null;
@@ -355,7 +396,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
   paws = prune(paws, now);
   const stage = nextStage(state.stage, geom, x, dir);
 
-  return { ...state, x, dir, targetX, restS, playing, stage, paws, strideLeft, pawSide };
+  return { ...state, x, dir, targetX, restS, playing, shot, stage, paws, strideLeft, pawSide };
 }
 
 /**

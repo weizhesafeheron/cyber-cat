@@ -248,12 +248,14 @@ export const ACTIVITY_HUNGRY_WALK_CHANCE = 0.5;
 export const ACTIVITY_HOLD_BEATS: Readonly<Record<ActionKey, readonly [number, number]>> = {
   idle: [2, 6], // 30 - 90 秒
   walk: [1, 3], // 15 - 45 秒，走一小段就停
-  pounce: [1, 2], // 扑跳是爆发动作，不会连着扑一分钟
+  // 打哈欠、伸懒腰、扑跳都是一次性动作（ACTIONS 里 loop: false）：只占一拍。
+  // 给更多拍没有意义 - 动作三四秒就播完了，剩下的时间运动层会让猫站着。
+  pounce: [1, 1],
   groom: [3, 8], // 45 秒 - 2 分钟，理毛是件耐心的事
   sit: [4, 12], // 1 - 3 分钟
   lie: [8, 24], // 2 - 6 分钟，趴着是猫最长的姿势
   yawn: [1, 1], // 一下就完
-  stretch: [1, 2],
+  stretch: [1, 1],
   eat: [2, 4], // 30 秒 - 1 分钟
   // 睡眠时长由模拟步的睡眠决策决定，不由这张表控制（见 advanceBeat 的持续状态分支）。
   sleep: [1, 1],
