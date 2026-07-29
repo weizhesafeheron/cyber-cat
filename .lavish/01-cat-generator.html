@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CYBER-CAT · Prototype ① 猫咪生成器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  body {
+    background: #0b0e1a;
+    color: #d8dcf0;
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(77,238,234,.07), transparent),
+      radial-gradient(ellipse 60% 40% at 90% 110%, rgba(246,82,160,.06), transparent);
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+  .tag { display:inline-block; font-size: 11px; letter-spacing: 2px; color: #4deeea; border: 1px solid #4deeea44; padding: 3px 10px; border-radius: 3px; margin-bottom: 10px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+  h1 .en { color:#f652a0; font-family: ui-monospace, monospace; }
+  .question {
+    margin: 14px 0 28px; padding: 12px 16px;
+    background: #12172b; border-left: 3px solid #f652a0; border-radius: 4px;
+    color: #aab3d8; font-size: 14px; line-height: 1.7;
+  }
+  .question b { color: #ffd94a; }
+  h2 { font-size: 16px; margin: 30px 0 4px; color: #4deeea; letter-spacing: 1px; }
+  .sub { font-size: 12px; color: #7a83a8; margin-bottom: 14px; line-height: 1.6; }
+
+  .breed-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; }
+  @media (max-width: 860px) { .breed-row { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  .card {
+    background: #12172b; border: 1px solid #232c52; border-radius: 8px;
+    padding: 12px 10px 10px; text-align: center; position: relative;
+    transition: border-color .15s;
+  }
+  .card:hover { border-color: #4deeea66; }
+  .card canvas { image-rendering: pixelated; width: 100%; max-width: 216px; display: block; margin: 0 auto; }
+  .stage-bg { background: linear-gradient(180deg, #171d36 0%, #1a2140 78%, #202a52 78%, #1c2445 100%); border-radius: 6px; padding: 4px 2px 0; }
+  .bname { font-size: 15px; font-weight: 600; margin-top: 8px; }
+  .bdesc { font-size: 11px; color: #7a83a8; margin-top: 2px; }
+  .meta { font-size: 11px; color: #5b6488; margin-top: 6px; font-family: ui-monospace, monospace; }
+  .traits { margin-top: 6px; display:flex; gap:4px; justify-content:center; flex-wrap: wrap; }
+  .trait { font-size: 10px; padding: 2px 7px; border-radius: 10px; background:#1c2445; color:#9fb0e8; border: 1px solid #2c3a68; }
+  .roll {
+    margin-top: 9px; cursor: pointer; font-size: 12px;
+    background: #1c2445; color: #4deeea; border: 1px solid #2c3a68;
+    padding: 5px 14px; border-radius: 4px; font-family: inherit;
+  }
+  .roll:hover { background: #232c52; }
+
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab {
+    cursor: pointer; font-size: 13px; padding: 6px 16px; border-radius: 4px;
+    background: #12172b; border: 1px solid #232c52; color: #aab3d8; font-family: inherit;
+  }
+  .tab.on { background: #1c2445; border-color: #4deeea; color: #4deeea; }
+  .grid10 { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; }
+  @media (max-width: 860px) { .grid10 { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+  .cell { background: #12172b; border: 1px solid #232c52; border-radius: 6px; padding: 6px; text-align: center; cursor: pointer; }
+  .cell:hover { border-color: #f652a066; }
+  .cell canvas { image-rendering: pixelated; width: 100%; max-width: 144px; }
+  .cell .meta { margin-top: 2px; }
+  .toolbar { margin-top: 12px; display: flex; gap: 10px; }
+
+  /* 决策区 */
+  .decision {
+    margin-top: 44px; background: #10142a; border: 1px solid #2c3a68; border-radius: 10px; padding: 20px;
+  }
+  .decision h2 { margin-top: 0; }
+  .qblock { margin: 18px 0; padding: 14px 16px; background: #12172b; border-radius: 8px; border: 1px solid #232c52; }
+  .qblock legend, .qblock .qt { font-size: 14px; font-weight: 600; color: #e8ecff; margin-bottom: 10px; display: block; }
+  .qblock label { display: block; font-size: 13px; color: #aab3d8; padding: 5px 2px; cursor: pointer; }
+  .qblock label:hover { color: #e8ecff; }
+  .qblock input { margin-right: 8px; accent-color: #f652a0; }
+  .qblock textarea {
+    width: 100%; min-height: 70px; background: #0b0e1a; color: #d8dcf0;
+    border: 1px solid #2c3a68; border-radius: 6px; padding: 10px; font-family: inherit; font-size: 13px;
+  }
+  .queue-btn {
+    margin-top: 10px; cursor: pointer; font-size: 13px; font-family: inherit;
+    background: #f652a0; color: #fff; border: none; padding: 8px 18px; border-radius: 5px;
+  }
+  .queue-btn:hover { filter: brightness(1.1); }
+  .queued-note { display:none; margin-left: 10px; font-size: 12px; color: #4deeea; }
+  .hint { font-size: 12px; color: #7a83a8; line-height: 1.7; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="tag">PROTOTYPE ① / 4 · 可随意批注</span>
+  <h1><span class="en">CYBER-CAT</span> · 猫咪生成器</h1>
+  <div class="question">
+    本页回答一个问题：<b>纯程序化画出来的像素猫，可不可爱？</b><br>
+    每只猫都由「品种 + Seed」实时逐像素生成，没有任何预绘制图片。看各品种是否一眼可辨、同品种不同 Seed 是否有个体差异、以及你是否愿意养其中某一只。猫会呼吸和眨眼。
+  </div>
+
+  <h2>① 品种对比</h2>
+  <div class="sub">每个品种一只代表猫（坐姿）。🎲 可单独重掷该品种的 Seed。性格标签由 Seed 在品种倾向附近采样。</div>
+  <div class="breed-row" id="breedRow"></div>
+
+  <h2>② 同品种个体差异</h2>
+  <div class="sub">同一品种、十个不同 Seed。点任意一只可单独重掷；「换一批」整批刷新。重点看：奶牛猫的花纹差异、橘猫的条纹与体型差异、布偶的面罩深浅。</div>
+  <div class="tabs" id="tabs"></div>
+  <div class="grid10" id="grid"></div>
+  <div class="toolbar">
+    <button class="roll" id="rerollAll">🎲 换一批</button>
+  </div>
+
+  <div class="decision">
+    <h2>🎯 你的抉择</h2>
+    <div class="hint">下面每题选完点「提交此答案」，会排入反馈队列；也可以直接框选页面上任何一只猫写批注。全部弄完后用右下角 Send to Agent 一次性发回。</div>
+
+    <form class="qblock" data-lavish-question="art-direction" id="qArt">
+      <span class="qt">Q1 · 画风路线判断（核心抉择）</span>
+      <label><input type="radio" name="art" value="A-继续纯程序化，按此方向打磨"> 可爱度达标或接近达标，<b>继续纯程序化</b>，按这个方向打磨细节</label>
+      <label><input type="radio" name="art" value="A-方向可以但差口气，先说清楚差在哪再迭代一轮"> 方向可以但差口气，<b>先迭代一轮再定</b>（请在批注/Q3 里说差在哪）</label>
+      <label><input type="radio" name="art" value="C-退到混合方案：程序化身体+手绘关键部位"> 代码画的脸不行，<b>退到混合方案 C</b>（程序化身体 + 手绘脸/眼睛部件）</label>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+
+    <form class="qblock" data-lavish-question="breed-recognition" id="qBreed">
+      <span class="qt">Q2 · 品种辨识度（多选：哪些品种「不像它该有的样子」，需要重点加强）</span>
+      <label><input type="checkbox" name="breed" value="橘猫"> 橘猫（该更圆、更懒相？）</label>
+      <label><input type="checkbox" name="breed" value="黑猫"> 黑猫（轮廓不够细长？眼睛不够亮？）</label>
+      <label><input type="checkbox" name="breed" value="奶牛猫"> 奶牛猫（花纹不够不规则？）</label>
+      <label><input type="checkbox" name="breed" value="布偶猫"> 布偶猫（毛领/面罩/蓬松感不到位？）</label>
+      <label><input type="checkbox" name="breed" value="德文卷毛"> 德文卷毛（耳朵/精灵感不到位？）</label>
+      <label><input type="checkbox" name="breed" value="美短"> 美短（虎斑不像？）</label>
+      <label><input type="checkbox" name="breed" value="阿比西尼亚"> 阿比西尼亚（渐层/野性感不到位？）</label>
+      <label><input type="checkbox" name="breed" value="都还行"> 都还行，辨识度过关</label>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+
+    <form class="qblock" data-lavish-question="free-feedback" id="qFree">
+      <span class="qt">Q3 · 自由反馈（可留空）</span>
+      <textarea name="free" placeholder="比如：橘猫头再大一点 / 眼睛间距太宽 / 想要 xx 色的猫 / 某个 seed 特别好看帮我记下来……"></textarea>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+  </div>
+</div>
+
+<script src="cat-core.js"></script>
+<script>
+(() => {
+  'use strict';
+  const CC = CatCore;
+  const cats = [];   // {cat, renderer, micro, pose, seedEl?, scale}
+  let seedBase = 20260728;
+
+  function rndSeed() { return Math.floor(Math.random() * 1e9); }
+
+  function addCat(container, breed, seed, big) {
+    const stage = document.createElement('div');
+    stage.className = 'stage-bg';
+    const canvas = document.createElement('canvas');
+    stage.appendChild(canvas);
+    container.appendChild(stage);
+    const entry = {
+      breed, seed,
+      cat: CC.makeCat(breed, seed),
+      renderer: CC.createRenderer(canvas),
+      micro: CC.makeMicro(seed),
+      t: Math.random() * 10,
+    };
+    cats.push(entry);
+    return entry;
+  }
+
+  /* ---- ① 四品种代表 ---- */
+  const row = document.getElementById('breedRow');
+  const TRAITS = (cat) => {
+    const p = cat.personality, out = [];
+    out.push(p.active > 0.6 ? '活跃' : p.active < 0.35 ? '慵懒' : '平和');
+    if (p.clingy > 0.65) out.push('粘人'); else if (p.clingy < 0.3) out.push('高冷');
+    if (p.greedy > 0.65) out.push('贪吃');
+    return out;
+  };
+  CC.BREED_KEYS.forEach((k, i) => {
+    const B = CC.BREEDS[k];
+    const card = document.createElement('div');
+    card.className = 'card';
+    row.appendChild(card);
+    const entry = addCat(card, k, seedBase + i * 17, true);
+    const info = document.createElement('div');
+    card.appendChild(info);
+    const btn = document.createElement('button');
+    btn.className = 'roll'; btn.textContent = '🎲 重掷 Seed';
+    card.appendChild(btn);
+    const renderInfo = () => {
+      info.innerHTML = `<div class="bname">${B.label}</div><div class="bdesc">${B.desc}</div>
+        <div class="traits">${TRAITS(entry.cat).map(t => `<span class="trait">${t}</span>`).join('')}</div>
+        <div class="meta">seed ${entry.seed}</div>`;
+    };
+    renderInfo();
+    btn.addEventListener('click', () => {
+      entry.seed = rndSeed();
+      entry.cat = CC.makeCat(k, entry.seed);
+      entry.micro = CC.makeMicro(entry.seed);
+      renderInfo();
+    });
+  });
+
+  /* ---- ② seed 网格 ---- */
+  const tabsEl = document.getElementById('tabs');
+  const gridEl = document.getElementById('grid');
+  let curBreed = 'cow';
+  const gridCats = [];
+
+  CC.BREED_KEYS.forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'tab' + (k === curBreed ? ' on' : '');
+    b.textContent = CC.BREEDS[k].label;
+    b.dataset.k = k;
+    b.addEventListener('click', () => {
+      curBreed = k;
+      tabsEl.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.k === k));
+      buildGrid();
+    });
+    tabsEl.appendChild(b);
+  });
+
+  function buildGrid() {
+    // 移除旧的 grid cats
+    for (const g of gridCats) {
+      const idx = cats.indexOf(g); if (idx >= 0) cats.splice(idx, 1);
+    }
+    gridCats.length = 0;
+    gridEl.innerHTML = '';
+    for (let i = 0; i < 10; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      gridEl.appendChild(cell);
+      const seed = rndSeed();
+      const entry = addCat(cell, curBreed, seed);
+      gridCats.push(entry);
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = 'seed ' + seed;
+      cell.appendChild(meta);
+      cell.addEventListener('click', () => {
+        entry.seed = rndSeed();
+        entry.cat = CC.makeCat(curBreed, entry.seed);
+        entry.micro = CC.makeMicro(entry.seed);
+        meta.textContent = 'seed ' + entry.seed;
+      });
+    }
+  }
+  buildGrid();
+  document.getElementById('rerollAll').addEventListener('click', buildGrid);
+
+  /* ---- 动画循环（坐姿 + 呼吸 + 眨眼）---- */
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    for (const e of cats) {
+      e.t += dt;
+      const mi = CC.stepMicro(e.micro, dt, { tilt: true });
+      e.renderer.draw(e.cat, CC.ACTIONS.sit.make(e.t, e.cat, mi, {}));
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ---- lavish 决策表单 ---- */
+  function wire(formId, build) {
+    const form = document.getElementById(formId);
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const msg = build(new FormData(form));
+      if (!msg) return;
+      if (window.lavish) {
+        window.lavish.queuePrompt(msg.prompt, {
+          tag: 'choice', text: msg.text, element: form,
+          queueKey: form.dataset.lavishQuestion,
+          data: msg.data,
+        });
+      }
+      const note = form.querySelector('.queued-note');
+      if (note) note.style.display = 'inline';
+    });
+  }
+  wire('qArt', (fd) => {
+    const v = fd.get('art');
+    if (!v) return null;
+    return { prompt: `Prototype① 画风路线抉择：${v}`, text: 'Q1 画风：' + v.split('-')[0], data: { q: 'art-direction', a: v } };
+  });
+  wire('qBreed', (fd) => {
+    const vs = fd.getAll('breed');
+    if (!vs.length) return null;
+    return { prompt: `Prototype① 品种辨识度反馈，需要加强的品种：${vs.join('、')}`, text: 'Q2 品种：' + vs.join('/'), data: { q: 'breed-recognition', a: vs } };
+  });
+  wire('qFree', (fd) => {
+    const v = (fd.get('free') || '').trim();
+    if (!v) return null;
+    return { prompt: `Prototype① 自由反馈：${v}`, text: 'Q3 自由反馈', data: { q: 'free', a: v } };
+  });
+})();
+</script>
+</body>
+</html>

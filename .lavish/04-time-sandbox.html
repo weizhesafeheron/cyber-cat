@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CYBER-CAT · Prototype ④ 时间沙盘</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  body {
+    background: #0b0e1a; color: #d8dcf0;
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(77,238,234,.07), transparent),
+      radial-gradient(ellipse 60% 40% at 10% 110%, rgba(246,82,160,.06), transparent);
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+  .tag { display:inline-block; font-size: 11px; letter-spacing: 2px; color: #4deeea; border: 1px solid #4deeea44; padding: 3px 10px; border-radius: 3px; margin-bottom: 10px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+  h1 .en { color:#f652a0; font-family: ui-monospace, monospace; }
+  .question { margin: 14px 0 22px; padding: 12px 16px; background: #12172b; border-left: 3px solid #f652a0; border-radius: 4px; color: #aab3d8; font-size: 14px; line-height: 1.7; }
+  .question b { color: #ffd94a; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1.15fr; gap: 14px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+  .box { background: #12172b; border: 1px solid #232c52; border-radius: 8px; padding: 14px; }
+  .box h3 { font-size: 13px; color: #4deeea; margin-bottom: 10px; letter-spacing: 1px; }
+
+  .portrait { display: flex; gap: 14px; align-items: flex-start; }
+  #catview { image-rendering: pixelated; width: 216px; max-width: 100%; background: linear-gradient(180deg,#171d36,#1a2140 78%,#202a52 78%,#1c2445); border-radius: 6px; }
+  .simclock { font-family: ui-monospace, monospace; font-size: 15px; color: #ffd94a; }
+  .elapsed { font-size: 12px; color: #7a83a8; margin-top: 2px; }
+  .statusband { margin: 10px 0; padding: 7px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+  .st-ok { background: #12301f; color: #58d68d; border: 1px solid #1e5a38; }
+  .st-hungry { background: #33270f; color: #ffc94d; border: 1px solid #6b5316; }
+  .st-sick { background: #331414; color: #ff7b6b; border: 1px solid #6b2a22; }
+  .st-dead { background: #1c1c24; color: #8a86a8; border: 1px solid #3a3a4a; }
+
+  .bars { flex: 1; min-width: 180px; }
+  .bar { margin-bottom: 9px; }
+  .bar .lbl { display: flex; justify-content: space-between; font-size: 12px; color: #aab3d8; margin-bottom: 3px; }
+  .bar .track { height: 9px; background: #0b0e1a; border-radius: 4px; overflow: hidden; border: 1px solid #232c52; }
+  .bar .fill { height: 100%; border-radius: 3px; transition: width .3s; }
+  .f-hunger { background: linear-gradient(90deg,#e07b39,#ffc94d); }
+  .f-energy { background: linear-gradient(90deg,#3b7fd4,#7cc4ff); }
+  .f-mood   { background: linear-gradient(90deg,#a058c9,#f652a0); }
+  .f-bond   { background: linear-gradient(90deg,#1e8a5a,#58d68d); }
+
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .abtn { cursor: pointer; font-size: 13px; padding: 7px 13px; border-radius: 5px; background: #1c2445; border: 1px solid #2c3a68; color: #aab3d8; font-family: inherit; }
+  .abtn:hover { border-color: #4deeea88; }
+  .abtn.on { background: #23305e; border-color: #4deeea; color: #4deeea; }
+  .abtn.warm { border-color: #f652a066; }
+  .abtn.warm:hover { border-color: #f652a0; color: #f652a0; }
+  .abtn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .subrow { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .meta { font-size: 12px; color: #5b6488; font-family: ui-monospace, monospace; }
+
+  #diary { max-height: 380px; overflow-y: auto; font-size: 12.5px; line-height: 1.85; color: #9fb0e8; }
+  #diary .day { color: #4deeea; font-weight: 600; margin-top: 8px; font-size: 12px; letter-spacing: 1px; }
+  #diary .t { color: #5b6488; font-family: ui-monospace, monospace; margin-right: 6px; }
+  #diary .imp { color: #ff7b6b; }
+  #diary .me { color: #ffd94a; }
+
+  .decision { margin-top: 34px; background: #10142a; border: 1px solid #2c3a68; border-radius: 10px; padding: 20px; }
+  .decision h2 { font-size: 16px; color: #4deeea; margin-bottom: 6px; }
+  .hint { font-size: 12px; color: #7a83a8; line-height: 1.7; margin-bottom: 10px; }
+  .qblock { margin: 14px 0; padding: 14px 16px; background: #12172b; border-radius: 8px; border: 1px solid #232c52; }
+  .qblock .qt { font-size: 14px; font-weight: 600; color: #e8ecff; margin-bottom: 10px; display: block; }
+  .qblock label { display: block; font-size: 13px; color: #aab3d8; padding: 5px 2px; cursor: pointer; }
+  .qblock input { margin-right: 8px; accent-color: #f652a0; }
+  .qblock textarea { width: 100%; min-height: 70px; background: #0b0e1a; color: #d8dcf0; border: 1px solid #2c3a68; border-radius: 6px; padding: 10px; font-family: inherit; font-size: 13px; }
+  .queue-btn { margin-top: 10px; cursor: pointer; font-size: 13px; font-family: inherit; background: #f652a0; color: #fff; border: none; padding: 8px 18px; border-radius: 5px; }
+  .queue-btn:hover { filter: brightness(1.1); }
+  .queued-note { display:none; margin-left: 10px; font-size: 12px; color: #4deeea; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="tag">PROTOTYPE ④ / 4 · 可随意批注</span>
+  <h1><span class="en">CYBER-CAT</span> · 时间沙盘</h1>
+  <div class="question">
+    本页回答两个问题：<b>状态数值的节奏对吗？猫咪日记的味道对吗？</b><br>
+    这里跑的就是真实游戏的模拟器（时间的纯函数），只是给了你一个快进按钮。
+    当前数值：饱食度满 → 空约 <b>16 小时</b>；空腹持续 <b>24h</b> 进入生病；生病 <b>48h</b> 不管会死亡 - 从最后一次喂食到死亡约 <b>3.7 天</b>。
+    请快进体验：一天的作息、忘喂两天、生病、治疗或死亡，然后判断节奏。日记会记下它经历的一切。
+  </div>
+
+  <div class="grid2">
+    <div>
+      <div class="box">
+        <div class="portrait">
+          <canvas id="catview"></canvas>
+          <div class="bars">
+            <div class="simclock" id="clock"></div>
+            <div class="elapsed" id="elapsed"></div>
+            <div class="statusband st-ok" id="statusband">状态加载中</div>
+            <div class="bar"><div class="lbl"><span>饱食度</span><span id="vHunger"></span></div><div class="track"><div class="fill f-hunger" id="bHunger"></div></div></div>
+            <div class="bar"><div class="lbl"><span>精力</span><span id="vEnergy"></span></div><div class="track"><div class="fill f-energy" id="bEnergy"></div></div></div>
+            <div class="bar"><div class="lbl"><span>心情</span><span id="vMood"></span></div><div class="track"><div class="fill f-mood" id="bMood"></div></div></div>
+            <div class="bar"><div class="lbl"><span>亲密度</span><span id="vBond"></span></div><div class="track"><div class="fill f-bond" id="bBond"></div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="box" style="margin-top:14px">
+        <h3>时间快进（模拟你离开又回来）</h3>
+        <div class="btns">
+          <button class="abtn" data-ff="1">+1 小时</button>
+          <button class="abtn" data-ff="6">+6 小时</button>
+          <button class="abtn" data-ff="24">+1 天</button>
+          <button class="abtn" data-ff="72">+3 天</button>
+          <button class="abtn" id="autoplay">▶ 自动播放（1秒=30分钟）</button>
+        </div>
+        <h3 style="margin-top:14px">照顾（发生在当前模拟时刻）</h3>
+        <div class="btns">
+          <button class="abtn warm" id="feed">🥣 喂食</button>
+          <button class="abtn warm" id="play">🪶 陪玩 15 分钟</button>
+          <button class="abtn warm" id="med" disabled>💊 喂药治疗</button>
+          <button class="abtn" id="restart">🔄 重新开始（重roll一只猫）</button>
+        </div>
+        <div class="subrow">
+          <span class="meta" id="catMeta"></span>
+        </div>
+      </div>
+    </div>
+    <div class="box">
+      <h3>📔 猫咪日记（离线推演的叙事副产品）</h3>
+      <div id="diary"></div>
+    </div>
+  </div>
+
+  <div class="decision">
+    <h2>🎯 你的抉择</h2>
+    <div class="hint">建议实验顺序：自动播放看一天作息 → +1天不喂看挨饿 → 继续+1天看生病 → 选择喂药救它或 +3天送走它（体验完整死亡链和告别）。然后回答：</div>
+
+    <form class="qblock" data-lavish-question="pace" id="qPace">
+      <span class="qt">Q1 · 饥饿节奏（满 → 空 16h，一天喂 1~2 次）</span>
+      <label><input type="radio" name="v" value="刚好-一天1~2次喂食节奏合适"> <b>刚好</b> - 一天惦记它一两次，是陪伴不是负担</label>
+      <label><input type="radio" name="v" value="太快-想更佛系，拉长到24h+"> <b>太快</b> - 更佛系一点，满→空拉到 24h 以上</label>
+      <label><input type="radio" name="v" value="太慢-想要更强的依赖感"> <b>太慢</b> - 想要它更需要我</label>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+
+    <form class="qblock" data-lavish-question="death-chain" id="qDeath">
+      <span class="qt">Q2 · 死亡链（挨饿24h→生病，生病48h→死亡，总缓冲约3.7天）</span>
+      <label><input type="radio" name="v" value="合适-3.7天缓冲刚好"> <b>合适</b> - 日常玩家不会误杀，弃养必死</label>
+      <label><input type="radio" name="v" value="太严-想再宽限或加提醒"> <b>太严</b> - 想再宽限（出差一周回来猫没了太伤）</label>
+      <label><input type="radio" name="v" value="太松-死亡该更有威慑"> <b>太松</b> - 死亡该更有威慑力</label>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+
+    <form class="qblock" data-lavish-question="diary-tone" id="qDiary">
+      <span class="qt">Q3 · 日记的味道</span>
+      <label><input type="radio" name="v" value="有味道-按此打磨"> <b>有味道</b> - 能读出这只猫的性格</label>
+      <label><input type="radio" name="v" value="太机械-要更有情绪和细节"> <b>太机械</b> - 要更有情绪和细节</label>
+      <label><input type="radio" name="v" value="太啰嗦-条数要精简"> <b>太啰嗦</b> - 条数/长度要精简</label>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+
+    <form class="qblock" data-lavish-question="sandbox-free" id="qFree">
+      <span class="qt">Q4 · 自由反馈（可留空）</span>
+      <textarea name="free" placeholder="比如：生病的表现要更明显 / 想要回归时先弹日记卡片 / 死亡告别想要个仪式……"></textarea>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+  </div>
+</div>
+
+<script src="cat-core.js"></script>
+<script>
+(() => {
+  'use strict';
+  const CC = CatCore;
+  const TICK_H = 0.5;               // 模拟步长：30 分钟
+
+  const catview = document.getElementById('catview');
+  const renderer = CC.createRenderer(catview);
+
+  /* ================= 模拟器（纯函数式内核，prototype 版） ================= */
+  let breed = 'orange', seed = 20260728;
+  let cat, sim, rnd;
+
+  function newSim() {
+    cat = CC.makeCat(breed, seed);
+    rnd = CC.mulberry32(seed ^ 0x5f3759df);
+    sim = {
+      t0: Date.now(), simMs: Date.now(),
+      hunger: 80, energy: 70, mood: 65, bond: 10,
+      sleeping: false, starveH: 0, sick: false, sickH: 0, dead: false,
+      bowl: 0, playGlow: 0, diaryDayCount: 0, lastDiaryDay: '',
+      diary: [],
+    };
+    diaryPush('start', 'me');
+    render(); renderDiary();
+    document.getElementById('catMeta').textContent =
+      `${CC.BREEDS[breed].label} · seed ${seed} · 活跃 ${(cat.personality.active*100)|0}% 贪吃 ${(cat.personality.greedy*100)|0}%`;
+  }
+
+  /* ---------- 日记文案 ---------- */
+  const T = {
+    start: ['「小猫」搬进了赛博公寓。它闻了闻每个角落，最后在窗边坐下了。'],
+    wake: ['睡醒了，先伸了个大大的懒腰。', '被窗外的雨声吵醒，眯着眼看了一会儿霓虹。', '醒了。第一件事是舔了舔昨天没舔完的毛。'],
+    sleepN: ['蜷进猫窝，尾巴盖住了鼻子。', '窗外霓虹还亮着，它已经睡熟了。'],
+    nap: ['太阳（虽然隔着雨云）晒不到，但它还是睡了个午觉。', '趴在地板上，睡着了。'],
+    eat: ['吃光了碗里的猫粮，心满意足。', '埋头吃饭，耳朵还警惕地转来转去。', '吃完饭，围着空碗又转了两圈。'],
+    eatGreedy: ['听到倒粮的声音就冲了过来，差点滑倒。'],
+    window: ['在窗前坐了很久，盯着雨里的悬浮车流。', '看到窗外霓虹闪了一下，歪了歪头。'],
+    groom: ['认认真真舔了半小时毛，尾巴尖都没放过。'],
+    zoomies: ['深夜跑酷！从猫窝冲到窗边又冲回来，谁也不知道为什么。'],
+    scratch: ['扒了扒悬浮猫抓柱，柱子晃晃悠悠。'],
+    play: ['和你玩了逗猫棒，扑到红点三次，很得意。', '追着羽毛跳了几个来回，玩累了瘫在地上。'],
+    hungry1: ['碗空了。它在食盆边坐了一会儿，又走开了。'],
+    hungry2: ['很饿。它对着门口叫了几声 - 你不在。'],
+    sickStart: ['开始发蔫，趴在角落不想动。它生病了。'],
+    sickOn: ['还是蔫蔫的，水也只喝了两口。', '病着。它把自己缩成一团，偶尔咳两声。'],
+    cured: ['吃了药，睡了一大觉，精神好多了！病好了。'],
+    weak: ['病刚好，走路还有点慢，但已经会翘尾巴了。'],
+    dead: ['小猫安静地走了。它在这个赛博城市里陪了你 {days} 天。'],
+    feedMe: ['你添了猫粮。'],
+    playMe: ['你陪它玩了一刻钟。'],
+    medMe: ['你喂了药，摸了摸它的头。'],
+  };
+  function pick(arr) { return arr[Math.floor(rnd() * arr.length)]; }
+  function fmtSim(ms) {
+    const d = new Date(ms);
+    return { day: `${d.getMonth()+1}月${d.getDate()}日`, hm: `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`, h: d.getHours() };
+  }
+  function diaryPush(key, cls, extra) {
+    const f = fmtSim(sim.simMs);
+    let text = pick(T[key] || ['……']);
+    if (extra) text = text.replace('{days}', extra);
+    sim.diary.push({ day: f.day, hm: f.hm, text, cls: cls || '' });
+    if (sim.diary.length > 400) sim.diary.shift();
+  }
+
+  /* ---------- 单个 tick（30 分钟） ---------- */
+  function tick() {
+    if (sim.dead) return;
+    sim.simMs += TICK_H * 3600 * 1000;
+    const f = fmtSim(sim.simMs);
+    const p = cat.personality;
+
+    // 睡眠决策（晨昏型节律）
+    const h = f.h;
+    let sleepP = 0.06;
+    if (h >= 0 && h < 6) sleepP = 0.85;
+    else if (h >= 12 && h < 16) sleepP = 0.4 + (1 - p.active) * 0.35;
+    else if (h >= 22) sleepP = 0.5;
+    if (sim.sick) sleepP += 0.3;
+    if (!sim.sleeping && sim.energy < 20) sim.sleeping = true;
+    else if (!sim.sleeping && rnd() < sleepP && sim.energy < 85) { sim.sleeping = true; if (h >= 22 || h < 6) maybeDiary('sleepN', 0.5); else maybeDiary('nap', 0.35); }
+    else if (sim.sleeping && (sim.energy > 92 || (rnd() < 0.25 && sim.energy > 55 && sleepP < 0.3))) { sim.sleeping = false; maybeDiary('wake', 0.6); }
+
+    // 数值演化
+    if (sim.sleeping) sim.energy = Math.min(100, sim.energy + 7);
+    else sim.energy = Math.max(0, sim.energy - 3.1);
+    sim.hunger = Math.max(0, sim.hunger - 3.2);
+    // 吃饭（邀请式：有粮 + 饿 + 醒着才吃）
+    if (!sim.sleeping && sim.bowl > 0 && sim.hunger < 62) {
+      sim.bowl--; sim.hunger = Math.min(100, sim.hunger + 62);
+      diaryPush(p.greedy > 0.7 && rnd() < 0.4 ? 'eatGreedy' : 'eat');
+      sim.starveH = 0;
+    }
+    // 心情
+    let moodTarget = 55 + (sim.bond / 10) - (sim.hunger < 15 ? 25 : 0) - (sim.sick ? 30 : 0) + sim.playGlow;
+    sim.mood += (moodTarget - sim.mood) * 0.12;
+    sim.mood = Math.max(0, Math.min(100, sim.mood));
+    sim.playGlow = Math.max(0, sim.playGlow - 1.5);
+    sim.bond = Math.max(0, sim.bond - 0.04);   // 长期不互动缓慢流失
+
+    // 挨饿 → 生病 → 死亡链
+    if (sim.hunger <= 0) {
+      sim.starveH += TICK_H;
+      if (sim.starveH === 6) diaryPush('hungry1', 'imp');
+      if (sim.starveH === 14) diaryPush('hungry2', 'imp');
+      if (!sim.sick && sim.starveH >= 24) { sim.sick = true; sim.sickH = 0; diaryPush('sickStart', 'imp'); }
+    } else if (!sim.sick) sim.starveH = 0;
+    if (sim.sick) {
+      sim.sickH += TICK_H;
+      if (Math.abs(sim.sickH % 12) < TICK_H) maybeDiary('sickOn', 0.7, 'imp');
+      if (sim.sickH >= 48) {
+        sim.dead = true;
+        const days = Math.max(1, Math.round((sim.simMs - sim.t0) / 86400000));
+        diaryPush('dead', 'imp', days);
+        return;
+      }
+    }
+    // 日常随机小事（醒着才有）
+    if (!sim.sleeping && !sim.sick && rnd() < 0.1) {
+      const pool = ['window', 'groom', 'scratch'];
+      if (h >= 22 || h < 2) pool.push('zoomies', 'zoomies');
+      maybeDiary(pick(pool), 1);
+    }
+  }
+  function maybeDiary(key, prob, cls) {
+    const f = fmtSim(sim.simMs);
+    if (f.day !== sim.lastDiaryDay) { sim.lastDiaryDay = f.day; sim.diaryDayCount = 0; }
+    if (sim.diaryDayCount >= 7 && cls !== 'imp') return;   // 每天条数克制
+    if (rnd() < prob) { diaryPush(key, cls); sim.diaryDayCount++; }
+  }
+  function fastForward(hours) {
+    const n = Math.round(hours / TICK_H);
+    for (let i = 0; i < n && !sim.dead; i++) tick();
+    render(); renderDiary();
+  }
+
+  /* ---------- 照顾 ---------- */
+  document.getElementById('feed').addEventListener('click', () => {
+    if (sim.dead) return;
+    sim.bowl = 2; sim.bond = Math.min(100, sim.bond + 1.5);
+    diaryPush('feedMe', 'me');
+    // 醒着且饿：立刻吃一份
+    if (!sim.sleeping && sim.hunger < 62) { sim.bowl--; sim.hunger = Math.min(100, sim.hunger + 62); sim.starveH = 0; diaryPush('eat'); }
+    render(); renderDiary();
+  });
+  document.getElementById('play').addEventListener('click', () => {
+    if (sim.dead || sim.sick) return;
+    if (sim.sleeping) { diaryPush('playMe', 'me'); sim.diary.push({ ...fmtSim(sim.simMs), day: fmtSim(sim.simMs).day, hm: fmtSim(sim.simMs).hm, text: '它睡着，对羽毛毫无反应。你悄悄收起了逗猫棒。', cls: '' }); }
+    else { sim.playGlow = 18; sim.bond = Math.min(100, sim.bond + 2.5); sim.energy = Math.max(0, sim.energy - 6); diaryPush('playMe', 'me'); diaryPush('play'); }
+    sim.simMs += 15 * 60 * 1000;
+    render(); renderDiary();
+  });
+  document.getElementById('med').addEventListener('click', () => {
+    if (!sim.sick || sim.dead) return;
+    sim.sick = false; sim.sickH = 0; sim.starveH = 0;
+    sim.weakUntil = sim.simMs + 6 * 3600 * 1000;
+    diaryPush('medMe', 'me'); diaryPush('cured');
+    render(); renderDiary();
+  });
+  document.getElementById('restart').addEventListener('click', () => {
+    seed = Math.floor(Math.random() * 1e9);
+    const keys = CC.BREED_KEYS;
+    breed = keys[Math.floor(Math.random() * keys.length)];
+    stopAuto(); newSim();
+  });
+  document.querySelectorAll('[data-ff]').forEach(b => b.addEventListener('click', () => fastForward(parseFloat(b.dataset.ff))));
+
+  let autoTimer = null;
+  const autoBtn = document.getElementById('autoplay');
+  function stopAuto() { if (autoTimer) { clearInterval(autoTimer); autoTimer = null; autoBtn.classList.remove('on'); autoBtn.textContent = '▶ 自动播放（1秒=30分钟）'; } }
+  autoBtn.addEventListener('click', () => {
+    if (autoTimer) return stopAuto();
+    autoBtn.classList.add('on'); autoBtn.textContent = '⏸ 暂停';
+    autoTimer = setInterval(() => { if (sim.dead) return stopAuto(); tick(); render(); renderDiary(); }, 1000);
+  });
+
+  /* ---------- 呈现 ---------- */
+  const $ = id => document.getElementById(id);
+  function render() {
+    const f = fmtSim(sim.simMs);
+    $('clock').textContent = `模拟时间：${f.day} ${f.hm}`;
+    const days = ((sim.simMs - sim.t0) / 86400000);
+    $('elapsed').textContent = `距开始已过去 ${days.toFixed(1)} 天`;
+    const bands = $('statusband');
+    if (sim.dead) { bands.className = 'statusband st-dead'; bands.textContent = '🕯 已离开 - 日记留作纪念，可重新开始'; }
+    else if (sim.sick) { bands.className = 'statusband st-sick'; bands.textContent = `🤒 生病中 ${sim.sickH.toFixed(0)}h / 48h - 喂药可治疗`; }
+    else if (sim.hunger <= 0) { bands.className = 'statusband st-hungry'; bands.textContent = `⚠ 挨饿中 ${sim.starveH.toFixed(0)}h / 24h 后生病`; }
+    else if (sim.hunger < 25) { bands.className = 'statusband st-hungry'; bands.textContent = '🍽 饿了 - 碗是空的'; }
+    else { bands.className = 'statusband st-ok'; bands.textContent = sim.sleeping ? '😴 睡着（' + (sim.bowl > 0 ? '碗里有粮' : '碗空') + '）' : '🟢 状态不错' + (sim.bowl > 0 ? ' · 碗里有粮' : ''); }
+    $('med').disabled = !sim.sick || sim.dead;
+    const set = (b, v, val) => { $(b).style.width = Math.max(0, Math.min(100, v)) + '%'; $(val).textContent = Math.round(v); };
+    set('bHunger', sim.hunger, 'vHunger'); set('bEnergy', sim.energy, 'vEnergy');
+    set('bMood', sim.mood, 'vMood'); set('bBond', sim.bond, 'vBond');
+  }
+  function renderDiary() {
+    const el = $('diary');
+    el.innerHTML = '';
+    let lastDay = '';
+    const list = sim.diary.slice(-40);
+    for (const e of list) {
+      if (e.day !== lastDay) { lastDay = e.day; const d = document.createElement('div'); d.className = 'day'; d.textContent = '- ' + e.day + ' -'; el.appendChild(d); }
+      const r = document.createElement('div');
+      r.innerHTML = `<span class="t">${e.hm}</span><span class="${e.cls || ''}">${e.text}</span>`;
+      el.appendChild(r);
+    }
+    el.scrollTop = el.scrollHeight;
+  }
+
+  /* ---------- 肖像动画 ---------- */
+  let micro = CC.makeMicro(1), pt = 0, last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now; pt += dt;
+    const mi = CC.stepMicro(micro, dt, { tilt: !sim.sleeping && !sim.dead });
+    let pose;
+    if (sim.dead) {
+      // 安静的告别：墓碑
+      const c = catview.getContext('2d');
+      c.clearRect(0, 0, CC.W, CC.H);
+      c.fillStyle = '#3a3a4a'; c.fillRect(30, 26, 14, 22); c.fillRect(28, 30, 18, 18);
+      c.fillStyle = '#4a4a5e'; c.fillRect(31, 27, 5, 3);
+      c.fillStyle = '#8a86a8'; c.fillRect(35, 33, 4, 1); c.fillRect(36, 31, 2, 5);
+      c.fillStyle = '#151126'; c.fillRect(24, 48, 26, 2);
+      c.fillStyle = '#58d68d'; c.fillRect(26, 47, 2, 1); c.fillRect(47, 47, 1, 1);
+      requestAnimationFrame(frame); return;
+    }
+    if (sim.sick) { pose = CC.ACTIONS.lie.make(pt * 0.5, cat, mi, {}); pose.eyeOpen = 0.25; pose.tailWave = 0; }
+    else if (sim.sleeping) pose = CC.ACTIONS.sleep.make(pt, cat, mi);
+    else if (sim.hunger < 25) { pose = CC.ACTIONS.sit.make(pt, cat, mi); pose.headDY = 1.5; pose.eyeOpen = Math.min(mi.eyeOpen, 0.7); }
+    else if (sim.mood > 70) { pose = CC.ACTIONS.sit.make(pt, cat, mi); pose.tailWave = 1.2; }
+    else pose = CC.ACTIONS.sit.make(pt, cat, mi);
+    renderer.draw(cat, pose);
+    requestAnimationFrame(frame);
+  }
+
+  newSim();
+  requestAnimationFrame(frame);
+
+  /* ---------- lavish 决策表单 ---------- */
+  function wire(formId, build) {
+    const form = document.getElementById(formId);
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const msg = build(new FormData(form));
+      if (!msg) return;
+      if (window.lavish) window.lavish.queuePrompt(msg.prompt, { tag: 'choice', text: msg.text, element: form, queueKey: form.dataset.lavishQuestion, data: msg.data });
+      form.querySelector('.queued-note').style.display = 'inline';
+    });
+  }
+  wire('qPace', fd => { const v = fd.get('v'); if (!v) return null; return { prompt: `Prototype④ 饥饿节奏抉择：${v}`, text: 'Q1 节奏：' + v.split('-')[0], data: { q: 'pace', a: v } }; });
+  wire('qDeath', fd => { const v = fd.get('v'); if (!v) return null; return { prompt: `Prototype④ 死亡链抉择：${v}`, text: 'Q2 死亡链：' + v.split('-')[0], data: { q: 'death-chain', a: v } }; });
+  wire('qDiary', fd => { const v = fd.get('v'); if (!v) return null; return { prompt: `Prototype④ 日记味道抉择：${v}`, text: 'Q3 日记：' + v.split('-')[0], data: { q: 'diary-tone', a: v } }; });
+  wire('qFree', fd => { const v = (fd.get('free') || '').trim(); if (!v) return null; return { prompt: `Prototype④ 自由反馈：${v}`, text: 'Q4 自由反馈', data: { q: 'free', a: v } }; });
+})();
+</script>
+</body>
+</html>

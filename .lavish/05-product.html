@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CYBER-CAT</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  body {
+    background: #07091a; color: #d8dcf0;
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background-image:
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(77,238,234,.06), transparent),
+      radial-gradient(ellipse 50% 40% at 85% 110%, rgba(246,82,160,.05), transparent);
+  }
+  .app { width: min(1020px, 96vw); padding: 14px 0 30px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .brand .logo { font-family: ui-monospace, monospace; font-weight: 700; font-size: 18px; letter-spacing: 3px; color: #f652a0; text-shadow: 0 0 12px rgba(246,82,160,.5); }
+  .brand .slogan { font-size: 11px; color: #5b6488; letter-spacing: 1px; }
+
+  .frame { position: relative; background: #10142a; border: 1px solid #2c3a68; border-radius: 12px; overflow: hidden; }
+  #scene { width: 100%; image-rendering: pixelated; display: block; }
+  #scene.laser { cursor: none; }
+
+  /* 顶部 HUD */
+  .hud-top { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: space-between; pointer-events: none; }
+  .hud-chip { pointer-events: auto; background: rgba(11,14,26,.78); border: 1px solid #2c3a68; border-radius: 8px; padding: 6px 12px; font-size: 13px; backdrop-filter: blur(2px); }
+  .hud-chip b { color: #ffd94a; }
+  .hud-chip .sub { font-size: 11px; color: #7a83a8; margin-top: 1px; }
+  #stChip { cursor: pointer; }
+  #stChip:hover { border-color: #4deeea88; }
+
+  /* 底部操作栏 */
+  .hud-bottom { position: absolute; left: 0; right: 0; bottom: 10px; display: flex; justify-content: center; gap: 10px; pointer-events: none; }
+  .act {
+    pointer-events: auto; cursor: pointer; font-family: inherit; font-size: 13.5px;
+    background: rgba(18,23,43,.9); color: #d8dcf0; border: 1px solid #2c3a68;
+    border-radius: 9px; padding: 9px 16px; backdrop-filter: blur(2px);
+  }
+  .act:hover { border-color: #4deeea; color: #4deeea; }
+  .act.on { border-color: #f652a0; color: #f652a0; }
+  .act.danger { border-color: #6b2a22; color: #ff7b6b; }
+  .act[hidden] { display: none; }
+
+  /* 状态面板 */
+  .panel {
+    position: absolute; right: 12px; top: 52px; width: 240px;
+    background: rgba(11,14,26,.94); border: 1px solid #2c3a68; border-radius: 10px; padding: 14px;
+    display: none;
+  }
+  .panel.show { display: block; }
+  .panel h4 { font-size: 13px; color: #4deeea; margin-bottom: 8px; }
+  .bar { margin-bottom: 8px; }
+  .bar .lbl { display: flex; justify-content: space-between; font-size: 11.5px; color: #aab3d8; margin-bottom: 3px; }
+  .bar .track { height: 7px; background: #07091a; border-radius: 4px; overflow: hidden; border: 1px solid #232c52; }
+  .bar .fill { height: 100%; }
+  .f-hunger { background: linear-gradient(90deg,#e07b39,#ffc94d); }
+  .f-energy { background: linear-gradient(90deg,#3b7fd4,#7cc4ff); }
+  .f-mood { background: linear-gradient(90deg,#a058c9,#f652a0); }
+  .f-bond { background: linear-gradient(90deg,#1e8a5a,#58d68d); }
+  .traits { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+  .trait { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: #1c2445; color: #9fb0e8; border: 1px solid #2c3a68; }
+  .panel .meta { font-size: 10.5px; color: #5b6488; margin-top: 8px; font-family: ui-monospace, monospace; }
+
+  /* 全屏遮罩流程（领养/告别/回归卡/日记） */
+  .overlay {
+    position: absolute; inset: 0; background: rgba(7,9,26,.9); backdrop-filter: blur(3px);
+    display: none; align-items: center; justify-content: center; z-index: 10;
+  }
+  .overlay.show { display: flex; }
+  .card {
+    width: min(480px, 92%); background: #10142a; border: 1px solid #2c3a68; border-radius: 14px;
+    padding: 26px; text-align: center; max-height: 88%; overflow-y: auto;
+  }
+  .card h2 { font-size: 18px; color: #e8ecff; margin-bottom: 6px; letter-spacing: 1px; }
+  .card .sub { font-size: 12.5px; color: #7a83a8; line-height: 1.8; }
+  .card canvas { image-rendering: pixelated; width: 216px; max-width: 80%; margin: 14px auto; display: block;
+    background: linear-gradient(180deg,#171d36,#1a2140 78%,#202a52 78%,#1c2445); border-radius: 8px; }
+  .card .btnrow { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+  .btn { cursor: pointer; font-family: inherit; font-size: 14px; border-radius: 8px; padding: 10px 22px; border: 1px solid #2c3a68; background: #1c2445; color: #d8dcf0; }
+  .btn:hover { border-color: #4deeea; color: #4deeea; }
+  .btn.primary { background: #f652a0; border-color: #f652a0; color: #fff; }
+  .btn.primary:hover { filter: brightness(1.12); color: #fff; }
+  .nameinput {
+    margin-top: 14px; width: 70%; background: #07091a; border: 1px solid #2c3a68; color: #ffd94a;
+    font-family: inherit; font-size: 16px; text-align: center; padding: 10px; border-radius: 8px;
+  }
+  .traits.center { justify-content: center; }
+
+  /* 日记 */
+  .diarylist { text-align: left; max-height: 46vh; overflow-y: auto; margin-top: 10px; font-size: 12.5px; line-height: 1.85; color: #9fb0e8; }
+  .diarylist .day { color: #4deeea; font-weight: 600; margin-top: 8px; font-size: 12px; }
+  .diarylist .t { color: #5b6488; font-family: ui-monospace, monospace; margin-right: 6px; }
+  .diarylist .imp { color: #ff7b6b; }
+  .diarylist .me { color: #ffd94a; }
+
+  /* 时间机器（开发抽屉） */
+  .devtab {
+    position: absolute; right: 12px; bottom: 56px; z-index: 5;
+    background: rgba(11,14,26,.7); border: 1px dashed #3a4470; color: #5b6488;
+    font-size: 11px; padding: 5px 10px; border-radius: 7px; cursor: pointer;
+  }
+  .devtab:hover { color: #9fb0e8; }
+  .devbox {
+    position: absolute; right: 12px; bottom: 92px; z-index: 6; display: none;
+    background: rgba(11,14,26,.95); border: 1px solid #2c3a68; border-radius: 10px; padding: 12px; width: 230px;
+  }
+  .devbox.show { display: block; }
+  .devbox h5 { font-size: 11px; color: #5b6488; margin-bottom: 8px; }
+  .devbox .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .devbox button { cursor: pointer; font-family: inherit; font-size: 11.5px; background: #1c2445; color: #aab3d8; border: 1px solid #2c3a68; border-radius: 5px; padding: 5px 9px; }
+  .devbox button:hover { border-color: #4deeea; }
+
+  .toast {
+    position: absolute; left: 50%; transform: translateX(-50%); bottom: 62px; z-index: 4;
+    background: rgba(11,14,26,.92); border: 1px solid #2c3a68; color: #cfd6f5;
+    padding: 8px 16px; border-radius: 9px; font-size: 12.5px; opacity: 0; transition: opacity .3s;
+    pointer-events: none; max-width: 80%;
+  }
+  .toast.show { opacity: 1; }
+  .toast .me { color: #ffd94a; }
+  .footnote { margin-top: 10px; font-size: 11px; color: #3f4763; text-align: center; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="brand"><span class="logo">CYBER-CAT</span><span class="slogan">赛博城市里，有一只真实的猫在等你回家 · MVP 产品原型</span></div>
+  <div class="frame">
+    <canvas id="scene"></canvas>
+
+    <div class="hud-top">
+      <div class="hud-chip" id="stChip">
+        <span id="hudName"><b>-</b></span> <span id="hudStatus">🟢</span>
+        <div class="sub" id="hudSub">第 1 天 · 点开看状态</div>
+      </div>
+      <div class="hud-chip"><span id="hudClock">--:--</span><div class="sub" id="hudDate"></div></div>
+    </div>
+
+    <div class="panel" id="panel">
+      <h4 id="pName">状态</h4>
+      <div class="bar"><div class="lbl"><span>饱食度</span><span id="vHunger"></span></div><div class="track"><div class="fill f-hunger" id="bHunger"></div></div></div>
+      <div class="bar"><div class="lbl"><span>精力</span><span id="vEnergy"></span></div><div class="track"><div class="fill f-energy" id="bEnergy"></div></div></div>
+      <div class="bar"><div class="lbl"><span>心情</span><span id="vMood"></span></div><div class="track"><div class="fill f-mood" id="bMood"></div></div></div>
+      <div class="bar"><div class="lbl"><span>亲密度</span><span id="vBond"></span></div><div class="track"><div class="fill f-bond" id="bBond"></div></div></div>
+      <div class="traits" id="pTraits"></div>
+      <div class="meta" id="pMeta"></div>
+    </div>
+
+    <div class="hud-bottom">
+      <button class="act" id="feedBtn">🥣 喂食</button>
+      <button class="act" id="laserBtn">🔴 逗猫棒</button>
+      <button class="act danger" id="medBtn" hidden>💊 喂药</button>
+      <button class="act" id="diaryBtn">📔 日记</button>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <div class="devtab" id="devtab">🛠 时间机器</div>
+    <div class="devbox" id="devbox">
+      <h5>模拟「离开又回来」（离线推演演示）</h5>
+      <div class="btns">
+        <button data-ff="6">离开 6 小时</button>
+        <button data-ff="24">离开 1 天</button>
+        <button data-ff="72">离开 3 天</button>
+        <button id="wipe">清空存档重来</button>
+      </div>
+    </div>
+
+    <!-- 领养流程 -->
+    <div class="overlay" id="ovAdopt">
+      <div class="card">
+        <h2 id="adoptTitle">今晚的雨里，有一只猫走向了你</h2>
+        <div class="sub" id="adoptSub">赛博城市每天有一万只流浪猫经过你的窗台，只有一只会停下。</div>
+        <canvas id="adoptView"></canvas>
+        <div class="traits center" id="adoptTraits"></div>
+        <div class="sub" id="adoptBreed"></div>
+        <input class="nameinput" id="nameInput" maxlength="10" placeholder="给它起个名字…" style="display:none">
+        <div class="btnrow" id="adoptBtns">
+          <button class="btn primary" id="rollBtn">遇见它</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 回归日记卡 -->
+    <div class="overlay" id="ovReturn">
+      <div class="card">
+        <h2 id="retTitle">你回来了</h2>
+        <div class="sub" id="retSub"></div>
+        <div class="diarylist" id="retDiary"></div>
+        <div class="btnrow"><button class="btn primary" id="retClose">去看看它</button></div>
+      </div>
+    </div>
+
+    <!-- 日记 -->
+    <div class="overlay" id="ovDiary">
+      <div class="card">
+        <h2>📔 <span id="diaryTitle">日记</span></h2>
+        <div class="diarylist" id="diaryList"></div>
+        <div class="btnrow"><button class="btn" id="diaryClose">合上</button></div>
+      </div>
+    </div>
+
+    <!-- 告别 -->
+    <div class="overlay" id="ovFarewell">
+      <div class="card">
+        <h2 id="fwTitle">再见了</h2>
+        <canvas id="fwView"></canvas>
+        <div class="sub" id="fwText"></div>
+        <div class="btnrow">
+          <button class="btn" id="fwDiary">翻看它的日记</button>
+          <button class="btn primary" id="fwAdopt">送别，然后迎接新的相遇</button>
+        </div>
+        <div class="sub" id="fwArchive" style="margin-top:14px"></div>
+      </div>
+    </div>
+  </div>
+  <div class="footnote">
+    真实产品形态 · 时间与现实 1:1 流逝 · 存档在浏览器本地（关掉页面猫也在生活，回来会补给你一份日记）<br>
+    右下「时间机器」仅为原型演示离线推演用，正式版不存在 · 可框选任何位置批注反馈
+  </div>
+</div>
+
+<script src="cat-core.js"></script>
+<script>
+(() => {
+  'use strict';
+  const CC = CatCore;
+  const SAVE_KEY = 'cyber-cat-v1';
+  const TICK_H = 0.5;
+  const SW = 216, SH = 120, FLOOR = 86, SILLG = 64;
+  const WIN = { x: 24, y: 10, w: 84, h: 50 };
+  const BED_X = 166, BOWL_X = 122, SCR_X = 205;
+
+  const scene = document.getElementById('scene');
+  scene.width = SW; scene.height = SH;
+  const ctx = scene.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  const catCanvas = document.createElement('canvas');
+  const renderer = CC.createRenderer(catCanvas);
+
+  const $ = id => document.getElementById(id);
+
+  /* ================= 存档 ================= */
+  let save = null;
+  // lavish 的沙箱 iframe 里 localStorage 可能不可用：全部安全降级为仅内存
+  function loadSave() { try { save = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { save = null; } }
+  function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* 内存模式 */ } }
+  function wipeStore() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+  const vnow = () => Date.now() + (save && save.timeOffset || 0);
+
+  let cat = null, micro = null, rnd = Math.random;
+
+  /* ================= 模拟器（与沙盘同一套规则） ================= */
+  function newSim(nowMs) {
+    return {
+      bornAt: nowMs, lastTick: nowMs,
+      hunger: 80, energy: 70, mood: 65, bond: 10,
+      sleeping: false, starveH: 0, sick: false, sickH: 0, dead: false, deadAt: 0,
+      bowl: 0, playGlow: 0, lastDiaryDay: '', diaryDayCount: 0,
+      diary: [], pets: 0, feeds: 0,
+    };
+  }
+  const T = {
+    start: ['{n}搬进了赛博公寓。它闻了闻每个角落，最后在窗边坐下了。'],
+    wake: ['睡醒了，先伸了个大大的懒腰。', '被窗外的雨声吵醒，眯着眼看了一会儿霓虹。', '醒了，坐在原地发了会儿呆。'],
+    sleepN: ['蜷进猫窝，尾巴盖住了鼻子。', '窗外霓虹还亮着，它已经睡熟了。'],
+    nap: ['爬上窗台睡了个下午觉，玻璃上全是雨。', '趴在沙发上，睡着了。'],
+    eat: ['吃光了碗里的猫粮，心满意足。', '埋头吃饭，耳朵还警惕地转来转去。'],
+    eatGreedy: ['听到倒粮的声音就冲了过来，差点滑倒。'],
+    window: ['跳上窗台，盯着雨里的悬浮车流看了很久。', '在窗台上看霓虹招牌一闪一闪，尾巴也跟着一晃一晃。'],
+    groom: ['认认真真舔了半小时毛，尾巴尖都没放过。'],
+    zoomies: ['深夜跑酷！从沙发冲上窗台又跳下来，谁也不知道为什么。'],
+    scratch: ['扒了扒悬浮猫抓柱，柱子晃晃悠悠。'],
+    sofa: ['在沙发上踩了半天奶，才心满意足地卧下。'],
+    play: ['和你玩了逗猫棒，扑到红点好几次，很得意。'],
+    hungry1: ['碗空了。它在食盆边坐了一会儿，又走开了。'],
+    hungry2: ['很饿。它对着门口叫了几声 - 你不在。'],
+    sickStart: ['开始发蔫，趴在角落不想动。它生病了。'],
+    sickOn: ['还是蔫蔫的，水也只喝了两口。'],
+    cured: ['吃了药，睡了一大觉，精神好多了！病好了。'],
+    dead: ['{n}安静地走了。它在这个赛博城市里陪了你 {days} 天。'],
+    feedMe: ['你添了猫粮。'], petMe: ['你摸了摸{n}。'], playMe: ['你陪{n}玩了逗猫棒。'], medMe: ['你喂了药，摸了摸它的头。'],
+  };
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  function fmtSim(ms) { const d = new Date(ms); return { day: `${d.getMonth()+1}月${d.getDate()}日`, hm: `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`, h: d.getHours() }; }
+  function diaryPush(sim, ms, key, cls, extra) {
+    const f = fmtSim(ms);
+    let text = pick(T[key] || ['……']).replaceAll('{n}', save.cat.name || '小猫');
+    if (extra != null) text = text.replace('{days}', extra);
+    sim.diary.push({ ts: ms, day: f.day, hm: f.hm, text, cls: cls || '' });
+    if (sim.diary.length > 600) sim.diary.shift();
+  }
+  function maybeDiary(sim, ms, key, prob, cls) {
+    const f = fmtSim(ms);
+    if (f.day !== sim.lastDiaryDay) { sim.lastDiaryDay = f.day; sim.diaryDayCount = 0; }
+    if (sim.diaryDayCount >= 7 && cls !== 'imp') return;
+    if (rnd() < prob) { diaryPush(sim, ms, key, cls); sim.diaryDayCount++; }
+  }
+  function tick(sim) {
+    if (sim.dead) return;
+    sim.lastTick += TICK_H * 3600e3;
+    const ms = sim.lastTick, h = fmtSim(ms).h, p = cat.personality;
+    let sleepP = 0.06;
+    if (h >= 0 && h < 6) sleepP = 0.85;
+    else if (h >= 12 && h < 16) sleepP = 0.4 + (1 - p.active) * 0.35;
+    else if (h >= 22) sleepP = 0.5;
+    if (sim.sick) sleepP += 0.3;
+    if (!sim.sleeping && sim.energy < 20) sim.sleeping = true;
+    else if (!sim.sleeping && rnd() < sleepP && sim.energy < 85) { sim.sleeping = true; if (h >= 22 || h < 6) maybeDiary(sim, ms, 'sleepN', 0.5); else maybeDiary(sim, ms, 'nap', 0.35); }
+    else if (sim.sleeping && (sim.energy > 92 || (rnd() < 0.25 && sim.energy > 55 && sleepP < 0.3))) { sim.sleeping = false; maybeDiary(sim, ms, 'wake', 0.55); }
+
+    sim.energy = sim.sleeping ? Math.min(100, sim.energy + 7) : Math.max(0, sim.energy - 3.1);
+    sim.hunger = Math.max(0, sim.hunger - 3.2);
+    if (!sim.sleeping && sim.bowl > 0 && sim.hunger < 62) {
+      sim.bowl--; sim.hunger = Math.min(100, sim.hunger + 62); sim.starveH = 0;
+      diaryPush(sim, ms, p.greedy > 0.7 && rnd() < 0.4 ? 'eatGreedy' : 'eat');
+    }
+    const target = 55 + sim.bond / 10 - (sim.hunger < 15 ? 25 : 0) - (sim.sick ? 30 : 0) + sim.playGlow;
+    sim.mood = Math.max(0, Math.min(100, sim.mood + (target - sim.mood) * 0.12));
+    sim.playGlow = Math.max(0, sim.playGlow - 1.5);
+    sim.bond = Math.max(0, sim.bond - 0.04);
+
+    if (sim.hunger <= 0) {
+      sim.starveH += TICK_H;
+      if (sim.starveH === 6) diaryPush(sim, ms, 'hungry1', 'imp');
+      if (sim.starveH === 14) diaryPush(sim, ms, 'hungry2', 'imp');
+      if (!sim.sick && sim.starveH >= 24) { sim.sick = true; sim.sickH = 0; diaryPush(sim, ms, 'sickStart', 'imp'); }
+    } else if (!sim.sick) sim.starveH = 0;
+    if (sim.sick) {
+      sim.sickH += TICK_H;
+      if (Math.abs(sim.sickH % 12) < TICK_H) maybeDiary(sim, ms, 'sickOn', 0.7, 'imp');
+      if (sim.sickH >= 48) {
+        sim.dead = true; sim.deadAt = ms;
+        diaryPush(sim, ms, 'dead', 'imp', Math.max(1, Math.round((ms - sim.bornAt) / 86400e3)));
+        return;
+      }
+    }
+    if (!sim.sleeping && !sim.sick && rnd() < 0.1) {
+      const pool = ['window', 'groom', 'scratch', 'sofa'];
+      if (h >= 22 || h < 2) pool.push('zoomies', 'zoomies');
+      maybeDiary(sim, ms, pick(pool), 1);
+    }
+  }
+  function catchUp(sim, toMs) {
+    let n = 0;
+    while (sim.lastTick + TICK_H * 3600e3 <= toMs && !sim.dead && n < 20000) { tick(sim); n++; }
+    return n;
+  }
+
+  /* ================= 场景 FSM（表演层） ================= */
+  const S = {
+    name: 'sit', t: 0, until: 4, x: 96, dir: 1, targetX: null, after: null,
+    level: 'floor', gy: FLOOR, jumpFrom: FLOOR, jumpTo: FLOOR,
+    laser: false, lx: 0, ly: 0,
+    pounce: -1, lastCatch: -99, catchX: -99, catchY: -99, catches: 0,
+    pet: 0, petGrumpy: false, hearts: 0, heartX: 0, heartY: 0,
+  };
+  const P = () => cat.personality;
+  const rr = (a, b) => a + Math.random() * (b - a);
+
+  function decide() {
+    const sim = save.sim;
+    if (sim.dead) return;
+    if (S.level === 'sill') {
+      // 在窗台上时：饿了/有邀约才下来，否则继续赖着
+      if ((sim.bowl > 0 && sim.hunger < 62) || S.laser) return go('jumpDown');
+      if (Math.random() < 0.35) return go('jumpDown');
+      S.name = 'sillRest'; S.t = 0; S.until = rr(8, 20); return;
+    }
+    if (sim.bowl > 0 && sim.hunger < 62) return go('toBowl');
+    if (S.laser && Math.random() < 0.25 + P().active * 0.6) { toast('它压低了身子，锁定红点。'); return go('chase'); }
+    if (sim.sick) { S.name = 'sickLie'; S.t = 0; S.until = rr(10, 20); return; }
+    if (sim.sleeping) return go('toBed');
+    const lazy = 1 - P().active;
+    const w = [['sit', 2], ['lie', 1 + lazy * 2], ['wander', 1 + P().active * 2.2], ['toSill', 1.8], ['groom', 0.8], ['toSofa', 1.1]];
+    let sum = w.reduce((s, x) => s + x[1], 0), r = Math.random() * sum;
+    for (const [n, wt] of w) { r -= wt; if (r <= 0) return go(n); }
+    go('sit');
+  }
+  function go(n) {
+    S.t = 0;
+    switch (n) {
+      case 'sit': S.name = 'sit'; S.until = rr(3, 8); break;
+      case 'lie': S.name = 'lie'; S.until = rr(6, 14); break;
+      case 'groom': S.name = 'groom'; S.until = rr(3, 6); break;
+      case 'wander': S.name = 'walk'; S.targetX = rr(6, 150); S.until = 99; break;
+      case 'toSofa': S.name = 'walk'; S.targetX = 12 - 18; S.targetX = -6; S.after = 'sofaLie'; S.until = 99; break;
+      case 'sofaLie': S.name = 'sofaLie'; S.until = rr(10, 24); break;
+      case 'toSill': S.name = 'walk'; S.targetX = WIN.x + rr(4, WIN.w - 66); S.after = 'jumpUp'; S.until = 99; break;
+      case 'jumpUp': S.name = 'jumpUp'; S.jumpFrom = FLOOR; S.jumpTo = SILLG; S.until = 0.55; break;
+      case 'jumpDown': S.name = 'jumpDown'; S.jumpFrom = SILLG; S.jumpTo = FLOOR; S.until = 0.5; break;
+      case 'sillRest': S.name = 'sillRest'; S.until = rr(10, 26); break;
+      case 'toBed': S.name = 'walk'; S.targetX = BED_X - 36; S.after = 'sleep'; S.until = 99; break;
+      case 'sleep': S.name = 'sleep'; S.until = rr(20, 50); break;
+      case 'toBowl': S.name = 'walk'; S.targetX = BOWL_X - 52; S.after = 'eat'; S.until = 99; break;
+      case 'eat': S.name = 'eat'; S.until = rr(5, 8); break;
+      case 'chase': S.name = 'chase'; S.until = 99; break;
+    }
+  }
+  function arrive() { const nx = S.after; S.after = null; nx ? go(nx) : decide(); }
+
+  /* ================= HUD 交互 ================= */
+  function toast(msg, me) {
+    const el = $('toast');
+    el.innerHTML = me ? `<span class="me">${msg}</span>` : msg;
+    el.classList.add('show');
+    clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2600);
+  }
+
+  $('feedBtn').addEventListener('click', () => {
+    const sim = save.sim; if (sim.dead) return;
+    sim.bowl = 2; sim.feeds++; sim.bond = Math.min(100, sim.bond + 1.5);
+    diaryPush(sim, vnow(), 'feedMe', 'me'); persist();
+    toast('你往食盆倒了猫粮。', true);
+    const p = P();
+    if (S.name === 'sleep' || sim.sleeping) {
+      if (p.greedy > 0.6 && sim.hunger < 62) { toast(`${save.cat.name}猛地睁开眼 - 贪吃鬼从不睡过饭点。`); sim.sleeping = false; go('toBowl'); }
+      else toast(`${save.cat.name}的耳朵动了一下，它决定睡完这觉再说。`);
+    } else if (sim.hunger < 62) {
+      toast(p.greedy > 0.6 ? `${save.cat.name}耳朵一立，小跑过来了。` : `${save.cat.name}瞄了一眼食盆，慢悠悠起身。`);
+      setTimeout(() => { if (save.sim.bowl > 0 && S.name !== 'eat') { S.after = null; go(S.level === 'sill' ? 'jumpDown' : 'toBowl'); if (S.level === 'sill') S.after = 'toBowl'; } }, (1 - p.greedy) * 3000);
+    } else toast(`${save.cat.name}看了看碗 - 现在不饿，但它记下了。`);
+  });
+
+  const laserBtn = $('laserBtn');
+  laserBtn.addEventListener('click', () => {
+    const sim = save.sim; if (sim.dead) return;
+    S.laser = !S.laser;
+    laserBtn.classList.toggle('on', S.laser);
+    scene.classList.toggle('laser', S.laser);
+    if (S.laser) {
+      S.catches = 0;
+      if (sim.sleeping || S.name === 'sleep') toast(`${save.cat.name}睡得正香，红点暂时无效。`);
+      else if (P().active > 0.55) { toast(`${save.cat.name}瞳孔放大 - 进入狩猎状态！`); go(S.level === 'sill' ? 'jumpDown' : 'chase'); if (S.level === 'sill') S.after = 'chase'; }
+      else { toast(`红点在晃。${save.cat.name}在装没看见。`); setTimeout(() => { if (S.laser && S.name !== 'chase' && Math.random() < 0.7) { toast(`装不下去了 - ${save.cat.name}扑向红点！`); go('chase'); } }, rr(3500, 8000)); }
+    } else {
+      if (S.catches > 0 && !sim.dead) { sim.playGlow = 18; sim.bond = Math.min(100, sim.bond + 2.5); diaryPush(sim, vnow(), 'playMe', 'me'); diaryPush(sim, vnow(), 'play'); persist(); }
+      if (S.name === 'chase') decide();
+    }
+  });
+  scene.addEventListener('pointermove', e => {
+    const r = scene.getBoundingClientRect();
+    S.lx = (e.clientX - r.left) / r.width * SW;
+    S.ly = (e.clientY - r.top) / r.height * SH;
+  });
+  scene.addEventListener('click', e => {
+    const sim = save.sim; if (!sim || sim.dead || S.laser) return;
+    const r = scene.getBoundingClientRect();
+    const mx = (e.clientX - r.left) / r.width * SW;
+    const my = (e.clientY - r.top) / r.height * SH;
+    const cx = S.x + 36, cy = S.gy - 20;
+    if (Math.abs(mx - cx) < 26 && Math.abs(my - cy) < 30) {
+      S.pet = 1.8; S.heartX = cx; S.heartY = S.gy - 42; sim.pets++;
+      if (S.name === 'sleep' || sim.sleeping) { S.petGrumpy = true; toast(`你摸了摸睡着的${save.cat.name} - 它甩了甩尾巴，很不满。`, true); }
+      else { S.petGrumpy = false; S.hearts = 1.6; sim.bond = Math.min(100, sim.bond + 0.8); toast(`${save.cat.name}把头蹭进你的手心，咕噜咕噜。`, true); persist(); }
+    }
+  });
+  $('medBtn').addEventListener('click', () => {
+    const sim = save.sim;
+    if (!sim.sick || sim.dead) return;
+    sim.sick = false; sim.sickH = 0; sim.starveH = 0;
+    diaryPush(sim, vnow(), 'medMe', 'me'); diaryPush(sim, vnow(), 'cured');
+    persist(); toast(`${save.cat.name}吃了药，缩在你手边睡着了。`, true);
+  });
+  $('stChip').addEventListener('click', () => $('panel').classList.toggle('show'));
+  $('diaryBtn').addEventListener('click', () => { renderDiary($('diaryList'), save.sim.diary.slice(-60)); $('diaryTitle').textContent = `${save.cat.name}的日记`; $('ovDiary').classList.add('show'); });
+  $('diaryClose').addEventListener('click', () => $('ovDiary').classList.remove('show'));
+
+  /* ---- 时间机器 ---- */
+  $('devtab').addEventListener('click', () => $('devbox').classList.toggle('show'));
+  document.querySelectorAll('[data-ff]').forEach(b => b.addEventListener('click', () => {
+    const h = parseFloat(b.dataset.ff);
+    const leaveMs = vnow();
+    save.timeOffset = (save.timeOffset || 0) + h * 3600e3;
+    const n = catchUp(save.sim, vnow());
+    persist();
+    $('devbox').classList.remove('show');
+    showReturnCard(leaveMs);
+    if (save.sim.dead) setTimeout(showFarewell, 600);
+  }));
+  $('wipe').addEventListener('click', () => { wipeStore(); location.reload(); });
+
+  /* ================= 流程：领养 ================= */
+  const adoptView = $('adoptView');
+  const adoptRenderer = CC.createRenderer(adoptView);
+  let rollTimer = null, candidate = null, adoptMicro = CC.makeMicro(7);
+
+  function startAdopt() {
+    $('ovAdopt').classList.add('show');
+    $('adoptTitle').textContent = '今晚的雨里，有一只猫走向了你';
+    $('adoptSub').textContent = '赛博城市每天有一万只流浪猫经过你的窗台，只有一只会停下。';
+    $('adoptTraits').innerHTML = ''; $('adoptBreed').textContent = '';
+    $('nameInput').style.display = 'none';
+    $('adoptBtns').innerHTML = '<button class="btn primary" id="rollBtn">遇见它</button>';
+    candidate = CC.makeCat('orange', 1);
+    $('rollBtn').addEventListener('click', doRoll);
+  }
+  function doRoll() {
+    $('adoptBtns').innerHTML = '<span class="sub">雨声中传来脚步声……</span>';
+    let speed = 70, elapsed = 0;
+    const spin = () => {
+      const b = CC.BREED_KEYS[Math.floor(Math.random() * CC.BREED_KEYS.length)];
+      candidate = CC.makeCat(b, Math.floor(Math.random() * 1e9));
+      elapsed += speed; speed *= 1.13;
+      if (speed < 420) rollTimer = setTimeout(spin, speed);
+      else reveal();
+    };
+    spin();
+  }
+  const TRAITS = (c) => {
+    const p = c.personality, out = [];
+    out.push(p.active > 0.6 ? '活跃' : p.active < 0.35 ? '慵懒' : '平和');
+    if (p.clingy > 0.65) out.push('粘人'); else if (p.clingy < 0.3) out.push('高冷');
+    if (p.greedy > 0.65) out.push('贪吃');
+    return out;
+  };
+  function reveal() {
+    $('adoptTitle').textContent = '它停下了';
+    $('adoptSub').textContent = '它抬头看了你一眼，没有走。';
+    $('adoptBreed').textContent = `${CC.BREEDS[candidate.breed].label} · ${CC.BREEDS[candidate.breed].desc}`;
+    $('adoptTraits').innerHTML = TRAITS(candidate).map(t => `<span class="trait">${t}</span>`).join('');
+    $('nameInput').style.display = 'inline-block';
+    $('nameInput').value = '';
+    $('adoptBtns').innerHTML = '<button class="btn" id="rerollBtn">让它再等等（换一只）</button><button class="btn primary" id="keepBtn">就是它了</button>';
+    $('rerollBtn').addEventListener('click', doRoll);
+    $('keepBtn').addEventListener('click', () => {
+      const name = ($('nameInput').value || '').trim() || '雨生';
+      const nowMs = save && save.timeOffset ? vnow() : Date.now();
+      const archive = save && save.archive || [];
+      const timeOffset = save && save.timeOffset || 0;
+      save = { cat: { breed: candidate.breed, seed: candidate.seed, name }, sim: newSim(nowMs), archive, timeOffset };
+      cat = CC.makeCat(candidate.breed, candidate.seed);
+      rnd = CC.mulberry32(candidate.seed ^ 0x5f3759df);
+      micro = CC.makeMicro(candidate.seed);
+      diaryPush(save.sim, nowMs, 'start');
+      persist();
+      $('ovAdopt').classList.remove('show');
+      S.name = 'sit'; S.t = 0; S.until = 4; S.x = 96; S.level = 'floor'; S.gy = FLOOR;
+      refreshStatic();
+      toast(`${name}进了家门，正在四处打量。`);
+    });
+  }
+  // 领养预览动画
+  setInterval(() => {
+    if (!$('ovAdopt').classList.contains('show') || !candidate) return;
+    const mi = CC.stepMicro(adoptMicro, 0.09, { tilt: true });
+    adoptRenderer.draw(candidate, CC.ACTIONS.sit.make(performance.now() / 1000, candidate, mi, {}));
+  }, 90);
+
+  /* ================= 流程：回归卡 / 告别 ================= */
+  function showReturnCard(leaveMs) {
+    const sim = save.sim;
+    const hours = (vnow() - leaveMs) / 3600e3;
+    if (hours < 2) { refreshStatic(); return; }
+    const entries = sim.diary.filter(d => d.ts > leaveMs).slice(-10);
+    $('retTitle').textContent = `你离开了${hours >= 24 ? (hours/24).toFixed(1) + ' 天' : Math.round(hours) + ' 小时'}`;
+    $('retSub').textContent = sim.dead ? '有些事情，你需要知道。' : `${save.cat.name}的这段时间：`;
+    renderDiary($('retDiary'), entries);
+    $('ovReturn').classList.add('show');
+    refreshStatic();
+  }
+  $('retClose').addEventListener('click', () => { $('ovReturn').classList.remove('show'); if (save.sim.dead) showFarewell(); });
+
+  const fwRenderer = CC.createRenderer($('fwView'));
+  function showFarewell() {
+    const sim = save.sim;
+    const days = Math.max(1, Math.round((sim.deadAt - sim.bornAt) / 86400e3));
+    $('fwTitle').textContent = `再见了，${save.cat.name}`;
+    $('fwText').innerHTML = `它陪了你 <b style="color:#ffd94a">${days}</b> 天 · 你喂了它 ${sim.feeds} 次，摸了它 ${sim.pets} 次<br>它的日记停在了 ${fmtSim(sim.deadAt).day}。`;
+    const c = $('fwView').getContext('2d');
+    c.clearRect(0, 0, CC.W, CC.H);
+    c.fillStyle = '#3a3a4a'; c.fillRect(30, 26, 14, 22); c.fillRect(28, 30, 18, 18);
+    c.fillStyle = '#4a4a5e'; c.fillRect(31, 27, 5, 3);
+    c.fillStyle = '#8a86a8'; c.fillRect(35, 33, 4, 1); c.fillRect(36, 31, 2, 5);
+    c.fillStyle = '#151126'; c.fillRect(22, 48, 30, 2);
+    c.fillStyle = '#58d68d'; c.fillRect(25, 47, 2, 1); c.fillRect(48, 47, 1, 1);
+    c.fillStyle = '#4deeea'; c.fillRect(52, 20, 1, 1); c.fillStyle = '#f652a0'; c.fillRect(20, 16, 1, 1);
+    const arch = save.archive.map(a => `${a.name}（${CC.BREEDS[a.breed].label} · ${a.days}天）`).join(' · ');
+    $('fwArchive').innerHTML = arch ? `🕯 你养过的猫：${arch}` : '';
+    $('ovFarewell').classList.add('show');
+  }
+  $('fwDiary').addEventListener('click', () => { renderDiary($('diaryList'), save.sim.diary.slice(-80)); $('diaryTitle').textContent = `${save.cat.name}的一生`; $('ovDiary').classList.add('show'); });
+  $('fwAdopt').addEventListener('click', () => {
+    const sim = save.sim;
+    save.archive.push({ name: save.cat.name, breed: save.cat.breed, seed: save.cat.seed, days: Math.max(1, Math.round((sim.deadAt - sim.bornAt) / 86400e3)) });
+    persist();
+    $('ovFarewell').classList.remove('show');
+    startAdopt();
+  });
+
+  /* ================= 渲染 ================= */
+  function renderDiary(el, entries) {
+    el.innerHTML = '';
+    let lastDay = '';
+    for (const e of entries) {
+      if (e.day !== lastDay) { lastDay = e.day; const d = document.createElement('div'); d.className = 'day'; d.textContent = '- ' + e.day + ' -'; el.appendChild(d); }
+      const r = document.createElement('div');
+      r.innerHTML = `<span class="t">${e.hm}</span><span class="${e.cls}">${e.text}</span>`;
+      el.appendChild(r);
+    }
+    el.scrollTop = el.scrollHeight;
+  }
+  function refreshStatic() {
+    if (!save || !save.cat) return;
+    const sim = save.sim;
+    $('hudName').innerHTML = `<b>${save.cat.name}</b>`;
+    const day = Math.max(1, Math.ceil((vnow() - sim.bornAt) / 86400e3));
+    let st = '🟢';
+    if (sim.dead) st = '🕯'; else if (sim.sick) st = '🤒'; else if (sim.hunger <= 0) st = '🆘'; else if (sim.hunger < 25) st = '🍽'; else if (sim.sleeping) st = '😴';
+    $('hudStatus').textContent = st;
+    $('hudSub').textContent = `第 ${day} 天 · ${sim.sick ? '生病中 ' + sim.sickH.toFixed(0) + 'h/48h' : sim.hunger < 25 ? '碗空了，它饿了' : '一切都好'}`;
+    $('medBtn').hidden = !sim.sick || sim.dead;
+    $('pName').textContent = `${save.cat.name} 的状态`;
+    const set = (b, v, val) => { $(b).style.width = Math.max(0, Math.min(100, v)) + '%'; $(val).textContent = Math.round(v); };
+    set('bHunger', sim.hunger, 'vHunger'); set('bEnergy', sim.energy, 'vEnergy'); set('bMood', sim.mood, 'vMood'); set('bBond', sim.bond, 'vBond');
+    $('pTraits').innerHTML = TRAITS(cat).map(t => `<span class="trait">${t}</span>`).join('');
+    $('pMeta').textContent = `${CC.BREEDS[save.cat.breed].label} · seed ${save.cat.seed}`;
+  }
+
+  /* ---- 像素字体（霓虹招牌） ---- */
+  const FONT = { C:[7,4,4,4,7], Y:[5,5,2,2,2], B:[6,5,6,5,6], P:[7,5,7,4,4], E:[7,4,7,4,7], R:[7,5,6,5,5], A:[2,5,7,5,5], T:[7,2,2,2,2], '-':[0,0,7,0,0] };
+  function neonText(str, x, y, color, alpha) {
+    ctx.fillStyle = color.replace('$a', (alpha * 0.18).toFixed(2));
+    ctx.fillRect(x - 2, y - 2, str.length * 4 + 3, 9);
+    ctx.fillStyle = color.replace('$a', alpha.toFixed(2));
+    for (let ci = 0; ci < str.length; ci++) {
+      const rows = FONT[str[ci]] || [0,0,0,0,0];
+      for (let ry = 0; ry < 5; ry++) for (let rx = 0; rx < 3; rx++)
+        if (rows[ry] & (4 >> rx)) ctx.fillRect(x + ci * 4 + rx, y + ry, 1, 1);
+    }
+  }
+
+  const h2 = (x, y, s) => { let h = (x*374761393 + y*668265263 + s*1274126177)|0; h = Math.imul(h ^ (h>>>13), 1103515245); return (((h ^ (h>>>16))>>>0) % 1000) / 1000; };
+  function curMode() {
+    const h = new Date(vnow()).getHours();
+    if (h >= 7 && h < 16) return 'day';
+    if (h >= 16 && h < 19) return 'dusk';
+    return 'night';
+  }
+  const MODES = {
+    day:   { skyTop:'#54627f', skyBot:'#6b7793', city:'#39466b', wall:'#252e55', wallLo:'#1f2747', floor:'#20294e', floorLo:'#1a2140', rain:'#7d89ad', neon:0.2, lights:0.1 },
+    dusk:  { skyTop:'#7d4a5f', skyBot:'#4a3a6e', city:'#241f45', wall:'#241f45', wallLo:'#1d1a3a', floor:'#1e1c3f', floorLo:'#181633', rain:'#8a7a9d', neon:0.7, lights:0.6 },
+    night: { skyTop:'#0e1330', skyBot:'#181f45', city:'#090d20', wall:'#141a33', wallLo:'#10152a', floor:'#141b38', floorLo:'#0f142b', rain:'#41528c', neon:1, lights:1 },
+  };
+
+  function drawScene(t, M) {
+    ctx.fillStyle = M.wall; ctx.fillRect(0, 0, SW, FLOOR);
+    ctx.fillStyle = M.wallLo; ctx.fillRect(0, FLOOR - 22, SW, 22);
+    ctx.fillStyle = M.floor; ctx.fillRect(0, FLOOR, SW, SH - FLOOR);
+    ctx.fillStyle = M.floorLo;
+    for (let x = 0; x < SW; x += 18) ctx.fillRect(x + ((x/18)%2?4:0), FLOOR + 8, 12, 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(0, FLOOR, SW, 1);
+
+    // 地毯
+    ctx.fillStyle = '#4a2438'; ctx.fillRect(58, FLOOR + 2, 52, 8);
+    ctx.fillStyle = '#5e3049'; ctx.fillRect(60, FLOOR + 3, 48, 6);
+    ctx.fillStyle = '#4a2438'; for (let x = 64; x < 106; x += 8) ctx.fillRect(x, FLOOR + 5, 4, 1);
+
+    // 窗
+    ctx.fillStyle = '#0a0d1e'; ctx.fillRect(WIN.x - 3, WIN.y - 3, WIN.w + 6, WIN.h + 6);
+    const g = ctx.createLinearGradient(0, WIN.y, 0, WIN.y + WIN.h);
+    g.addColorStop(0, M.skyTop); g.addColorStop(1, M.skyBot);
+    ctx.fillStyle = g; ctx.fillRect(WIN.x, WIN.y, WIN.w, WIN.h);
+    ctx.fillStyle = M.city;
+    for (let i = 0; i < 9; i++) {
+      const bw = 8 + h2(i, 1, 7) * 10, bh = 10 + h2(i, 2, 7) * 22;
+      const bx = WIN.x + 2 + i * 9.2;
+      ctx.fillRect(bx, WIN.y + WIN.h - bh, bw, bh);
+      if (M.lights > 0.3) {
+        for (let wy = 0; wy < bh - 3; wy += 4) for (let wx = 1; wx < bw - 1; wx += 3) {
+          if (h2(i * 31 + wx, wy, 13) < 0.3 * M.lights * (0.7 + 0.3 * Math.sin(t * 0.3 + i + wy))) {
+            ctx.fillStyle = '#ffd94a'; ctx.fillRect(bx + wx, WIN.y + WIN.h - bh + wy + 2, 1, 1); ctx.fillStyle = M.city;
+          }
+        }
+      }
+    }
+    // 霓虹招牌（带字）
+    const blink1 = (Math.sin(t * 2.2) > -0.2 ? 1 : 0.25) * M.neon;
+    const blink2 = (Math.sin(t * 1.4 + 2) > 0 ? 1 : 0.3) * M.neon;
+    neonText('CYBER', WIN.x + 6, WIN.y + 8, 'rgba(246,82,160,$a)', Math.max(0.12, blink1));
+    neonText('CAT', WIN.x + 58, WIN.y + 24, 'rgba(77,238,234,$a)', Math.max(0.12, blink2));
+    // 雨
+    ctx.strokeStyle = M.rain; ctx.lineWidth = 1; ctx.globalAlpha = 0.7; ctx.beginPath();
+    for (let i = 0; i < 26; i++) {
+      const rx = WIN.x + ((i * 37 + t * 38 * (0.7 + h2(i,0,3) * 0.6)) % WIN.w);
+      const ry = WIN.y + ((i * 53 + t * 90 * (0.8 + h2(i,1,3) * 0.5)) % WIN.h);
+      ctx.moveTo(rx, ry); ctx.lineTo(rx - 1, ry + 4);
+    }
+    ctx.stroke(); ctx.globalAlpha = 1;
+    // 窗框 + 加宽的可跳窗台
+    ctx.fillStyle = '#2c3a68';
+    ctx.fillRect(WIN.x - 3, WIN.y - 3, WIN.w + 6, 3); ctx.fillRect(WIN.x - 3, WIN.y + WIN.h, WIN.w + 6, 3);
+    ctx.fillRect(WIN.x - 3, WIN.y, 3, WIN.h); ctx.fillRect(WIN.x + WIN.w, WIN.y, 3, WIN.h);
+    ctx.fillRect(WIN.x + WIN.w / 2 - 1, WIN.y, 2, WIN.h);
+    ctx.fillStyle = '#37477e'; ctx.fillRect(WIN.x - 7, SILLG - 1, WIN.w + 14, 2);
+    ctx.fillStyle = '#232c52'; ctx.fillRect(WIN.x - 7, SILLG + 1, WIN.w + 14, 2);
+
+    // 暖光锥
+    ctx.fillStyle = `rgba(255,205,120,${M.neon > 0.5 ? 0.06 : 0.03})`;
+    ctx.beginPath(); ctx.moveTo(150, 0); ctx.lineTo(205, 0); ctx.lineTo(215, FLOOR); ctx.lineTo(140, FLOOR); ctx.fill();
+
+    // 沙发（左墙角）
+    ctx.fillStyle = '#274a5e'; ctx.fillRect(-4, FLOOR - 18, 34, 18);
+    ctx.fillStyle = '#33607a'; ctx.fillRect(-4, FLOOR - 18, 34, 3);
+    ctx.fillStyle = '#2d566e'; ctx.fillRect(-2, FLOOR - 13, 14, 7); ctx.fillRect(14, FLOOR - 13, 14, 7);
+    ctx.fillStyle = '#1c3a4a'; ctx.fillRect(-4, FLOOR - 4, 34, 4);
+    // 书堆
+    ctx.fillStyle = '#7a4a5e'; ctx.fillRect(188, FLOOR - 3, 12, 3);
+    ctx.fillStyle = '#4a6a8a'; ctx.fillRect(189, FLOOR - 6, 10, 3);
+    ctx.fillStyle = '#8a7a4a'; ctx.fillRect(190, FLOOR - 8, 8, 2);
+
+    // 猫窝
+    ctx.fillStyle = '#3a2f52'; ctx.fillRect(BED_X - 17, FLOOR - 5, 34, 6);
+    ctx.fillStyle = '#5e4d80'; ctx.fillRect(BED_X - 15, FLOOR - 6, 30, 2);
+    ctx.fillStyle = '#2c2440'; ctx.fillRect(BED_X - 13, FLOOR - 4, 26, 3);
+    // 食盆
+    ctx.fillStyle = '#2c3a68'; ctx.fillRect(BOWL_X - 6, FLOOR - 3, 12, 3);
+    ctx.fillStyle = '#3d4f8a'; ctx.fillRect(BOWL_X - 5, FLOOR - 4, 10, 1);
+    if (save && save.sim && save.sim.bowl > 0) { ctx.fillStyle = '#c98a4b'; ctx.fillRect(BOWL_X - 4, FLOOR - 5, 8, 2); ctx.fillStyle = '#e0a45e'; ctx.fillRect(BOWL_X - 2, FLOOR - 6, 2, 1); }
+    // 悬浮猫抓柱
+    const hover = Math.sin(t * 1.6) * 1.2;
+    ctx.fillStyle = '#4a3d66'; ctx.fillRect(SCR_X - 2, FLOOR - 26 + hover, 4, 22);
+    ctx.fillStyle = '#6b5a94'; ctx.fillRect(SCR_X - 6, FLOOR - 30 + hover, 12, 4);
+    ctx.fillStyle = `rgba(77,238,234,${0.5 + 0.3 * Math.sin(t * 3)})`; ctx.fillRect(SCR_X - 4, FLOOR - 2, 8, 1);
+  }
+
+  function drawHearts() {
+    if (S.hearts <= 0) return;
+    const k = 1.6 - S.hearts;
+    ctx.fillStyle = '#f65292';
+    [[0, 0], [6, -3], [-5, -4]].forEach(([ox, oy], i) => {
+      const y = S.heartY - k * 8 + oy - i * 2, x = S.heartX + ox + Math.sin(k * 5 + i) * 2;
+      ctx.fillRect(x, y, 2, 2); ctx.fillRect(x - 1, y - 1, 1, 1); ctx.fillRect(x + 2, y - 1, 1, 1);
+    });
+  }
+
+  /* ================= 主循环 ================= */
+  let last = performance.now(), clockAcc = 0;
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    const t = now / 1000;
+    const M = MODES[curMode()];
+    drawScene(t, M);
+
+    if (save && save.cat && !save.sim.dead) {
+      const sim = save.sim;
+      // 实时 tick（游戏内 1:1 时间）
+      if (vnow() - sim.lastTick >= TICK_H * 3600e3) { catchUp(sim, vnow()); persist(); refreshStatic(); if (sim.dead) showFarewell(); }
+
+      S.t += dt;
+      if (S.pet > 0) S.pet -= dt;
+      if (S.hearts > 0) S.hearts -= dt;
+      const mi = CC.stepMicro(micro, dt, { tilt: S.name === 'sit' || S.name === 'sillRest' });
+      let pose; const p = P();
+      switch (S.name) {
+        case 'walk': {
+          const dx = S.targetX - S.x;
+          S.dir = dx >= 0 ? 1 : -1;
+          S.x += Math.sign(dx) * Math.min(Math.abs(dx), (20 + p.active * 16) * dt);
+          pose = CC.ACTIONS.walk.make(S.t, cat, mi);
+          if (Math.abs(dx) < 1.5) arrive();
+          break;
+        }
+        case 'jumpUp': case 'jumpDown': {
+          const k = Math.min(1, S.t / S.until);
+          const arc = 4 * k * (1 - k);
+          S.gy = S.jumpFrom + (S.jumpTo - S.jumpFrom) * k - arc * 10;
+          pose = { form: 'stand', stretchX: 1.15, squashY: 0.9, airborne: 2, legOx: [3, 2, -2, -3], eyeOpen: 1 };
+          if (k >= 1) {
+            S.gy = S.jumpTo;
+            S.level = S.name === 'jumpUp' ? 'sill' : 'floor';
+            if (S.name === 'jumpUp') go('sillRest');
+            else arrive();
+          }
+          break;
+        }
+        case 'sillRest': {
+          pose = (p.active < 0.4 ? CC.ACTIONS.lie : CC.ACTIONS.sit).make(S.t, cat, mi, {});
+          pose.headDY = (pose.headDY || 0) - 1;
+          pose.pupilDX = Math.sin(S.t * 0.6) > 0 ? 1 : -1;
+          break;
+        }
+        case 'sofaLie': pose = CC.ACTIONS.lie.make(S.t, cat, mi, { tailSweep: true }); break;
+        case 'chase': {
+          if (!S.laser) { decide(); pose = CC.ACTIONS.sit.make(S.t, cat, mi); break; }
+          const dx = (S.lx - 36) - S.x;
+          if (S.pounce < 0 && Math.abs(dx) > 16) {
+            S.dir = dx >= 0 ? 1 : -1;
+            S.x += Math.sign(dx) * (30 + p.active * 26) * dt;
+            pose = CC.ACTIONS.walk.make(S.t * 1.6, cat, mi);
+          } else if (S.pounce < 0) {
+            const moved = Math.hypot(S.lx - S.catchX, S.ly - S.catchY) > 18;
+            const cd = 1.8 - p.active * 1.4;
+            if (t - S.lastCatch > cd || moved) S.pounce = 0;
+            else { pose = CC.ACTIONS.sit.make(S.t, cat, mi); pose.pupilDX = S.lx > S.x + 36 ? 1 : -1; }
+          }
+          if (S.pounce >= 0) {
+            S.pounce += dt;
+            const T2 = S.pounce;
+            if (T2 < 0.5) pose = { form: 'stand', squashY: 0.8, dy: 2, legScale: 0.6, tailAng: 1.3 + Math.sin(T2 * 16) * 0.1, tailWave: 1.2, tailPhase: t * 5, eyeOpen: 1, pupilDX: S.dir };
+            else if (T2 < 0.85) {
+              const k = (T2 - 0.5) / 0.35, arc = 4 * k * (1 - k);
+              S.x += Math.sign(S.lx - 36 - S.x) * 30 * dt;
+              pose = { form: 'stand', stretchX: 1.2, squashY: 0.85, dy: Math.round(-arc * 8) + 2, airborne: arc * 8 - 1, legScale: 0.5, legOx: [4, 3, -3, -4], eyeOpen: 1 };
+            } else if (T2 < 1.4) {
+              pose = CC.ACTIONS.sit.make(S.t, cat, mi);
+              if (T2 - dt < 0.85) { S.lastCatch = t; S.catchX = S.lx; S.catchY = S.ly; S.catches++; }
+            } else S.pounce = -1;
+            if (!pose) pose = CC.ACTIONS.sit.make(S.t, cat, mi);
+          }
+          if (!pose) pose = CC.ACTIONS.sit.make(S.t, cat, mi);
+          break;
+        }
+        case 'eat': {
+          if (S.t < 0.1 && sim.bowl > 0) { sim.bowl--; sim.hunger = Math.min(100, sim.hunger + 62); sim.starveH = 0; diaryPush(sim, vnow(), 'eat'); persist(); refreshStatic(); }
+          pose = CC.ACTIONS.eat.make(S.t, cat, mi); pose.bowl = null;
+          break;
+        }
+        case 'sickLie': pose = CC.ACTIONS.lie.make(S.t * 0.5, cat, mi, {}); pose.eyeOpen = 0.25; pose.tailWave = 0; break;
+        case 'lie': pose = CC.ACTIONS.lie.make(S.t, cat, mi, { tailSweep: true }); break;
+        case 'groom': pose = CC.ACTIONS.groom.make(S.t, cat, mi); break;
+        case 'sleep': pose = CC.ACTIONS.sleep.make(S.t, cat, mi); break;
+        default: pose = CC.ACTIONS.sit.make(S.t, cat, mi);
+      }
+      if (sim.sick && !['sickLie', 'walk', 'eat', 'jumpUp', 'jumpDown'].includes(S.name)) { S.name = 'sickLie'; }
+      if (S.pet > 0) {
+        if (S.petGrumpy) { pose.tailWave = 2.4; pose.tailPhase = t * 9; pose.earFlickL = 1; }
+        else { pose.eyeOpen = 0; pose.tilt = 0.6; }
+      }
+      pose.dir = (S.name === 'walk' || S.name === 'chase') ? S.dir : (pose.dir || S.dir);
+      if (S.t > S.until && !['walk', 'chase', 'jumpUp', 'jumpDown'].includes(S.name)) decide();
+
+      renderer.draw(cat, pose);
+      ctx.drawImage(catCanvas, Math.round(S.x), Math.round(S.gy - CC.GROUND));
+      drawHearts();
+      if (S.laser) {
+        ctx.fillStyle = 'rgba(255,60,60,0.25)'; ctx.fillRect(S.lx - 2, S.ly - 2, 5, 5);
+        ctx.fillStyle = '#ff4646'; ctx.fillRect(S.lx - 1, S.ly - 1, 2, 2);
+      }
+    }
+
+    clockAcc += dt;
+    if (clockAcc > 1) {
+      clockAcc = 0;
+      const d = new Date(vnow());
+      $('hudClock').textContent = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      $('hudDate').textContent = `${d.getMonth()+1}月${d.getDate()}日 · ${['夜晚','白天','黄昏'][['night','day','dusk'].indexOf(curMode())]}`;
+      if (save && save.cat) refreshStatic();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* ================= 启动 ================= */
+  loadSave();
+  if (save && save.cat) {
+    cat = CC.makeCat(save.cat.breed, save.cat.seed);
+    rnd = CC.mulberry32(save.cat.seed ^ 0x5f3759df);
+    micro = CC.makeMicro(save.cat.seed);
+    const leaveMs = save.sim.lastTick;
+    catchUp(save.sim, vnow());
+    persist();
+    refreshStatic();
+    if (save.sim.dead) { showReturnCard(leaveMs); }
+    else showReturnCard(leaveMs);
+  } else {
+    save = { cat: null, sim: null, archive: [], timeOffset: 0 };
+    startAdopt();
+  }
+  requestAnimationFrame(frame);
+  window.addEventListener('beforeunload', () => { if (save && save.cat) persist(); });
+})();
+</script>
+</body>
+</html>

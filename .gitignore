@@ -1,0 +1,25 @@
+# Rust / Tauri
+target/
+**/target/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+.vite/
+
+# 构建产物
+*.dmg
+*.msi
+*.exe
+*.app/
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# 本地环境
+.env
+.env.local

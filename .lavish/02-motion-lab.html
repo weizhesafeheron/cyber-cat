@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CYBER-CAT · Prototype ② 动作实验室</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  body {
+    background: #0b0e1a; color: #d8dcf0;
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(77,238,234,.07), transparent),
+      radial-gradient(ellipse 60% 40% at 10% 110%, rgba(246,82,160,.06), transparent);
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+  .tag { display:inline-block; font-size: 11px; letter-spacing: 2px; color: #4deeea; border: 1px solid #4deeea44; padding: 3px 10px; border-radius: 3px; margin-bottom: 10px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+  h1 .en { color:#f652a0; font-family: ui-monospace, monospace; }
+  .question {
+    margin: 14px 0 22px; padding: 12px 16px;
+    background: #12172b; border-left: 3px solid #f652a0; border-radius: 4px;
+    color: #aab3d8; font-size: 14px; line-height: 1.7;
+  }
+  .question b { color: #ffd94a; }
+
+  .stage-wrap { background: #10142a; border: 1px solid #2c3a68; border-radius: 10px; padding: 14px; }
+  #stage { width: 100%; image-rendering: pixelated; display: block; border-radius: 6px; }
+  .stage-info { display:flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: #7a83a8; flex-wrap: wrap; gap: 6px;}
+  .stage-info b { color: #4deeea; font-weight: 600; }
+
+  .panel { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; margin-top: 14px; }
+  @media (max-width: 820px) { .panel { grid-template-columns: 1fr; } }
+  .box { background: #12172b; border: 1px solid #232c52; border-radius: 8px; padding: 14px; }
+  .box h3 { font-size: 13px; color: #4deeea; margin-bottom: 10px; letter-spacing: 1px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .abtn {
+    cursor: pointer; font-size: 13px; padding: 7px 13px; border-radius: 5px;
+    background: #1c2445; border: 1px solid #2c3a68; color: #aab3d8; font-family: inherit;
+  }
+  .abtn:hover { border-color: #4deeea88; }
+  .abtn.on { background: #23305e; border-color: #4deeea; color: #4deeea; }
+  .bbtn.on { border-color: #f652a0; color: #f652a0; background: #2a1c33; }
+  .toggles label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #aab3d8; margin: 4px 14px 4px 0; cursor: pointer; }
+  .toggles input { accent-color: #4deeea; }
+  .slider-row { display:flex; align-items:center; gap: 10px; margin-top: 10px; font-size: 13px; color:#aab3d8; }
+  .slider-row input { flex: 1; accent-color: #f652a0; }
+  .seedrow { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+  .meta { font-size: 12px; color: #5b6488; font-family: ui-monospace, monospace; }
+
+  .decision { margin-top: 34px; background: #10142a; border: 1px solid #2c3a68; border-radius: 10px; padding: 20px; }
+  .decision h2 { font-size: 16px; color: #4deeea; margin-bottom: 6px; }
+  .hint { font-size: 12px; color: #7a83a8; line-height: 1.7; margin-bottom: 10px; }
+  .qblock { margin: 14px 0; padding: 14px 16px; background: #12172b; border-radius: 8px; border: 1px solid #232c52; }
+  .qblock .qt { font-size: 14px; font-weight: 600; color: #e8ecff; margin-bottom: 10px; display: block; }
+  .qblock label { display: inline-block; min-width: 30%; font-size: 13px; color: #aab3d8; padding: 5px 2px; cursor: pointer; }
+  .qblock label.wide { display: block; }
+  .qblock input { margin-right: 7px; accent-color: #f652a0; }
+  .qblock textarea {
+    width: 100%; min-height: 70px; background: #0b0e1a; color: #d8dcf0;
+    border: 1px solid #2c3a68; border-radius: 6px; padding: 10px; font-family: inherit; font-size: 13px;
+  }
+  .queue-btn { margin-top: 10px; cursor: pointer; font-size: 13px; font-family: inherit; background: #f652a0; color: #fff; border: none; padding: 8px 18px; border-radius: 5px; }
+  .queue-btn:hover { filter: brightness(1.1); }
+  .queued-note { display:none; margin-left: 10px; font-size: 12px; color: #4deeea; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="tag">PROTOTYPE ② / 4 · 可随意批注</span>
+  <h1><span class="en">CYBER-CAT</span> · 动作实验室</h1>
+  <div class="question">
+    本页回答一个问题：<b>程序化动画能把「猫的真实感」做到什么程度？</b><br>
+    所有动作都是参数曲线 + 少量物理（尾巴波动、呼吸缩放、落地压缩），没有逐帧手绘。
+    重点体验：①每个基础动作像不像猫；②右侧「微动作开关」逐个关掉再打开，感受眨眼/呼吸/尾巴这些小东西对「活着的感觉」的贡献；③换品种和 Seed，看性格是否影响动作（活跃的猫走得快、扑得急）。
+  </div>
+
+  <div class="stage-wrap">
+    <canvas id="stage"></canvas>
+    <div class="stage-info">
+      <span>当前动作：<b id="curAct">站立呼吸</b></span>
+      <span id="catMeta" class="meta"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="box">
+      <h3>基础动作</h3>
+      <div class="btns" id="actBtns"></div>
+      <div class="slider-row">
+        <span>动画速度</span>
+        <input type="range" id="speed" min="0.4" max="2" step="0.1" value="1">
+        <span id="speedVal">1.0×</span>
+      </div>
+    </div>
+    <div class="box">
+      <h3>微动作层（逐个开关感受贡献）</h3>
+      <div class="toggles" id="microToggles">
+        <label><input type="checkbox" data-k="breath" checked> 呼吸起伏</label>
+        <label><input type="checkbox" data-k="blink" checked> 随机眨眼</label>
+        <label><input type="checkbox" data-k="ear" checked> 耳朵抖动</label>
+        <label><input type="checkbox" data-k="tilt" checked> 偶尔歪头</label>
+        <label><input type="checkbox" data-k="tailPhys" checked> 尾巴摆动</label>
+        <label><input type="checkbox" data-k="tailSweep" checked> 尾巴扫地（趴下时）</label>
+      </div>
+      <h3 style="margin-top:14px">换一只猫</h3>
+      <div class="btns" id="breedBtns"></div>
+      <div class="seedrow">
+        <button class="abtn" id="reroll">🎲 重掷 Seed</button>
+        <span class="meta" id="seedLabel"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="decision">
+    <h2>🎯 你的抉择</h2>
+    <div class="hint">选完点「提交此答案」排入队列；看到具体哪一帧不对，直接框选舞台截图区批注。最后 Send to Agent 一次性发回。</div>
+
+    <form class="qblock" data-lavish-question="actions-rework" id="qActs">
+      <span class="qt">Q1 · 哪些动作「不像猫」，需要重做/重点调整？（多选，都行就都不勾）</span>
+      <div id="actCheckboxes"></div>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+
+    <form class="qblock" data-lavish-question="realism-verdict" id="qVerdict">
+      <span class="qt">Q2 · 「动作真实感」整体判断（核心抉择）</span>
+      <label class="wide"><input type="radio" name="v" value="达标-程序化动画路线成立，按此打磨"> <b>成立</b> - 程序化动画能撑起真实感，按这个路线打磨</label>
+      <label class="wide"><input type="radio" name="v" value="方向对但需明显打磨-在Q3里说最缺什么"> <b>方向对但差距明显</b> - 请在 Q3 说说最缺什么（惯性？过渡？帧数感？）</label>
+      <label class="wide"><input type="radio" name="v" value="不行-考虑逐帧手绘关键动作或混合"> <b>不行</b> - 关键动作得逐帧手绘，考虑混合路线</label>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+
+    <form class="qblock" data-lavish-question="motion-feedback" id="qFree">
+      <span class="qt">Q3 · 自由反馈（可留空）</span>
+      <textarea name="free" placeholder="比如：走路太滑像漂移 / 扑跳蓄力时间再长点 / 睡觉应该偶尔换姿势 / 想要动作之间的自然过渡……"></textarea>
+      <button class="queue-btn" type="submit">提交此答案</button><span class="queued-note">✓ 已排入队列</span>
+    </form>
+  </div>
+</div>
+
+<script src="cat-core.js"></script>
+<script>
+(() => {
+  'use strict';
+  const CC = CatCore;
+  const SW = 168, SH = 72;
+  const stage = document.getElementById('stage');
+  stage.width = SW; stage.height = SH;
+  const sctx = stage.getContext('2d');
+  sctx.imageSmoothingEnabled = false;
+
+  // 猫的离屏渲染器
+  const catCanvas = document.createElement('canvas');
+  const renderer = CC.createRenderer(catCanvas);
+
+  let breed = 'orange';
+  let seed = 20260728;
+  let cat = CC.makeCat(breed, seed);
+  let micro = CC.makeMicro(seed);
+  let actKey = 'idle';
+  let actT = 0;
+  let speed = 1;
+  let catX = (SW - CC.W) / 2, pageDir = 1;
+  const microOn = { breath: true, blink: true, ear: true, tilt: true, tailPhys: true, tailSweep: true };
+
+  const metaEl = document.getElementById('catMeta');
+  const seedEl = document.getElementById('seedLabel');
+  function refreshMeta() {
+    const p = cat.personality;
+    metaEl.textContent = `${CC.BREEDS[breed].label} · seed ${seed} · 活跃度 ${(p.active*100)|0}%`;
+    seedEl.textContent = 'seed ' + seed;
+  }
+  refreshMeta();
+
+  /* ---- 控件 ---- */
+  const actBtns = document.getElementById('actBtns');
+  const ACT_ORDER = ['idle','walk','sit','lie','sleep','groom','eat','yawn','stretch','pounce'];
+  ACT_ORDER.forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'abtn' + (k === actKey ? ' on' : '');
+    b.textContent = CC.ACTIONS[k].label;
+    b.dataset.k = k;
+    b.addEventListener('click', () => {
+      actKey = k; actT = 0;
+      catX = (SW - CC.W) / 2;
+      document.getElementById('curAct').textContent = CC.ACTIONS[k].label;
+      actBtns.querySelectorAll('.abtn').forEach(x => x.classList.toggle('on', x.dataset.k === k));
+    });
+    actBtns.appendChild(b);
+  });
+
+  const breedBtns = document.getElementById('breedBtns');
+  CC.BREED_KEYS.forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'abtn bbtn' + (k === breed ? ' on' : '');
+    b.textContent = CC.BREEDS[k].label;
+    b.dataset.k = k;
+    b.addEventListener('click', () => {
+      breed = k;
+      cat = CC.makeCat(breed, seed);
+      micro = CC.makeMicro(seed);
+      breedBtns.querySelectorAll('.abtn').forEach(x => x.classList.toggle('on', x.dataset.k === k));
+      refreshMeta();
+    });
+    breedBtns.appendChild(b);
+  });
+  document.getElementById('reroll').addEventListener('click', () => {
+    seed = Math.floor(Math.random() * 1e9);
+    cat = CC.makeCat(breed, seed);
+    micro = CC.makeMicro(seed);
+    refreshMeta();
+  });
+
+  document.getElementById('microToggles').addEventListener('change', (e) => {
+    const k = e.target.dataset.k;
+    if (k) microOn[k] = e.target.checked;
+  });
+  const speedInput = document.getElementById('speed');
+  speedInput.addEventListener('input', () => {
+    speed = parseFloat(speedInput.value);
+    document.getElementById('speedVal').textContent = speed.toFixed(1) + '×';
+  });
+
+  /* ---- 舞台背景 ---- */
+  function drawStage() {
+    sctx.clearRect(0, 0, SW, SH);
+    // 房间暗部
+    const g = sctx.createLinearGradient(0, 0, 0, SH);
+    g.addColorStop(0, '#151a33'); g.addColorStop(0.85, '#1a2140'); g.addColorStop(1, '#151a33');
+    sctx.fillStyle = g;
+    sctx.fillRect(0, 0, SW, SH);
+    // 远处霓虹一条（气氛暗示，场景是 prototype ③ 的事）
+    sctx.fillStyle = 'rgba(77,238,234,.16)';
+    sctx.fillRect(10, 12, 30, 1);
+    sctx.fillStyle = 'rgba(246,82,160,.18)';
+    sctx.fillRect(126, 8, 24, 1);
+    // 地板
+    const groundY = 16 + CC.GROUND;
+    sctx.fillStyle = '#232c52';
+    sctx.fillRect(0, groundY, SW, 1);
+    sctx.fillStyle = '#161c38';
+    sctx.fillRect(0, groundY + 1, SW, SH - groundY - 1);
+    sctx.fillStyle = '#1d2547';
+    for (let x = 8; x < SW; x += 24) sctx.fillRect(x, groundY + 3, 10, 1);
+  }
+
+  /* ---- 主循环 ---- */
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000) * speed;
+    last = now;
+    actT += dt;
+
+    const act = CC.ACTIONS[actKey];
+    const mi = CC.stepMicro(micro, dt, {
+      blink: microOn.blink, ear: microOn.ear,
+      tilt: microOn.tilt && (actKey === 'idle' || actKey === 'sit'),
+    });
+    const pose = act.make(actT, cat, mi, { tailSweep: microOn.tailSweep });
+    if (!microOn.breath) pose.breath = 0;
+    if (!microOn.tailPhys) { pose.tailWave = 0; }
+    if (!microOn.blink && pose.eyeOpen == null) pose.eyeOpen = 1;
+
+    // 走路：页面驱动位移与转向
+    if (actKey === 'walk') {
+      const v = (act.travel + cat.personality.active * 14) * dt;
+      catX += v * pageDir;
+      if (catX > SW - CC.W + 6) pageDir = -1;
+      if (catX < -6) pageDir = 1;
+      pose.dir = pageDir;
+    } else {
+      pose.dir = 1;
+    }
+
+    renderer.draw(cat, pose);
+    drawStage();
+    sctx.drawImage(catCanvas, Math.round(catX), 16);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ---- 决策表单 ---- */
+  const actCbs = document.getElementById('actCheckboxes');
+  ACT_ORDER.forEach(k => {
+    const label = document.createElement('label');
+    label.innerHTML = `<input type="checkbox" name="act" value="${CC.ACTIONS[k].label}"> ${CC.ACTIONS[k].label}`;
+    actCbs.appendChild(label);
+  });
+
+  function wire(formId, build) {
+    const form = document.getElementById(formId);
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const msg = build(new FormData(form));
+      if (!msg) return;
+      if (window.lavish) {
+        window.lavish.queuePrompt(msg.prompt, {
+          tag: 'choice', text: msg.text, element: form,
+          queueKey: form.dataset.lavishQuestion, data: msg.data,
+        });
+      }
+      form.querySelector('.queued-note').style.display = 'inline';
+    });
+  }
+  wire('qActs', (fd) => {
+    const vs = fd.getAll('act');
+    const txt = vs.length ? vs.join('、') : '（无 - 全部动作可接受）';
+    return { prompt: `Prototype② 需要重做/重点调整的动作：${txt}`, text: 'Q1 需调动作：' + (vs.length ? vs.join('/') : '无'), data: { q: 'actions-rework', a: vs } };
+  });
+  wire('qVerdict', (fd) => {
+    const v = fd.get('v');
+    if (!v) return null;
+    return { prompt: `Prototype② 动作真实感整体判断：${v}`, text: 'Q2 真实感：' + v.split('-')[0], data: { q: 'realism-verdict', a: v } };
+  });
+  wire('qFree', (fd) => {
+    const v = (fd.get('free') || '').trim();
+    if (!v) return null;
+    return { prompt: `Prototype② 动作自由反馈：${v}`, text: 'Q3 自由反馈', data: { q: 'free', a: v } };
+  });
+})();
+</script>
+</body>
+</html>
