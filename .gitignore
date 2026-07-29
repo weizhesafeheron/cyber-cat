@@ -30,3 +30,10 @@ spike/**/diag
 spike/**/diag2
 spike/**/diag3
 spike/**/*.dSYM/
+
+# Tauri 构建产物
+src-tauri/target/
+src-tauri/gen/
+
+spike/**/dump
+spike/**/verify

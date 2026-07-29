@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CYBER-CAT</title>
+    <style>
+      /* 整页必须完全透明 - 任何背景色都会在桌面上变成一块可见的矩形 */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+      }
+      /* 猫贴在底边居中：猫的脚在精灵的下沿，贴底才能站在"地面"上 */
+      #stage {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+      }
+      #cat {
+        display: block;
+        image-rendering: pixelated;
+        /* 禁止选中与拖拽默认行为，ticket 09 会接管拖拽 */
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"><canvas id="cat"></canvas></div>
+    <script type="module" src="/src/app/main.ts"></script>
+  </body>
+</html>

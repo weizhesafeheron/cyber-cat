@@ -1,12 +1,22 @@
 import { defineConfig } from 'vite';
 
 /**
- * 开发用的验证页配置。
+ * 前端构建配置。
  *
- * root 指向 dev/ - 那里只有渲染核心的人工验证页，不是产品入口。
- * 产品入口会在 Tauri 骨架（ticket 03）落地时另行建立。
+ * 根目录的 index.html 是宠物窗口的入口（Tauri 加载它）。
+ * dev/index.html 是渲染核心的人工验证页，开发时访问 /dev/ 即可，不进产物。
  */
 export default defineConfig({
-  root: 'dev',
-  server: { port: 5273, open: false },
+  // Tauri 期望固定端口，且失败要报错而不是静默换端口
+  server: {
+    port: 5273,
+    strictPort: true,
+  },
+  // Tauri 在自己的窗口里加载页面，不需要浏览器自动打开
+  clearScreen: false,
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    target: 'es2022',
+  },
 });

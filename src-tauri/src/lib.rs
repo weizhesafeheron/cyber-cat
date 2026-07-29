@@ -1,0 +1,65 @@
+//! CYBER-CAT 桌面宠物。
+//!
+//! 这一层只负责窗口、托盘与平台适配。猫的状态与外观分别由世界层与渲染层
+//! （TypeScript 侧）负责，两者都是平台无关的纯逻辑。
+
+mod platform;
+
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{Manager, WebviewWindow};
+
+/// 前端渲染出第一帧后调用，此时才显示窗口。
+///
+/// **这是防止启动白闪的唯一手段，不是可选的优化。**
+/// Tauri 2.11.5 既没有 `noRedirectionBitmap` 配置项也没有对应的构建器方法
+/// （底层 tao 有 `with_no_redirection_bitmap`，但 tauri-runtime-wry 没有透传）。
+/// 所以只能靠「窗口以 visible: false 启动、内容就绪后才 show」这条框架无关的路子 -
+/// 窗口在有内容之前根本不存在，也就无从闪烁。
+///
+/// 如果哪天改掉这个流程，Windows 上的启动白闪会立刻回来。
+#[tauri::command]
+fn pet_ready(window: WebviewWindow) {
+    if let Err(e) = window.show() {
+        eprintln!("[cyber-cat] 显示宠物窗口失败：{e}");
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![pet_ready])
+        .setup(|app| {
+            platform::configure_app(app);
+
+            match app.get_webview_window("pet") {
+                Some(pet) => platform::configure_pet_window(&pet),
+                // 配置里写死了 label=pet，取不到说明配置被改坏了，
+                // 此时窗口永远不会显示，必须让它可见地失败而不是静默。
+                None => eprintln!("[cyber-cat] 严重：找不到 label=pet 的窗口，猫不会出现"),
+            }
+
+            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&quit])?;
+
+            TrayIconBuilder::with_id("tray")
+                .icon(
+                    app.default_window_icon()
+                        .expect("bundle 里应当有图标")
+                        .clone(),
+                )
+                .tooltip("CYBER-CAT")
+                .menu(&menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(|app, event| {
+                    if event.id.as_ref() == "quit" {
+                        app.exit(0);
+                    }
+                })
+                .build(app)?;
+
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("启动 CYBER-CAT 失败");
+}

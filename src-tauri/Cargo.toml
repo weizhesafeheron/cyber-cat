@@ -1,0 +1,29 @@
+[package]
+name = "cyber-cat"
+version = "0.0.0"
+description = "常驻桌面的赛博养猫"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "cyber_cat_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [
+  # 透明窗口在 macOS 上依赖私有 API。代价是无法上架 Mac App Store，
+  # 这是 ADR 0003 已接受的取舍，直接分发 DMG 不受影响。
+  "macos-private-api",
+  "tray-icon",
+  "image-png",
+] }
+
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
