@@ -7,6 +7,7 @@
 //! 发一个事件，由它作为一次用户动作走进同一个 `step`。多一条改状态的路，
 //! 离线推演的等价性就没法再保证了（ADR 0001）。
 
+mod adopt;
 mod platform;
 mod save;
 mod tray;
@@ -21,11 +22,16 @@ use tauri::{Manager, WebviewWindow};
 /// 所以只能靠「窗口以 visible: false 启动、内容就绪后才 show」这条框架无关的路子 -
 /// 窗口在有内容之前根本不存在，也就无从闪烁。
 ///
+/// 显示的是**调用方自己那个窗口**，所以宠物窗口与领养窗口共用这一个命令。
+/// 领养窗口尤其需要它：那一页是深色的雨夜，白底闪一下比在透明窗口上更显眼。
+/// 两边都必须**同步画完第一帧再调**，不能放进 requestAnimationFrame -
+/// rAF 对隐藏窗口不触发，那样会死锁在「窗口永远不显示」上（踩过）。
+///
 /// 如果哪天改掉这个流程，Windows 上的启动白闪会立刻回来。
 #[tauri::command]
-fn pet_ready(window: WebviewWindow) {
+fn content_ready(window: WebviewWindow) {
     if let Err(e) = window.show() {
-        eprintln!("[cyber-cat] 显示宠物窗口失败：{e}");
+        eprintln!("[cyber-cat] 显示窗口 {} 失败：{e}", window.label());
     }
 }
 
@@ -60,17 +66,21 @@ fn move_stage(window: WebviewWindow, x: f64, y: f64) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            pet_ready,
+            content_ready,
             cursor_probe,
             set_pass_through,
             stage_metrics,
             move_stage,
+            adopt::open_adoption,
+            adopt::close_adoption,
             save::save_world,
             save::load_world,
             tray::update_tray
         ])
         .setup(|app| {
             platform::configure_app(app);
+            // 领养是否走完的标记。窗口被销毁时靠它区分「选完了」与「被关掉了」。
+            app.manage(adopt::AdoptionDone::default());
 
             match app.get_webview_window("pet") {
                 Some(pet) => platform::configure_pet_window(&pet),

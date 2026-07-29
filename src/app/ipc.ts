@@ -8,6 +8,9 @@
  * 调用都会失败（tauri.conf.json 里已配好，改动它会让猫连窗口都显示不出来）。
  */
 
+import { ADOPTED_EVENT, parseAdopted } from '../adopt/identity.js';
+import type { AdoptedIdentity } from '../adopt/identity.js';
+
 /** 是否跑在 Tauri 里。直接用浏览器打开这个页面调试时为 false。 */
 export const inTauri = '__TAURI_INTERNALS__' in globalThis;
 
@@ -23,10 +26,21 @@ async function invoker(): Promise<Invoke> {
   return cached;
 }
 
-/** 通知 Rust 侧显示窗口。失败会抛 - 这是窗口能否显示的唯一途径，不能静默。 */
-export async function petReady(): Promise<void> {
+/**
+ * 第一帧画好了，通知 Rust 显示**调用方自己这个窗口**。
+ *
+ * 宠物窗口与领养窗口共用：两者都以 visible: false 建出来，画完第一帧才显示
+ * （防白闪，见 ADR 0003 与 lib.rs 的 content_ready）。
+ * 必须在**同步画完第一帧之后**调，不能放进 rAF - rAF 对隐藏窗口不触发。
+ *
+ * 在 Tauri 里失败会抛：这是窗口能否显示的唯一途径，不能静默。
+ * 浏览器里直接开页面调试时没有窗口要显示，跳过就好 - 早先这里会抛，
+ * 结果浏览器调试只能看到静止的第一帧。
+ */
+export async function contentReady(): Promise<void> {
+  if (!inTauri) return;
   const invoke = await invoker();
-  await invoke<void>('pet_ready');
+  await invoke<void>('content_ready');
 }
 
 /**
@@ -76,6 +90,58 @@ export async function moveStage(x: number, y: number): Promise<void> {
   if (!inTauri) return;
   const invoke = await invoker();
   await invoke<void>('move_stage', { x, y });
+}
+
+/**
+ * 打开领养窗口。尺寸由前端给 - 窗口该多大取决于里面要放什么，
+ * 那是呈现层的判断（见 adopt/constants.ts），Rust 侧只负责居中建窗。
+ *
+ * 失败会抛：领养是首次启动的必经一步，开不出窗口就等于没有猫，不能静默。
+ */
+export async function openAdoption(width: number, height: number): Promise<void> {
+  const invoke = await invoker();
+  await invoke<void>('open_adoption', { width, height });
+}
+
+/**
+ * 关掉领养窗口（由领养窗口自己调）。
+ *
+ * 走 Rust 而不是前端的 `getCurrentWindow().close()`：关窗需要额外的窗口权限，
+ * 而 Rust 侧本来就要在这里把 macOS 的激活策略切回附属模式 - 两件事必须一起做，
+ * 分开做会漏掉其中一半。
+ */
+export async function closeAdoption(): Promise<void> {
+  const invoke = await invoker();
+  await invoke<void>('close_adoption');
+}
+
+/**
+ * 领养窗口把选定的猫交回宠物窗口。
+ *
+ * 用事件而不是命令：载荷的形状（品种 + Seed + 名字）是 TypeScript 侧的领域约定，
+ * 让 Rust 也认识它等于把同一个协议写两遍。Rust 只知道有一条事件通道。
+ */
+export async function announceAdopted(payload: unknown): Promise<void> {
+  const { emit } = await import('@tauri-apps/api/event');
+  await emit(ADOPTED_EVENT, payload);
+}
+
+/**
+ * 等领养结果。**必须先调用它、再打开领养窗口**，见 app/adoption.ts 的 requestAdoption。
+ *
+ * 只取第一条：领养窗口交回身份之后就关掉了，不会有第二条。
+ */
+export async function waitForAdopted(): Promise<AdoptedIdentity> {
+  const { once } = await import('@tauri-apps/api/event');
+  return new Promise<AdoptedIdentity>((resolve, reject) => {
+    void once<unknown>(ADOPTED_EVENT, (event) => {
+      try {
+        resolve(parseAdopted(event.payload));
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    }).catch(reject);
+  });
 }
 
 let passThroughFailures = 0;

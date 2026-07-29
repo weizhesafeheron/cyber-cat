@@ -46,6 +46,35 @@ pub fn configure_app(app: &mut App) {
     }
 }
 
+/// 让应用临时变成「普通应用」，或切回附属模式。
+///
+/// 只有 macOS 需要：平时用 `Accessory` 把图标从程序坞里去掉（见 configure_app），
+/// 但附属应用的窗口拿键盘焦点是不可靠的，而**领养要打字**。所以领养期间切成
+/// `Regular`，结束后切回来 - 代价是程序坞里短暂出现一个图标，只在首次启动的
+/// 那一次领养流程里可见。
+///
+/// Windows 与 Linux 不需要这套：那边 skipTaskbar 只作用在宠物窗口上，
+/// 领养窗口本来就是个正常的、能拿焦点的窗口。
+pub fn set_foreground_app(app: &tauri::AppHandle, foreground: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let policy = if foreground {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        if let Err(e) = app.set_activation_policy(policy) {
+            // 失败的后果是「程序坞里多/少一个图标」或「领养窗口要点一下才能打字」，
+            // 都不该阻断领养流程本身，所以只报不抛。
+            eprintln!("[cyber-cat] 切换激活策略失败：{e}");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, foreground);
+    }
+}
+
 /// 宠物窗口创建后的平台设置。
 pub fn configure_pet_window(window: &WebviewWindow) {
     // 阴影已在配置里关掉，这里再显式设一次以防配置被改动。
