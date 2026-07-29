@@ -52,6 +52,7 @@ export class CatDisplay {
   private readonly ctx: CanvasRenderingContext2D;
   private deviceScale = 1;
   private dpr = 1;
+  private leftCss = 0;
 
   /**
    * `boxOf` 给出画布可以占用的 CSS 空间，用来钳制放大倍数。
@@ -123,7 +124,19 @@ export class CatDisplay {
   place(centerCss: number): void {
     const left = centerCss - (W * this.deviceScale) / this.dpr / 2;
     const snapped = Math.round(left * this.dpr) / this.dpr;
+    this.leftCss = snapped;
     this.canvas.style.transform = `translateX(${snapped}px)`;
+  }
+
+  /**
+   * 精灵左上角在画布父容器里的 CSS x，**已经对齐到整数物理像素**。
+   *
+   * 给舞台里的其他覆盖层用（回归气泡）。**必须从这里取，不能按运动层的 x 再算一遍** -
+   * 那等于把定位规则抄第二份，两份一旦不同步（就是上面这次取整）覆盖层就会与猫错开，
+   * 而且只在真机上看得出来。与 main.ts 里 toSprite 的注释是同一条理由。
+   */
+  get originCss(): number {
+    return this.leftCss;
   }
 
   paint(res: RenderResult): void {

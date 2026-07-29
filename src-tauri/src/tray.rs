@@ -43,6 +43,9 @@ pub fn build(app: &App) -> tauri::Result<()> {
     let details = Submenu::with_items(app, "状态详情", true, &[&hunger, &energy, &mood, &bond])?;
 
     let summary = MenuItem::with_id(app, "summary", "读取存档中……", false, None::<&str>)?;
+    // 猫咪日记排在最前（CONTEXT.md 的托盘菜单顺序）：它是「我不在时它也在过日子」
+    // 的唯一常驻出口，比喂食这类操作项更该先被看到。
+    let diary = MenuItem::with_id(app, "diary", "猫咪日记", true, None::<&str>)?;
     let feed = MenuItem::with_id(app, "feed", "喂食", true, None::<&str>)?;
     // 喂药只在生病时可用（mvp-scope 4）：界面不该常年挂一个用不到的入口。
     let medicate = MenuItem::with_id(app, "medicate", "喂药", false, None::<&str>)?;
@@ -60,6 +63,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
         app,
         &[
             &summary,
+            &diary,
             &details,
             &PredefinedMenuItem::separator(app)?,
             &feed,
@@ -94,7 +98,9 @@ pub fn build(app: &App) -> tauri::Result<()> {
             "quit" => app.exit(0),
             // 挂件的显示开关也交回前端：摆放存档在那边，而且勾选状态必须与它
             // 记的那份保持一致 - 在这里直接 show/hide 会让两边漂移。
-            id @ ("feed" | "medicate" | "prop-bowl" | "prop-bed") => {
+            // 日记也交回前端：窗口尺寸是呈现层的判断，而且气泡那条入口本来就在
+            // 前端，两个入口走同一条路才不会出现两套窗口生命周期。
+            id @ ("feed" | "medicate" | "prop-bowl" | "prop-bed" | "diary") => {
                 // 交回前端，由它作为一次 UserAction 走进 step。
                 if let Err(e) = app.emit(TRAY_ACTION_EVENT, id) {
                     eprintln!("[cyber-cat] 发送托盘动作 {id} 失败：{e}");

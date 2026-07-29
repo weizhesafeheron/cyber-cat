@@ -8,6 +8,7 @@
 //! 离线推演的等价性就没法再保证了（ADR 0001）。
 
 mod adopt;
+mod diary;
 mod platform;
 mod save;
 mod tray;
@@ -96,6 +97,8 @@ pub fn run() {
             move_stage,
             adopt::open_adoption,
             adopt::close_adoption,
+            diary::open_diary,
+            diary::close_diary,
             place_prop,
             save::save_world,
             save::load_world,

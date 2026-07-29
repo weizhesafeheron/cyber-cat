@@ -7,6 +7,7 @@ import { defineConfig } from 'vite';
  * - `index.html` 是宠物窗口（label = pet，Tauri 启动时加载）。
  * - `adopt.html` 是领养窗口（label = adopt，首次启动时由 Rust 按需建出来）。
  * - `prop.html` 是食盆与猫窝共用的挂件入口（靠 `?kind=` 区分，见 src/app/prop-main.ts）。
+ * - `diary.html` 是猫咪日记（label = diary，托盘菜单或猫头顶的气泡按需建出来）。
  *
  * dev/index.html 是渲染核心的人工验证页，开发时访问 /dev/ 即可，不进产物。
  *
@@ -30,7 +31,12 @@ export default defineConfig({
     emptyOutDir: true,
     target: 'es2022',
     rollupOptions: {
-      input: { pet: 'index.html', adopt: 'adopt.html', prop: 'prop.html' },
+      input: {
+        pet: 'index.html',
+        adopt: 'adopt.html',
+        prop: 'prop.html',
+        diary: 'diary.html',
+      },
     },
   },
 });
