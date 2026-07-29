@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { diaryLine } from '../../src/farewell/diary-text.js';
+import { diaryText } from '../../src/diary/index.js';
+import { makeCat } from '../../src/render/index.js';
 import {
   archiveRows,
   companionLine,
@@ -144,28 +145,29 @@ describe('日记文案', () => {
     'died',
   ];
 
+  // 告别页里的日记文案用的就是猫咪日记那一份（ticket 13 合并时统一）。
+  // 这里只守「告别页这条路上每种事件都有话可说」，文案本身的性格分化由
+  // test/diary/text.test.ts 负责。
+  const CAT = makeCat('orange', 20260728);
+
   it('每一种事件都有自己的一句话，没有两种共用同一句', () => {
     const said = new Set<string>();
     for (const kind of ALL) {
-      const text = diaryLine({ kind, at: 0, important: false }, '小橘');
+      const text = diaryText({ kind, at: 0, important: false }, CAT);
       expect(text.length).toBeGreaterThan(0);
       said.add(text);
     }
     expect(said.size).toBe(ALL.length);
   });
 
-  it('名字会被填进去 - 日记是这只猫的日记', () => {
-    expect(diaryLine({ kind: 'adopted', at: 0, important: true }, '小橘')).toContain('小橘');
-  });
-
   it('认不出的事件给一句兜底，不抛错也不露出英文名', () => {
-    const text = diaryLine({ kind: 'someFutureKind' as WorldEventKind, at: 0, important: false }, '小橘');
+    const text = diaryText({ kind: 'someFutureKind' as WorldEventKind, at: 0, important: false }, CAT);
     expect(text.length).toBeGreaterThan(0);
     expect(text).not.toContain('someFutureKind');
   });
 
   it('死亡那条带上陪伴天数（事件里就有这个数）', () => {
-    const text = diaryLine({ kind: 'died', at: 0, important: true, data: { days: 34 } }, '小橘');
+    const text = diaryText({ kind: 'died', at: 0, important: true, data: { days: 34 } }, CAT);
     expect(text).toContain('34');
   });
 });

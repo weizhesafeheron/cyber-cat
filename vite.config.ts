@@ -8,6 +8,7 @@ import { defineConfig } from 'vite';
  * - `adopt.html` 是领养窗口（label = adopt，首次启动时由 Rust 按需建出来）。
  * - `farewell.html` 是告别页（label = farewell，猫死后由 Rust 按需建出来）。
  * - `prop.html` 是食盆与猫窝共用的挂件入口（靠 `?kind=` 区分，见 src/app/prop-main.ts）。
+ * - `diary.html` 是猫咪日记（label = diary，托盘菜单或猫头顶的气泡按需建出来）。
  *
  * dev/index.html 是渲染核心的人工验证页，开发时访问 /dev/ 即可，不进产物。
  *
@@ -37,6 +38,7 @@ export default defineConfig({
         adopt: 'adopt.html',
         farewell: 'farewell.html',
         prop: 'prop.html',
+        diary: 'diary.html',
       },
     },
   },

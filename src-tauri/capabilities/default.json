@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "宠物窗口与领养窗口所需的最小权限集。领养窗口要用事件通道把选定的猫交回宠物窗口，因此也必须列在这里 - 漏了它 emit 会被权限系统拦掉，表现为领养完之后什么都没发生。",
-  "windows": ["pet", "adopt"],
+  "description": "宠物窗口、领养窗口与日记窗口所需的最小权限集。领养窗口要用事件通道把选定的猫交回宠物窗口，因此也必须列在这里 - 漏了它 emit 会被权限系统拦掉，表现为领养完之后什么都没发生。日记窗口只调应用自己的命令（读存档、显示自己、关自己），列在这里是为了让「按需建出来的窗口」三个一处可见，而不是分散在各自的模块里。",
+  "windows": ["pet", "adopt", "diary"],
   "permissions": ["core:default"]
 }

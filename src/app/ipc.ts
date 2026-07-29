@@ -223,6 +223,32 @@ export async function onAdoptAnother(handler: () => void): Promise<void> {
 }
 
 /**
+ * 打开猫咪日记窗口。托盘菜单与猫头顶的回归气泡共用这一条。
+ *
+ * 失败只记录：日记打不开是「看不到日记」，不该连带影响猫的日常运行。
+ * 浏览器里调试时直接跳过 - 没有第二个窗口可开。
+ */
+export async function openDiary(width: number, height: number): Promise<void> {
+  if (!inTauri) {
+    console.info('[cyber-cat] 浏览器调试模式：真机上这里会打开日记窗口');
+    return;
+  }
+  try {
+    const invoke = await invoker();
+    await invoke<void>('open_diary', { width, height });
+  } catch (err) {
+    console.error('[cyber-cat] 打开日记窗口失败：', err);
+  }
+}
+
+/** 关掉日记窗口（由日记页自己调）。理由同 closeAdoption。 */
+export async function closeDiary(): Promise<void> {
+  if (!inTauri) return;
+  const invoke = await invoker();
+  await invoke<void>('close_diary');
+}
+
+/**
  * 领养窗口把选定的猫交回宠物窗口。
  *
  * 用事件而不是命令：载荷的形状（品种 + Seed + 名字）是 TypeScript 侧的领域约定，

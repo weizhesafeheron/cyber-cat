@@ -8,6 +8,7 @@
 //! 离线推演的等价性就没法再保证了（ADR 0001）。
 
 mod adopt;
+mod diary;
 mod farewell;
 mod notify;
 mod platform;
@@ -104,6 +105,8 @@ pub fn run() {
             farewell::open_farewell,
             farewell::close_farewell,
             notify::notify,
+            diary::open_diary,
+            diary::close_diary,
             place_prop,
             save::save_world,
             save::load_world,

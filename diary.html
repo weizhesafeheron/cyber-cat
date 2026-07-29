@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>猫咪日记</title>
+    <style>
+      /*
+       * 猫咪日记。按需建出来的一页，用完即关。
+       *
+       * 呈现要求：**这是一本日记，不是一张日志表。**
+       * 所以没有表头、没有等宽字体、没有事件类型标签 - 每天一个日期，
+       * 底下是几句话，时刻退到左边当行号用。
+       *
+       * 配色跟领养页同一套（深靛蓝 + 青 + 黄），那套已经验收过。
+       */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        background: #0b0e1a;
+        color: #d8dcf0;
+        font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        user-select: none;
+      }
+
+      /* 抬头钉在上面，日记本身滚动 - 翻到第三十天时还要知道这是谁的日记 */
+      header {
+        flex: none;
+        padding: 16px 22px 12px;
+        border-bottom: 1px solid #1c2340;
+      }
+      #who {
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        color: #4deeea;
+      }
+      #meta {
+        margin-top: 5px;
+        font-size: 12px;
+        color: #5b6488;
+      }
+
+      main {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 22px 24px;
+      }
+      /* 空日记是可能的：刚领养完就打开 */
+      #empty {
+        margin-top: 28px;
+        font-size: 13px;
+        line-height: 1.9;
+        color: #5b6488;
+      }
+      #empty[hidden] {
+        display: none;
+      }
+
+      .day {
+        margin-top: 18px;
+      }
+      .day > h2 {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        color: #ffd94a;
+        padding-bottom: 6px;
+        border-bottom: 1px dashed #2c3a68;
+      }
+      .day > ul {
+        list-style: none;
+      }
+      .day li {
+        display: flex;
+        gap: 10px;
+        padding: 7px 0;
+        font-size: 13.5px;
+        line-height: 1.65;
+      }
+      .day li + li {
+        border-top: 1px solid #131936;
+      }
+      .day time {
+        flex: none;
+        width: 40px;
+        color: #5b6488;
+        font-size: 12px;
+        /* 数字对齐到同一列，读起来才像行号而不是句子的一部分 */
+        font-variant-numeric: tabular-nums;
+        padding-top: 2px;
+      }
+      /*
+       * 重要事件（生病、死亡）在日记里必须显眼。
+       * 用左侧一道竖线加字色，不整行变红：整行变红会让日记读起来像报警日志，
+       * 而这些条目恰恰最需要被当成「它的一生里的一件事」来读。
+       */
+      .day li.important {
+        margin-left: -10px;
+        padding-left: 8px;
+        border-left: 2px solid #f652a0;
+      }
+      .day li.important p {
+        color: #ffd94a;
+      }
+
+      footer {
+        flex: none;
+        padding: 8px 22px 12px;
+        font-size: 11px;
+        color: #3d456b;
+        border-top: 1px solid #1c2340;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div id="who">读取存档中……</div>
+      <div id="meta"></div>
+    </header>
+    <main>
+      <p id="empty" hidden></p>
+      <div id="days"></div>
+    </main>
+    <footer>按 Esc 关闭</footer>
+
+    <script type="module" src="/src/diary/main.ts"></script>
+  </body>
+</html>

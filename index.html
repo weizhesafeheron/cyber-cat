@@ -31,6 +31,20 @@
         pointer-events: none;
       }
       /*
+       * 回归气泡（ADR 0011）。舞台里的第三张画布，铺满舞台、盖在猫之上。
+       *
+       * `pointer-events: none` 不影响它可点：点击由 window 上的 pointerdown
+       * 统一处理，落点是不是气泡由命中矩形判定（src/diary/bubble.ts）。
+       * 让画布自己收事件反而会把猫的点击挡掉一块 - 画布铺满整个舞台。
+       */
+      #bubble {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        image-rendering: pixelated;
+        pointer-events: none;
+      }
+      /*
        * 猫贴在舞台下沿：猫的脚在精灵的下沿，贴底才能站在"地面"上。
        * 横向位置由 display.place() 写 transform，不用 flex 居中 -
        * 命中测试量的是这个 canvas 的布局矩形，位置必须只有一个来源。
@@ -51,8 +65,9 @@
     <div id="stage">
       <canvas id="paws"></canvas>
       <canvas id="cat"></canvas>
-      <!-- 爱心在猫之上：它从猫头顶冒出来，压在猫身后就看不见了 -->
+      <!-- 爱心与气泡都在猫之上：两者都从猫头顶冒出来，压在猫身后就看不见了 -->
       <canvas id="hearts"></canvas>
+      <canvas id="bubble"></canvas>
     </div>
     <script type="module" src="/src/app/main.ts"></script>
   </body>
