@@ -478,6 +478,22 @@ export function advanceBeat(w: World, cat: Cat, urge: ActionKey | null = null): 
   setActivity(w, chooseActivity(w, cat, hour));
 }
 
+/**
+ * 把「时间占比」换算成「这一次抽签的权重」。
+ *
+ * **常量表里的权重是时间占比，不是抽签概率。** 定档时每个模拟步只做一个动作，
+ * 每个动作占的时长相同，两者恰好等价；加了持续时长之后就不等价了 -
+ * 抽签决定的是「下一段做什么」，而趴下一段是 8 到 24 拍，走路一段只有 1 到 3 拍。
+ * 直接拿时间占比去抽签，趴着的时长会被放大八倍。
+ *
+ * 这不是推理出来的，是真机上看出来的：改成节拍之后猫几乎只在站和趴之间切换，
+ * 实测 120 拍里只有 4 拍在走路。除以平均持续时长之后时间占比才回到定档的样子。
+ */
+function perSegment(action: ActionKey, timeShare: number): number {
+  const [min, max] = ACTIVITY_HOLD_BEATS[action];
+  return (timeShare * 2) / (min + max);
+}
+
 /** 换动作，并按 ACTIVITY_HOLD_BEATS 抽一个持续时长。 */
 function setActivity(w: World, action: ActionKey): void {
   const [min, max] = ACTIVITY_HOLD_BEATS[action];
@@ -505,15 +521,25 @@ function chooseActivity(w: World, cat: Cat, hour: number): ActionKey {
   const pounce =
     active * ACTIVITY_POUNCE_ACTIVE_SPAN * (isZoomiesHour(hour) ? ZOOMIES_POUNCE_MULTIPLIER : 1);
 
+  // 每一项都要过 perSegment - 常量表给的是时间占比，抽签要的是每段的权重。
   return pickWeighted(
     [
-      { key: 'idle', weight: ACTIVITY_IDLE_WEIGHT },
-      { key: 'walk', weight: ACTIVITY_WALK_BASE + active * ACTIVITY_WALK_ACTIVE_SPAN },
-      { key: 'pounce', weight: pounce },
-      { key: 'groom', weight: ACTIVITY_GROOM_WEIGHT },
-      { key: 'sit', weight: ACTIVITY_SIT_BASE + lazy * ACTIVITY_SIT_LAZY_SPAN },
-      { key: 'lie', weight: ACTIVITY_LIE_BASE + lazy * ACTIVITY_LIE_LAZY_SPAN },
-      { key: 'yawn', weight: tired * ACTIVITY_YAWN_TIRED_SPAN },
+      { key: 'idle', weight: perSegment('idle', ACTIVITY_IDLE_WEIGHT) },
+      {
+        key: 'walk',
+        weight: perSegment('walk', ACTIVITY_WALK_BASE + active * ACTIVITY_WALK_ACTIVE_SPAN),
+      },
+      { key: 'pounce', weight: perSegment('pounce', pounce) },
+      { key: 'groom', weight: perSegment('groom', ACTIVITY_GROOM_WEIGHT) },
+      {
+        key: 'sit',
+        weight: perSegment('sit', ACTIVITY_SIT_BASE + lazy * ACTIVITY_SIT_LAZY_SPAN),
+      },
+      {
+        key: 'lie',
+        weight: perSegment('lie', ACTIVITY_LIE_BASE + lazy * ACTIVITY_LIE_LAZY_SPAN),
+      },
+      { key: 'yawn', weight: perSegment('yawn', tired * ACTIVITY_YAWN_TIRED_SPAN) },
     ],
     rollActivity(w),
   );

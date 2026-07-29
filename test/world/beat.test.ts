@@ -125,6 +125,23 @@ describe('十分钟里的行为读起来是自主的', () => {
     expect(runs(seq).length).toBeGreaterThanOrEqual(5);
   });
 
+  it('走动类动作占到可观的时间，不是几乎只有站和趴', () => {
+    // 这条守的是一个真机上看出来、纯看代码看不出来的陷阱：
+    // 常量表里的权重是**时间占比**，而抽签决定的是「下一段做什么」。
+    // 趴下一段 8 到 24 拍，走路一段只有 1 到 3 拍 - 直接拿时间占比去抽签，
+    // 趴着的时长会被放大八倍。修之前实测 120 拍里只有 4 拍在走路，
+    // 用户的原话是「观察了很久，猫不是站着就是趴着」。
+    const seq = activities(dusk(), (2 * HOUR) / BEAT_MS);
+    const awake = seq.filter((a) => a !== 'sleep');
+    const moving = awake.filter((a) => a === 'walk' || a === 'pounce').length;
+    expect(moving / awake.length).toBeGreaterThan(0.15);
+    // 反面也要守住：也不能变成一只永远在跑的猫。
+    expect(moving / awake.length).toBeLessThan(0.55);
+    // 趴着不该独占醒着的时间。
+    const lying = awake.filter((a) => a === 'lie').length;
+    expect(lying / awake.length).toBeLessThan(0.4);
+  });
+
   it('但也不是节拍器：动作段落长短不一，且有明显长于一拍的段落', () => {
     const seq = activities(dusk(), (30 * 60_000) / BEAT_MS);
     const lens = runs(seq).map((r) => r.beats);

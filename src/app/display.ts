@@ -101,16 +101,22 @@ export class CatDisplay {
   /**
    * 把猫放到舞台内的某个横向位置。`centerCss` 是精灵横向中心在舞台内的 CSS x。
    *
+   * `dyCss` 是换动作时的落位偏移（见 app/settle.ts），平时是 0。
+   * 它作用在这里而不在姿态里，是为了让影子跟着一起走 - 猫不该在过渡的
+   * 两百毫秒里悬在自己的影子上方。爪印画在另一张画布上，不受它影响，
+   * 这是对的：爪印留在地上，不跟着猫起落。
+   *
    * 移动画布而不是重画整个舞台：猫只占舞台的三分之一，每帧清一整个舞台的画布
    * 是白烧填充率。
    *
    * **偏移必须落在整数物理像素上。** 非整数偏移会让浏览器对整张画布重采样，
    * 像素风立刻破功 - 这与 deviceScaleFor 取整是同一条约束的两面。
    */
-  place(centerCss: number): void {
+  place(centerCss: number, dyCss = 0): void {
     const left = centerCss - (W * this.deviceScale) / this.dpr / 2;
     const snapped = Math.round(left * this.dpr) / this.dpr;
-    this.canvas.style.transform = `translateX(${snapped}px)`;
+    const snappedY = Math.round(dyCss * this.dpr) / this.dpr;
+    this.canvas.style.transform = `translate(${snapped}px, ${snappedY}px)`;
   }
 
   paint(res: RenderResult): void {
