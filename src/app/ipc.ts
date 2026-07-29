@@ -11,6 +11,7 @@
 import { ADOPTED_EVENT, parseAdopted } from '../adopt/identity.js';
 import type { AdoptedIdentity } from '../adopt/identity.js';
 import { ADOPT_ANOTHER_EVENT } from '../farewell/handoff.js';
+import type { ForegroundWindow } from './perch.js';
 
 /** 是否跑在 Tauri 里。直接用浏览器打开这个页面调试时为 false。 */
 export const inTauri = '__TAURI_INTERNALS__' in globalThis;
@@ -100,6 +101,22 @@ export async function inputIdle(): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * 读当前前台窗口的可见矩形（ticket 12）。null = 此刻没有可用的前台窗口。
+ *
+ * 返回的坐标是**逻辑像素**，与 probeStage 同一个坐标系 - 两个平台的换算差异
+ * 全部关在 platform.rs 里（macOS 的 kCGWindowBounds 本来是点，Windows 的 DWM
+ * 矩形是物理像素，要按目标窗口所在屏的 DPI 换算）。
+ *
+ * 浏览器里调试时返回 null：那时没有 Rust 侧可问，猫就只在桌面上活动。
+ * 真机上失败会抛，由 ForegroundWatcher 接住并退避 - 读不到窗口不该影响猫的日常。
+ */
+export async function probeForeground(): Promise<ForegroundWindow | null> {
+  if (!inTauri) return null;
+  const invoke = await invoker();
+  return invoke<ForegroundWindow | null>('foreground_window');
 }
 
 /**

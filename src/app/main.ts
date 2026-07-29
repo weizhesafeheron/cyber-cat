@@ -6,7 +6,7 @@
  * **猫的状态一步都不在这里演化** - 全部经由世界层的 `step`（ADR 0001）。
  * **逐帧位置一步都不回写世界层** - 那条通路会破坏离线等价性（ADR 0007）。
  *
- * 真正的抚摸见 ticket 10，爬前台窗口见 ticket 12。
+ * 真正的抚摸见 ticket 10。
  */
 import {
   ACTIONS,
@@ -67,7 +67,6 @@ import {
   ALL_MICRO_ON,
   applyMicroSwitches,
   catInStage,
-  groundScreenY,
   createMotion,
   faceDir,
   microOptsFor,
@@ -77,6 +76,16 @@ import {
 } from './motion.js';
 import type { MicroSwitches, MotionState, ScreenRect, StageGeometry } from './motion.js';
 import { PollingPassthrough } from './passthrough.js';
+import { ForegroundWatcher } from './foreground.js';
+import {
+  footScreenY,
+  initialPerchDesire,
+  nextPerchDesire,
+  perchAllowed,
+  perchStartOk,
+  perchSurfaceOf,
+} from './perch.js';
+import type { PerchDesire } from './perch.js';
 import {
   EAT_SAY_SPRITE,
   sayBob,
@@ -214,6 +223,19 @@ const props = new PropsHost(geometry());
  * 甚至上次运行时就死了（用户直接关掉了告别页）。
  */
 const farewell = new FarewellHost(tauriFarewellPorts);
+
+// --- 爬到前台窗口上（ticket 12，[ADR 0012](../../docs/adr/0012-surfaces-and-perching.md)）---
+//
+// 三层分工与挂件那条链完全对称：平台层读窗口矩形（watcher），app/perch.ts 判断
+// 那条边能不能站、这一刻要不要上去，运动层负责跳上去、在上面走、跳下来。
+// **世界层只出两个投影**（status 与 anchor），它连屏幕上有没有窗口都不知道 -
+// 屏幕矩形一旦进 World，同一份存档在不同分辨率的机器上就会演化出不同的猫。
+
+/** 前台窗口的轮询。每帧问一次，它自己按猫的活动状态节流（10 Hz / 2 Hz）。 */
+const foreground = new ForegroundWatcher();
+
+/** 「想不想上去、还要不要待着」。**不进存档**，与运动层同理。 */
+let perchDesire: PerchDesire = initialPerchDesire();
 
 /** dpr 或窗口尺寸变化时重算四张画布。它们的像素格必须一样大。 */
 function applyGeometry(): void {
@@ -376,7 +398,16 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
   paws.paint(pawsInStage(motion, nowMs), display.scale, display.pixelRatio);
   hearts = stepHearts(hearts, nowMs);
   heartCanvas.paint(
-    heartsInStage(hearts, nowMs, motion.stage, groundScreenY(geometry()), display.spriteScale),
+    // 爱心按**猫这一刻的脚底线**定位，不是桌面那条地面线：猫站在窗口上时舞台整块
+    // 升高了（ticket 12 的表面模型），拿地面线算出来的爱心会从猫脚下几百像素的
+    // 桌面上冒出来。摸窗口上的猫是完全正常的操作，所以这不是边角情况。
+    heartsInStage(
+      hearts,
+      nowMs,
+      motion.stage,
+      footScreenY(geometry(), motion.liftY),
+      display.spriteScale,
+    ),
     display.spriteScale,
   );
   // 两种气泡都排在 display.place 之后：横向位置取自 display.originCss，
@@ -396,6 +427,9 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
 function paintBubble(nowMs: number): void {
   // 拎着或正在下落时不画：被拎起来的姿态会伸进气泡占的那几行，而且那时用户的手
   // 正在猫身上，气泡的点击区会跟拖拽抢同一片像素（见 diary/bubble.ts）。
+  // 猫站在窗口上时（liftY > 0）同样不画 - 那个气泡是「我回来了」的招呼，
+  // 该在桌面上等着被点，而不是跟着猫飘到别人的标题栏上。它不会因此丢掉：
+  // bubbleArmedAt 还在，猫下来之后照样冒。
   if (!bubbleVisible(bubbleArmedAt, nowMs, motion.held || motion.liftY > 0)) {
     bubbleRect = null;
     bubble.clear();
@@ -457,6 +491,26 @@ function frame(now: number): void {
   const g = geometry();
   const anchorX = now < reactionUntilMs ? null : props.anchorX(intent.anchor, motion.x, g);
 
+  // 前台窗口：每帧问一次轮询器（它自己节流），把读到的矩形翻成一条可站的表面，
+  // 再交给判断层决定这一刻要不要邀请猫上去。
+  //
+  // **轮询在这里而不是用 setInterval**，是为了让「睡眠与锁屏时停止」成为结构保证：
+  // rAF 对隐藏/被遮挡的窗口不触发，帧循环停了轮询自然也停。
+  foreground.poll(now, {
+    // 猫在动或者已经在窗口上时用高频：前者随时可能起跳，后者要跟着窗口走。
+    active: motion.perch !== null || motion.playing === 'walk',
+    hidden: document.hidden,
+  });
+  perchDesire = nextPerchDesire(perchDesire, {
+    dt: animDt,
+    // 即时反馈期间也不上去：与「不给锚点」同一条理由 - 用户刚点了猫。
+    allowed: now >= reactionUntilMs && perchAllowed(intent.status, intent.anchor),
+    startOk: perchStartOk(effective),
+    surface: perchSurfaceOf(foreground.window, g, display.pixelRatio),
+    active: cat.personality.active,
+    rnd: Math.random,
+  });
+
   // dt 乘上 timeScale：病后虚弱时动作会放慢，地面速度必须跟着放慢，
   // 否则腿的相位与实际位移脱节，走起来是滑步。
   motion = stepMotion(motion, {
@@ -467,6 +521,7 @@ function frame(now: number): void {
     cursorX: cursorScreenX,
     teaseLandingX: teaseThisFrame(intent, now, g),
     anchorX,
+    perch: perchDesire.offer,
     cat,
     geom: g,
     rnd: Math.random,
@@ -790,7 +845,9 @@ function teaseThisFrame(intent: RenderIntent, now: number, g: StageGeometry): nu
     lastMealAt: lastMealAtMs,
     keyboardIdleS,
     catX: motion.x,
-    catY: groundScreenY(g),
+    // 距离闸门从**猫这一刻的脚下**算，不是桌面那条地面线：猫站在窗口上时
+    // 两者差几百像素，用地面线算的话光标明明就在它旁边却判成「太远」。
+    catY: footScreenY(g, motion.liftY),
     trail: cursorTrail,
     pouncesInARow: tease.pouncesInARow,
     boredUntil: tease.boredUntil,
@@ -898,6 +955,20 @@ matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('cha
     return micros;
   },
   motion: (): MotionState => motion,
+  /**
+   * 爬窗口这条链上的三段读数（ticket 12）。真机验收基本靠它。
+   *
+   * 「猫为什么不爬这个窗口」有六七种原因（太高、太低、太窄、跨 DPI、世界层不允许、
+   * 还在冷却、还没抽中），肉眼一个也看不出来。这个钩子把三段都摊开：
+   * 平台层读到什么（window）、判断层认为能不能站（surface）、这一刻要不要上去（desire）。
+   */
+  perch: (): unknown => ({
+    window: foreground.window,
+    surface: perchSurfaceOf(foreground.window, geometry(), display.pixelRatio),
+    desire: perchDesire,
+    liftY: motion.liftY,
+    phase: motion.perch?.phase ?? null,
+  }),
 };
 
 void onTrayAction((id) => {

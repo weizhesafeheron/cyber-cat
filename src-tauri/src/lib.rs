@@ -83,6 +83,17 @@ fn stage_metrics(window: WebviewWindow) -> Result<platform::StageMetrics, String
     platform::stage_metrics(&window)
 }
 
+/// 当前前台窗口的可见矩形，逻辑像素。见 `platform::foreground_window`。
+///
+/// 前端每 100ms（猫在动时）到 500ms（猫趴着时）问一次，睡眠与锁屏时不问 -
+/// 轮询由帧循环驱动，而 rAF 对隐藏窗口不触发（见 src/app/foreground.ts）。
+#[tauri::command]
+fn foreground_window(
+    window: WebviewWindow,
+) -> Result<Option<platform::ForegroundWindow>, String> {
+    platform::foreground_window(&window)
+}
+
 /// 把舞台挪到桌面上的某个位置。**只在猫走到舞台边缘时调**，见 `platform::move_window`。
 #[tauri::command]
 fn move_stage(window: WebviewWindow, x: f64, y: f64) -> Result<(), String> {
@@ -125,6 +136,7 @@ pub fn run() {
             stage_metrics,
             input_idle,
             move_stage,
+            foreground_window,
             adopt::open_adoption,
             adopt::close_adoption,
             farewell::open_farewell,

@@ -10,6 +10,7 @@ export {
   ACTIONS,
   ACTION_KEYS,
   EAT_CYCLE,
+  LEAP_CROUCH_S,
   MOTION_ONLY_ACTIONS,
   type ActionKey,
   type MotionOnlyAction,
