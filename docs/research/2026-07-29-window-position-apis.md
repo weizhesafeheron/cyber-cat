@@ -364,9 +364,15 @@ Windows 侧不需要 macOS 那种「锁定 windowID 增量查询」的优化。
 - 宠物自身的透明置顶窗口在 Windows 上的全部表现（白边、圆角、白闪、点击穿透、任务栏、全屏置顶、跨 DPI 时 Canvas 像素画是否被插值）。
   该项需要 Rust 工具链构建 Tauri 应用，协作者机器上没有，本轮未做。**这是目前 Windows 侧最大的未知。**
 
-补充确认（来自 Tauri v2 官方配置参考）：防止透明窗口创建时白闪的配置项准确为 `noRedirectionBitmap`，boolean 类型，位于 `app.windows[]` 的单个窗口配置内，在 Windows 上会设置 `WS_EX_NOREDIRECTIONBITMAP`。
-来源：[Tauri v2 config reference · noRedirectionBitmap](https://v2.tauri.app/reference/config/#noredirectionbitmap)。
-**该键名已核实，但其消除白闪的实际效果未经实测。**
+~~补充确认（来自 Tauri v2 官方配置参考）：防止透明窗口创建时白闪的配置项准确为 `noRedirectionBitmap`。~~
+
+**更正（2026-07-29，ticket #4 构建时发现）：这条不成立。**
+`noRedirectionBitmap` 在实际使用的 Tauri 2.11.5 里**不是合法配置字段** - 写进 `tauri.conf.json` 会让 `tauri-build` 直接编译失败，并列出全部合法字段，其中没有它。
+追查各层源码：tao 0.35.3 确有 `with_no_redirection_bitmap()`，但 tauri-runtime-wry 2.11.4 与 tauri 2.11.5 都没有引用或透传它，配置结构体里也没有对应字段。
+
+也就是说这个能力在底层窗口库存在，Tauri 没有暴露出来。
+改用框架无关的做法：窗口以 `visible: false` 启动，前端画出第一帧后再 `show()`。
+教训：**版本无关的文档结论要在目标版本上实际编译一次才算确认。**
 
 ---
 

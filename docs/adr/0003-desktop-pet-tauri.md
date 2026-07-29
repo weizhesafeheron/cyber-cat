@@ -25,7 +25,9 @@
 
 - **macOS 的透明窗口依赖 `macos-private-api`，因此无法上架 Mac App Store。** 直接分发 DMG（开发者签名 + 公证）不受影响。
 - Windows 需要 WebView2 运行时；无边框窗口可能出现 1px 白边与 Win11 强制圆角，需显式关闭阴影。
-- 创建透明窗口需开启 `noRedirectionBitmap` 防白闪。键名与层级已核实：boolean 类型，位于 `app.windows[]` 的单个窗口配置内，Windows 上会设置 `WS_EX_NOREDIRECTIONBITMAP`（[官方配置参考](https://v2.tauri.app/reference/config/#noredirectionbitmap)）。其实际效果尚未实测。
+- **防白闪不能依赖 `noRedirectionBitmap`** - 该字段在实际使用的 Tauri 2.11.5 中**不存在**，既没有配置字段也没有构建器方法。底层 tao 0.35 确有 `with_no_redirection_bitmap()`（设 `WS_EX_NOREDIRECTIONBITMAP`），但 tauri-runtime-wry 2.11.4 没有透传。
+  改用框架无关的做法：窗口以 `visible: false` 启动，前端画出第一帧后再由 Rust `show()`。窗口在有内容之前根本不存在，也就无从闪烁。
+  这一条是 ticket #4 构建时发现的 - 早先根据文档记录的字段名在本版本上编译直接失败。
 - `setSkipTaskbar` 在 macOS 无效，macOS 需改用 `ActivationPolicy::Accessory`。
 - MSI 必须在 Windows 机器上构建，不能交叉编译，发布链路需要 CI 或协作者的机器。
 - 项目无 Windows 测试机，Windows 版的视觉与手感问题依赖外部验收。
