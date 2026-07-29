@@ -110,14 +110,16 @@ export class PropsHost {
    * 猫会先按「没有锚点」漫游，之后突然被拽向食盆。先摆默认位置、读到存档再覆盖，
    * 中间那一下最多是挂件位置变一次，猫的行为是连续的。
    */
-  /** 最近一次知道的工作区。拖拽的钳制要用它，而拖拽事件里不带几何。 */
+  /** 最近一次知道的工作区与精灵缩放。拖拽的钳制要用它们，而拖拽事件里不带几何。 */
   private work: ScreenRect;
+  private spriteScale: number;
 
   constructor(
     geom: StageGeometry,
     private readonly ports: PropsPorts = tauriPropsPorts,
   ) {
     this.work = geom.work;
+    this.spriteScale = geom.spriteScale;
     this.state = defaultPropsState(geom.work, groundScreenY(geom), geom.spriteScale);
   }
 
@@ -137,6 +139,7 @@ export class PropsHost {
    */
   async boot(geom: StageGeometry): Promise<void> {
     this.work = geom.work;
+    this.spriteScale = geom.spriteScale;
     const saved = await this.ports.loadProps();
     // 读到的摆放要先把 y 拉回地面线再钳进工作区：**y 是派生量**，存档里存的
     // 只是上一次算出来的值，而地面线会随工作区变化（换屏、程序坞显隐）。
@@ -172,13 +175,13 @@ export class PropsHost {
     // 只有这里知道另一件挂件在哪。
     void this.ports.listenEvent<PropDragPayload>(PROP_EVENT_DRAG, (p) => {
       if (!this.booted) return; // 与 onMoved 同一条理由：读档完成前不接受位置
-      this.state = dragResult(p.kind, p.x, this.state, this.work);
+      this.state = dragResult(p.kind, p.x, this.state, this.work, this.spriteScale);
       this.pump();
     });
     // 松手：把间隔补上。拖动过程中是允许重合的（跟手优先），静止时不允许。
     void this.ports.listenEvent<PropKind>(PROP_EVENT_DROP, (kind) => {
       if (!this.booted) return;
-      this.state = settleDrag(kind, this.state, this.work);
+      this.state = settleDrag(kind, this.state, this.work, this.spriteScale);
       this.pump();
       this.schedulePersist();
     });
@@ -221,6 +224,7 @@ export class PropsHost {
    */
   reclamp(geom: StageGeometry): void {
     this.work = geom.work;
+    this.spriteScale = geom.spriteScale;
     // 工作区变了地面线也变了，纵向要跟着回到新的地面线上。
     const next = clampPropsState(
       groundedPropsState(this.state, groundScreenY(geom), geom.spriteScale),

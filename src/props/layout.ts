@@ -72,22 +72,21 @@ export function defaultPropsState(
     right -= w + PROP_GAP_PX;
   }
 
-  // 猫能站到的最右位置。超出的部分整组左移。
-  const reachMax = work.x + work.w - (CAT_W * spriteScale) / 2;
+  // 超出「猫走得到」那一段的部分整组左移，间隔与贴边的相对关系不变。
   let overflow = 0;
   for (const kind of PROP_KINDS) {
     const x = xs[kind];
     if (x === undefined) throw new Error(`PROP_RIGHT_TO_LEFT 漏了 ${kind}`);
-    const center = x + propWindowSize(kind).w / 2;
-    overflow = Math.max(overflow, center - reachMax);
+    overflow = Math.max(overflow, x - propBounds(kind, work, spriteScale).max);
   }
 
   const out: Partial<Record<PropKind, PropPlacement>> = {};
   for (const kind of PROP_KINDS) {
+    const b = propBounds(kind, work, spriteScale);
     out[kind] = clampPlacement(
       kind,
       {
-        x: Math.round(xs[kind]! - overflow),
+        x: clamp(Math.round(xs[kind]! - overflow), b.min, b.max),
         y: Math.round(groundedY(kind, groundY, spriteScale)),
         visible: PROP_DEFAULT_VISIBLE,
       },
@@ -225,6 +224,33 @@ export function samePropsState(a: PropsState, b: PropsState): boolean {
 }
 
 /**
+ * 挂件的 x 允许落在哪一段：**中心必须在猫走得到的范围内**。
+ *
+ * 猫的锚点是它精灵的横向中心，而精灵不能出屏，所以它能站到的位置两端各差半个身子
+ * （与 motion.ts 的 reachableX 是同一条算法，那边是给运动层用的）。
+ * 挂件被拖出这段的后果很直观：猫窝拖到屏幕最右边，猫躺下时中心到不了垫子中心，
+ * 于是**一半睡在床外**；食盆同理，猫会站在盆旁边够不着。
+ *
+ * 所以这不是「贴边好不好看」的问题，而是挂件只有落在这段里才是可用的家具。
+ * 默认摆放、拖动、松手补间隔全部走这一个约束。
+ *
+ * 屏幕窄到连一个身位都放不下时退回整个工作区 - 那种屏幕上猫本来就没法正常活动，
+ * 至少别把挂件推到看不见的地方。
+ */
+export function propBounds(
+  kind: PropKind,
+  work: ScreenRect,
+  spriteScale: number,
+): { min: number; max: number } {
+  const w = propWindowSize(kind).w;
+  const catHalf = (CAT_W * spriteScale) / 2;
+  const min = work.x + catHalf - w / 2;
+  const max = work.x + work.w - catHalf - w / 2;
+  if (min > max) return { min: work.x, max: work.x + work.w - w };
+  return { min: Math.ceil(min), max: Math.floor(max) };
+}
+
+/**
  * 拖动过程中的结果：**只动横向，跟手，允许暂时重合**。
  *
  * 纵向不给用户动，因为挂件是**放在地上的东西** - 纵向位置由地面线唯一决定
@@ -248,11 +274,14 @@ export function dragResult(
   desiredX: number,
   state: PropsState,
   work: ScreenRect,
+  spriteScale: number,
 ): PropsState {
   const w = propWindowSize(kind).w;
-  const inWork = (v: number, width: number): number =>
-    clamp(Math.round(v), work.x, work.x + work.w - width);
-  const x = inWork(desiredX, w);
+  const inBounds = (v: number, k: PropKind): number => {
+    const b = propBounds(k, work, spriteScale);
+    return clamp(Math.round(v), b.min, b.max);
+  };
+  const x = inBounds(desiredX, kind);
   const center = x + w / 2;
   const centerNow = state[kind].x + w / 2;
 
@@ -270,7 +299,7 @@ export function dragResult(
     // 中心交错了。被交换的那件落到我来的那一侧，紧邻我并留出间隔 -
     // 用「我现在在哪」算而不是「我原来在哪」，这样连续拖动时它的落点是稳定的。
     const parked = center < oCenter ? x + w + PROP_GAP_PX : x - PROP_GAP_PX - ow;
-    next = { ...next, [other]: { ...o, x: inWork(parked, ow) } } as PropsState;
+    next = { ...next, [other]: { ...o, x: inBounds(parked, other) } } as PropsState;
   }
 
   return next;
@@ -283,10 +312,14 @@ export function dragResult(
  * 往哪一侧推由中心的相对位置决定 - 推到「看起来更近」的那一侧，用户才不会觉得
  * 东西自己跑了。两侧都放不下（屏幕太窄）就留在原地，宁可挨着也不要推出屏幕外。
  */
-export function settleDrag(kind: PropKind, state: PropsState, work: ScreenRect): PropsState {
+export function settleDrag(
+  kind: PropKind,
+  state: PropsState,
+  work: ScreenRect,
+  spriteScale: number,
+): PropsState {
   const w = propWindowSize(kind).w;
-  const minX = work.x;
-  const maxX = work.x + work.w - w;
+  const { min: minX, max: maxX } = propBounds(kind, work, spriteScale);
   let x = state[kind].x;
 
   for (const other of PROP_KINDS) {

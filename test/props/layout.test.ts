@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   PROP_GAP_PX,
+  propBounds,
   dragResult,
   groundedPropsState,
   settleDrag,
@@ -341,7 +342,7 @@ describe('拖动：跟手，越过中心交换，松手补间隔', () => {
 
   it('纵向一步都不动 - 挂件是放在地上的东西', () => {
     const s = at(400, 800);
-    const next = dragResult('bowl', 600, s, DESKTOP);
+    const next = dragResult('bowl', 600, s, DESKTOP, SPRITE_SCALE);
     expect(next.bowl.y).toBe(s.bowl.y);
     expect(next.bed.y).toBe(s.bed.y);
   });
@@ -350,7 +351,7 @@ describe('拖动：跟手，越过中心交换，松手补间隔', () => {
     // 前一版在这里按间隔挡住，挂件停住而光标还在走，一百多像素不跟手，
     // 走到尽头再突然交换。现在每一个位置都照给。
     for (const want of [420, 600, 700, 740, 760]) {
-      const next = dragResult('bowl', want, at(400, 800), DESKTOP);
+      const next = dragResult('bowl', want, at(400, 800), DESKTOP, SPRITE_SCALE);
       expect(next.bowl.x, `想去 ${want} 却停在 ${next.bowl.x}`).toBe(want);
     }
   });
@@ -359,7 +360,7 @@ describe('拖动：跟手，越过中心交换，松手补间隔', () => {
     // 想去的位置压在猫窝上（但中心还没越过），就该压上去。
     const s = at(400, 800);
     const want = 800 + wOf('bed') / 2 - wOf('bowl') / 2 - 4; // 中心差 4 像素没到
-    const next = dragResult('bowl', want, s, DESKTOP);
+    const next = dragResult('bowl', want, s, DESKTOP, SPRITE_SCALE);
     expect(next.bowl.x).toBe(Math.round(want));
     expect(gapBetween(next)).toBeLessThan(0); // 真的重合了
     expect(next.bed.x).toBe(s.bed.x); // 还没交换
@@ -370,7 +371,7 @@ describe('拖动：跟手，越过中心交换，松手补间隔', () => {
     const bedCenter = centerOf('bed', s);
     // 让食盆中心刚好越过猫窝中心
     const want = bedCenter - wOf('bowl') / 2 + 1;
-    const next = dragResult('bowl', want, s, DESKTOP);
+    const next = dragResult('bowl', want, s, DESKTOP, SPRITE_SCALE);
     expect(centerOf('bowl', next)).toBeGreaterThan(centerOf('bed', next));
     // 交换之后立刻是分开的，间隔就是定好的那一段
     expect(gapBetween(next)).toBe(PROP_GAP_PX);
@@ -379,10 +380,10 @@ describe('拖动：跟手，越过中心交换，松手补间隔', () => {
   it('交换之后继续同向拖，不会再来回换', () => {
     let cur = at(400, 800);
     const bedCenter = centerOf('bed', cur);
-    cur = dragResult('bowl', bedCenter - wOf('bowl') / 2 + 1, cur, DESKTOP);
+    cur = dragResult('bowl', bedCenter - wOf('bowl') / 2 + 1, cur, DESKTOP, SPRITE_SCALE);
     const bedAfter = cur.bed.x;
     for (let want = cur.bowl.x; want < cur.bowl.x + 200; want += 13) {
-      cur = dragResult('bowl', want, cur, DESKTOP);
+      cur = dragResult('bowl', want, cur, DESKTOP, SPRITE_SCALE);
     }
     expect(cur.bed.x).toBe(bedAfter);
     expect(centerOf('bowl', cur)).toBeGreaterThan(centerOf('bed', cur));
@@ -390,16 +391,38 @@ describe('拖动：跟手，越过中心交换，松手补间隔', () => {
 
   it('反向也能换回来（交换不是单程票）', () => {
     let s = at(400, 800);
-    s = dragResult('bowl', centerOf('bed', s) - wOf('bowl') / 2 + 1, s, DESKTOP);
+    s = dragResult('bowl', centerOf('bed', s) - wOf('bowl') / 2 + 1, s, DESKTOP, SPRITE_SCALE);
     expect(centerOf('bowl', s)).toBeGreaterThan(centerOf('bed', s));
-    s = dragResult('bowl', centerOf('bed', s) - wOf('bowl') / 2 - 1, s, DESKTOP);
+    s = dragResult('bowl', centerOf('bed', s) - wOf('bowl') / 2 - 1, s, DESKTOP, SPRITE_SCALE);
     expect(centerOf('bowl', s)).toBeLessThan(centerOf('bed', s));
   });
 
-  it('拖不出工作区 - 出去了用户就再也拖不回来', () => {
-    expect(dragResult('bowl', -9999, at(400, 1200), DESKTOP).bowl.x).toBe(DESKTOP.x);
-    const far = dragResult('bowl', 99999, at(400, 1200), DESKTOP);
-    expect(far.bowl.x + wOf('bowl')).toBe(DESKTOP.x + DESKTOP.w);
+  it('拖不出「猫走得到」的那一段 - 否则猫会一半睡在床外', () => {
+    // 挂件的中心必须落在猫能站到的范围内。猫的锚点是精灵横向中心、精灵不能出屏，
+    // 所以两端各差半个身子。拖到屏幕最右边的代价很直观：猫躺下时中心到不了垫子
+    // 中心，一半身子在床外。
+    const catHalf = (W * SPRITE_SCALE) / 2;
+    for (const kind of PROP_KINDS) {
+      const left = dragResult(kind, -9999, at(400, 1200), DESKTOP, SPRITE_SCALE);
+      const right = dragResult(kind, 99999, at(400, 1200), DESKTOP, SPRITE_SCALE);
+      expect(centerOf(kind, left), `${kind} 拖过了左边界`).toBeGreaterThanOrEqual(
+        DESKTOP.x + catHalf - 1,
+      );
+      expect(centerOf(kind, right), `${kind} 拖过了右边界`).toBeLessThanOrEqual(
+        DESKTOP.x + DESKTOP.w - catHalf + 1,
+      );
+      // 而且是贴着这条线，不是白留一大截
+      expect(DESKTOP.x + DESKTOP.w - catHalf - centerOf(kind, right)).toBeLessThan(SPRITE_SCALE);
+    }
+  });
+
+  it('默认摆放也在同一条约束里 - 两处不能各算一套', () => {
+    const s = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
+    for (const kind of PROP_KINDS) {
+      const b = propBounds(kind, DESKTOP, SPRITE_SCALE);
+      expect(s[kind].x, `${kind} 的默认位置越界`).toBeGreaterThanOrEqual(b.min);
+      expect(s[kind].x).toBeLessThanOrEqual(b.max);
+    }
   });
 
   it('藏起来的挂件不参与交换 - 看不见的东西突然跳一下更莫名', () => {
@@ -407,23 +430,23 @@ describe('拖动：跟手，越过中心交换，松手补间隔', () => {
       bowl: { x: 400, y: 900, visible: true },
       bed: { x: 800, y: 900, visible: false },
     };
-    const next = dragResult('bowl', 1500, s, DESKTOP);
+    const next = dragResult('bowl', 1500, s, DESKTOP, SPRITE_SCALE);
     expect(next.bowl.x).toBe(1500);
     expect(next.bed.x).toBe(s.bed.x);
   });
 
   it('松手之后一定不重合，且推向更近的那一侧', () => {
     // 压在猫窝左半边就松手 → 往左让开
-    const overlapLeft = dragResult('bowl', 760, at(400, 800), DESKTOP);
+    const overlapLeft = dragResult('bowl', 760, at(400, 800), DESKTOP, SPRITE_SCALE);
     expect(gapBetween(overlapLeft)).toBeLessThan(PROP_GAP_PX);
-    const settledLeft = settleDrag('bowl', overlapLeft, DESKTOP);
+    const settledLeft = settleDrag('bowl', overlapLeft, DESKTOP, SPRITE_SCALE);
     expect(gapBetween(settledLeft)).toBe(PROP_GAP_PX);
     expect(settledLeft.bowl.x).toBeLessThan(settledLeft.bed.x);
   });
 
   it('松手时本来就不重合的话，一动都不动', () => {
     const s = at(400, 800);
-    expect(settleDrag('bowl', s, DESKTOP)).toBe(s);
+    expect(settleDrag('bowl', s, DESKTOP, SPRITE_SCALE)).toBe(s);
   });
 
   it('屏幕窄到放不下两件时，宁可挨着也不推出屏幕外', () => {
@@ -432,7 +455,7 @@ describe('拖动：跟手，越过中心交换，松手补间隔', () => {
       bowl: { x: 10, y: 500, visible: true },
       bed: { x: 14, y: 500, visible: true },
     };
-    const settled = settleDrag('bowl', s, tiny);
+    const settled = settleDrag('bowl', s, tiny, SPRITE_SCALE);
     expect(settled.bowl.x).toBeGreaterThanOrEqual(tiny.x);
     expect(settled.bowl.x + wOf('bowl')).toBeLessThanOrEqual(tiny.x + tiny.w);
   });
