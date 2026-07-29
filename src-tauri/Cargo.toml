@@ -13,6 +13,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# 命令返回值需要自己的结构体（舞台几何有八个字段，返回元组读不懂）。
+# tauri 本来就依赖同一个 serde，这里只是把它显式引进来好用 derive。
+serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [
   # 透明窗口在 macOS 上依赖私有 API。代价是无法上架 Mac App Store，
   # 这是 ADR 0003 已接受的取舍，直接分发 DMG 不受影响。

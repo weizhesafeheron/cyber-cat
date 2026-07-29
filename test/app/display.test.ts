@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { cssSizeFor, deviceScaleFor } from '../../src/app/display.js';
 import type { CssBox } from '../../src/app/display.js';
+import { STAGE_H, STAGE_W, TARGET_SCALE } from '../../src/app/stage.js';
 import { H, W } from '../../src/render/index.js';
 
 /**
@@ -61,12 +63,18 @@ describe('设备缩放取整', () => {
 });
 
 describe('画布不得溢出窗口', () => {
-  /** 宠物窗口的客户区尺寸，与 tauri.conf.json 保持一致。 */
-  const WINDOW: CssBox = { w: 240, h: 190 };
+  /**
+   * 舞台窗口的客户区尺寸。
+   *
+   * 直接用 stage.ts 的常量，不再抄一份数字：舞台化之后这两个值同时被
+   * tauri.conf.json、DPI 钳制、运动层的滚动阈值三处依赖，抄错一处症状是
+   * 「猫在某个缩放下被缩小一档」，很难从现象反推。
+   */
+  const WINDOW: CssBox = { w: STAGE_W, h: STAGE_H };
 
   it('各档真实 dpr 下，放大后的画布都放得进窗口', () => {
     for (const dpr of REAL_DPRS) {
-      const scale = deviceScaleFor(3, dpr, WINDOW);
+      const scale = deviceScaleFor(TARGET_SCALE, dpr, WINDOW);
       const { w, h } = cssSizeFor(scale, dpr);
       expect(w, `dpr=${dpr} 画布宽 ${w} 超出窗口 ${WINDOW.w}`).toBeLessThanOrEqual(WINDOW.w);
       expect(h, `dpr=${dpr} 画布高 ${h} 超出窗口 ${WINDOW.h}`).toBeLessThanOrEqual(WINDOW.h);
@@ -74,12 +82,23 @@ describe('画布不得溢出窗口', () => {
     }
   });
 
-  it('不加钳制时，Windows 的 125% 缩放会让画布溢出 - 这是钳制存在的原因', () => {
-    // 回归保护：这个组合曾经会让猫被裁掉一截。
-    const unclamped = deviceScaleFor(3, 1.25);
-    expect(cssSizeFor(unclamped, 1.25).w).toBeGreaterThan(216);
-    // 加上钳制后放得进窗口
-    const clamped = deviceScaleFor(3, 1.25, WINDOW);
+  it('舞台高度留了余量：任何真实 dpr 下钳制都不会把猫缩小一档', () => {
+    // 舞台化之后宽度方向永远宽裕（舞台是三倍精灵宽），钳制只可能来自高度。
+    // 190 高时 dpr=1.5 只剩 3 像素余量，这条测试就是那份余量的守卫。
+    for (const dpr of REAL_DPRS) {
+      expect(
+        deviceScaleFor(TARGET_SCALE, dpr, WINDOW),
+        `dpr=${dpr} 被舞台高度 ${STAGE_H} 钳掉了一档`,
+      ).toBe(deviceScaleFor(TARGET_SCALE, dpr));
+    }
+  });
+
+  it('不加钳制时，Windows 的 125% 缩放会让画布超出三倍精灵宽 - 这是钳制存在的原因', () => {
+    // 回归保护：舞台之前窗口只有 240 宽，这个组合会让猫被裁掉一截。
+    const unclamped = deviceScaleFor(TARGET_SCALE, 1.25);
+    expect(cssSizeFor(unclamped, 1.25).w).toBeGreaterThan(W * TARGET_SCALE);
+    // 猫的画布仍然必须放得进舞台
+    const clamped = deviceScaleFor(TARGET_SCALE, 1.25, WINDOW);
     expect(cssSizeFor(clamped, 1.25).w).toBeLessThanOrEqual(WINDOW.w);
   });
 
@@ -89,5 +108,24 @@ describe('画布不得溢出窗口', () => {
 
   it('窗口极小也至少保留 1 倍缩放', () => {
     expect(deviceScaleFor(3, 2, { w: 1, h: 1 })).toBe(1);
+  });
+});
+
+describe('舞台尺寸与窗口配置一致', () => {
+  it('tauri.conf.json 里 pet 窗口的尺寸就是 stage.ts 的常量', () => {
+    // JSON 配置没法 import 常量，只能反过来由测试守着。两边不一致的症状是
+    // 猫在舞台里的位置整体偏移，而且只在真机上看得见。
+    const conf = JSON.parse(
+      readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+    ) as { app: { windows: { label: string; width: number; height: number }[] } };
+    const pet = conf.app.windows.find((w) => w.label === 'pet');
+    expect(pet).toBeDefined();
+    expect(pet!.width).toBe(STAGE_W);
+    expect(pet!.height).toBe(STAGE_H);
+  });
+
+  it('舞台宽度是三倍精灵宽，容得下猫加身后一段爪印', () => {
+    expect(STAGE_W).toBe(W * TARGET_SCALE * 3);
+    expect(STAGE_H).toBeGreaterThanOrEqual(H * TARGET_SCALE);
   });
 });

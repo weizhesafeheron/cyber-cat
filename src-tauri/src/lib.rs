@@ -44,6 +44,18 @@ fn set_pass_through(window: WebviewWindow, on: bool) -> Result<(), String> {
     platform::set_pass_through(&window, on)
 }
 
+/// 舞台窗口的几何与桌面工作区，逻辑像素。见 `platform::stage_metrics`。
+#[tauri::command]
+fn stage_metrics(window: WebviewWindow) -> Result<platform::StageMetrics, String> {
+    platform::stage_metrics(&window)
+}
+
+/// 把舞台挪到桌面上的某个位置。**只在猫走到舞台边缘时调**，见 `platform::move_stage`。
+#[tauri::command]
+fn move_stage(window: WebviewWindow, x: f64, y: f64) -> Result<(), String> {
+    platform::move_stage(&window, x, y)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -51,6 +63,8 @@ pub fn run() {
             pet_ready,
             cursor_probe,
             set_pass_through,
+            stage_metrics,
+            move_stage,
             save::save_world,
             save::load_world,
             tray::update_tray

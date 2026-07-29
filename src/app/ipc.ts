@@ -42,6 +42,42 @@ export async function probeCursor(): Promise<{ x: number; y: number } | null> {
   return { x, y };
 }
 
+/** Rust 侧 `stage_metrics` 的返回形状，逻辑像素。 */
+export interface StageMetricsDto {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  work_x: number;
+  work_y: number;
+  work_w: number;
+  work_h: number;
+}
+
+/**
+ * 读舞台窗口的位置、尺寸与桌面工作区。
+ *
+ * 位置与工作区一次取回，不分两次 IPC：前端要拿它们做减法，
+ * 两次调用之间窗口可能已经挪过（猫会自己走），错位会让猫的屏幕位置整体偏移。
+ */
+export async function probeStage(): Promise<StageMetricsDto | null> {
+  if (!inTauri) return null;
+  const invoke = await invoker();
+  return invoke<StageMetricsDto>('stage_metrics');
+}
+
+/**
+ * 把舞台挪到桌面上的某个逻辑坐标。
+ *
+ * 与 setPassThrough 不同，这里**必须等返回**：画布偏移只有在窗口真的挪到位
+ * 之后才能跟着改，否则猫会先跳到别处再跳回来（见 motion.ts 的 settleStage）。
+ */
+export async function moveStage(x: number, y: number): Promise<void> {
+  if (!inTauri) return;
+  const invoke = await invoker();
+  await invoke<void>('move_stage', { x, y });
+}
+
 let passThroughFailures = 0;
 
 /**
