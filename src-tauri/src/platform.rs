@@ -239,12 +239,3 @@ pub fn place_prop(window: &WebviewWindow, x: f64, y: f64, visible: bool) -> Resu
     }
 }
 
-/// 把窗口交给操作系统的拖拽循环。
-///
-/// 挂件靠这个实现「拖到桌面任意位置」。自己在 pointermove 里逐帧 set_position
-/// 也能做，但每一步都是一次 IPC 加一次跨进程窗口操作，拖起来是拽不动的。
-/// 代价是拖拽期间前端收不到任何指针事件，也没有「拖完了」的回调 -
-/// 所以挂件窗口要回读自己的位置（见 src/app/prop-main.ts）。
-pub fn start_drag(window: &WebviewWindow) -> Result<(), String> {
-    window.start_dragging().map_err(|e| e.to_string())
-}

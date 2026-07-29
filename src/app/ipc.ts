@@ -106,19 +106,6 @@ export async function placeProp(
   await invoke<void>('place_prop', { kind, x, y, visible });
 }
 
-/**
- * 开始拖动**调用方自己那个窗口**。
- *
- * 必须由 Rust 侧的 `start_dragging` 来做：之后窗口交给操作系统的拖拽循环，
- * 前端既收不到 pointermove 也不会收到「拖完了」的回调。
- * 因此挂件窗口得靠回读位置（probeSelf）才知道自己被挪到哪儿了。
- */
-export async function dragSelf(): Promise<void> {
-  if (!inTauri) return;
-  const invoke = await invoker();
-  await invoke<void>('drag_prop');
-}
-
 /** 刷新托盘里两个挂件的显示/隐藏勾选状态。 */
 export async function pushPropMenu(bowl: boolean, bed: boolean): Promise<void> {
   if (!inTauri) return;

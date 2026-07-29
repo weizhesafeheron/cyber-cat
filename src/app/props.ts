@@ -1,5 +1,6 @@
 import {
   PROP_EVENT_CLICKED,
+  PROP_EVENT_DRAG,
   PROP_EVENT_MOVED,
   PROP_EVENT_READY,
   PROP_EVENT_SYNC,
@@ -7,12 +8,21 @@ import {
   anchorScreenX,
   clampPropsState,
   defaultPropsState,
+  dragResult,
+  groundedPropsState,
   propWindowLabel,
   samePlacement,
   samePropsState,
   withPlacement,
 } from '../props/index.js';
-import type { PropKind, PropMovedPayload, PropPlacement, PropsState } from '../props/index.js';
+import type {
+  PropDragPayload,
+  PropKind,
+  PropMovedPayload,
+  PropPlacement,
+  PropsState,
+  ScreenRect,
+} from '../props/index.js';
 import { emitToWindow, listenEvent, placeProp, pushPropMenu } from './ipc.js';
 import { groundScreenY, reachableX } from './motion.js';
 import type { StageGeometry } from './motion.js';
@@ -94,10 +104,14 @@ export class PropsHost {
    * 猫会先按「没有锚点」漫游，之后突然被拽向食盆。先摆默认位置、读到存档再覆盖，
    * 中间那一下最多是挂件位置变一次，猫的行为是连续的。
    */
+  /** 最近一次知道的工作区。拖拽的钳制要用它，而拖拽事件里不带几何。 */
+  private work: ScreenRect;
+
   constructor(
     geom: StageGeometry,
     private readonly ports: PropsPorts = tauriPropsPorts,
   ) {
+    this.work = geom.work;
     this.state = defaultPropsState(geom.work, groundScreenY(geom), geom.spriteScale);
   }
 
@@ -116,9 +130,15 @@ export class PropsHost {
    * 不钳的话挂件在屏幕外，用户既看不见也拖不回来。
    */
   async boot(geom: StageGeometry): Promise<void> {
+    this.work = geom.work;
     const saved = await this.ports.loadProps();
+    // 读到的摆放要先把 y 拉回地面线再钳进工作区：**y 是派生量**，存档里存的
+    // 只是上一次算出来的值，而地面线会随工作区变化（换屏、程序坞显隐）。
     this.state = saved
-      ? clampPropsState(saved, geom.work)
+      ? clampPropsState(
+          groundedPropsState(saved, groundScreenY(geom), geom.spriteScale),
+          geom.work,
+        )
       : defaultPropsState(geom.work, groundScreenY(geom), geom.spriteScale);
     await this.apply();
     for (const kind of PROP_KINDS) await this.sync(kind);
@@ -142,11 +162,22 @@ export class PropsHost {
     void this.ports.listenEvent<PropKind>(PROP_EVENT_CLICKED, (kind) => {
       if (kind === 'bowl') onFeed();
     });
+    // 拖拽：挂件只报「我想去这个 x」，钳制在这边做 - 只有这里知道另一件挂件在哪。
+    void this.ports.listenEvent<PropDragPayload>(PROP_EVENT_DRAG, (p) => {
+      if (!this.booted) return; // 与 onMoved 同一条理由：读档完成前不接受位置
+      const next = dragResult(p.kind, p.x, this.state, this.work);
+      if (samePropsState(next, this.state)) return;
+      this.state = next;
+      // 交换位置时另一件也动了，所以两件都要下发一次。applyOne 自带去重。
+      void this.apply();
+      this.schedulePersist();
+    });
     void this.ports.listenEvent<PropMovedPayload>(PROP_EVENT_MOVED, (p) => {
       if (!this.booted) return; // 见 booted 的注释：读档完成前不接受位置
       // 用户拖过的位置**不再钳回工作区**：他把食盆摆在哪儿是他的决定
       // （ADR 0004 的「布置领地」），当场纠回去只会让人觉得窗口在跟自己抢。
-      const next = withPlacement(this.state, p.kind, { x: p.x, y: p.y });
+      // **只采纳 x。** 纵向由地面线决定，系统把窗口挪到哪一行都不算用户的意思。
+      const next = withPlacement(this.state, p.kind, { x: p.x });
       if (samePropsState(next, this.state)) return;
       this.state = next;
       // 位置是挂件窗口自己报上来的，窗口已经在那儿了，不要再下发一次移动 -
@@ -179,7 +210,12 @@ export class PropsHost {
    * 能看见能拖到的位置一律尊重用户，只有「已经拿不回来了」才出手。
    */
   reclamp(geom: StageGeometry): void {
-    const next = clampPropsState(this.state, geom.work);
+    this.work = geom.work;
+    // 工作区变了地面线也变了，纵向要跟着回到新的地面线上。
+    const next = clampPropsState(
+      groundedPropsState(this.state, groundScreenY(geom), geom.spriteScale),
+      geom.work,
+    );
     if (samePropsState(next, this.state)) return;
     this.state = next;
     void this.apply();

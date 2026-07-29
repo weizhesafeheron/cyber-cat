@@ -223,3 +223,92 @@ export function samePlacement(a: PropPlacement, b: PropPlacement): boolean {
 export function samePropsState(a: PropsState, b: PropsState): boolean {
   return PROP_KINDS.every((kind) => samePlacement(a[kind], b[kind]));
 }
+
+/**
+ * 拖动的结果：**只动横向**，而且两件家具永不重合。
+ *
+ * 纵向不给用户动，因为挂件是**放在地上的东西** - 纵向位置由地面线唯一决定
+ * （groundedY）。放开纵向的代价立刻就能看见：食盆会被拖到猫脚下面的空处浮着，
+ * 而猫走过去吃饭时仍然按地面线站，两者对不上。
+ * 猫本身也只有 x、没有 y，永远走在同一条线上，所以「所有东西共用一条地面线」
+ * 是这套空间模型的唯一不变量。这与「脚踩实地」是同一条约束的两面
+ * （见 art-and-motion-decisions）。
+ *
+ * 重合怎么避免：**拖的那件中心越过另一件中心时，两件互换位置。**
+ *
+ * 被否决的两个方案：
+ * - 挡住不许越过。最简单，但代价是两件家具再也换不了位置 - 互相挡着，
+ *   哪一件都过不去。产品负责人的问题「如果我想让 2 个挂件换位置，应该咋办」
+ *   就是这个方案答不上来。
+ * - 推开：拖着一件去顶另一件，被顶的跟着滑。手感像推家具，但顶到屏幕边就卡住，
+ *   贴边摆放时（默认就是贴边）照样换不了。
+ *
+ * 交换是原子的：两件同时落到新位置，中间不存在重合的那一帧。
+ */
+export function dragResult(
+  kind: PropKind,
+  desiredX: number,
+  state: PropsState,
+  work: ScreenRect,
+): PropsState {
+  const w = propWindowSize(kind).w;
+  const inWork = (v: number, width: number): number =>
+    clamp(Math.round(v), work.x, work.x + work.w - width);
+  // 用户「想去」的位置。判定要不要交换看的是它，而不是钳过之后的结果 -
+  // 钳过之后中心永远越不过对方，交换就永远不会发生。
+  const wantX = inWork(desiredX, w);
+  const wantCenter = wantX + w / 2;
+  const myCenterNow = state[kind].x + w / 2;
+
+  let next = state;
+  let minX = work.x;
+  let maxX = work.x + work.w - w;
+
+  for (const other of PROP_KINDS) {
+    if (other === kind) continue;
+    // 隐藏的挂件既不阻挡也不交换：看不见的东西挡手或者突然跳一下都很莫名。
+    if (!state[other].visible) continue;
+    const o = state[other];
+    const ow = propWindowSize(other).w;
+    const oCenter = o.x + ow / 2;
+
+    if (myCenterNow < oCenter === wantCenter < oCenter) {
+      // 还在同一侧：挡住，留出间隔，绝不重合。
+      if (myCenterNow < oCenter) maxX = Math.min(maxX, o.x - PROP_GAP_PX - w);
+      else minX = Math.max(minX, o.x + ow + PROP_GAP_PX);
+      continue;
+    }
+
+    // 推过了对方的中心：交换。对方去我腾出来的位置（按中心对齐，免得宽度不同时
+    // 看起来偏一截），我落到另一侧，再按新的相对关系留出间隔。
+    const movedOther = { ...o, x: inWork(myCenterNow - ow / 2, ow) };
+    next = { ...next, [other]: movedOther } as PropsState;
+    const newOCenter = movedOther.x + ow / 2;
+    if (wantCenter < newOCenter) maxX = Math.min(maxX, movedOther.x - PROP_GAP_PX - w);
+    else minX = Math.max(minX, movedOther.x + ow + PROP_GAP_PX);
+  }
+
+  // 屏幕窄到放不下两件家具时 min 会超过 max。此时只保证不出工作区 -
+  // 宁可两件挨着也不要把挂件推到屏幕外，推出去用户就再也拖不回来了。
+  const x = minX > maxX ? wantX : clamp(wantX, minX, maxX);
+  return { ...next, [kind]: { ...state[kind], x } } as PropsState;
+}
+
+/**
+ * 把每件挂件的纵向位置拉回地面线。
+ *
+ * 读存档之后必须走一遍：**y 是派生量**，由地面线与贴图高度算出来，不是用户的选择。
+ * 存档里可能留着旧版本写下的任意 y（早先的实现允许纵向拖动），照用的结果是
+ * 挂件浮在半空。工作区也可能变了（换屏、程序坞显隐），地面线跟着变。
+ */
+export function groundedPropsState(
+  state: PropsState,
+  groundY: number,
+  spriteScale: number,
+): PropsState {
+  const out: Partial<Record<PropKind, PropPlacement>> = {};
+  for (const kind of PROP_KINDS) {
+    out[kind] = { ...state[kind], y: Math.round(groundedY(kind, groundY, spriteScale)) };
+  }
+  return out as PropsState;
+}

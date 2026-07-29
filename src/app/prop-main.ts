@@ -2,6 +2,7 @@ import {
   PET_WINDOW_LABEL,
   PROP_DRAG_THRESHOLD_PX,
   PROP_EVENT_CLICKED,
+  PROP_EVENT_DRAG,
   PROP_EVENT_MOVED,
   PROP_EVENT_READY,
   PROP_EVENT_SYNC,
@@ -19,7 +20,6 @@ import type { PropKind, PropSprite, PropSyncPayload } from '../props/index.js';
 import { CursorTracker } from './cursor.js';
 import type { HitConfig } from './hit.js';
 import {
-  dragSelf,
   emitToWindow,
   inTauri,
   listenEvent,
@@ -169,10 +169,28 @@ window.addEventListener('pointermove', (e) => tracker.observe(e.clientX, e.clien
 // 拖拽与点击
 // ---------------------------------------------------------------------------
 
+/**
+ * 拖拽自己实现，**不用系统的 `start_dragging`**。
+ *
+ * 系统拖拽两个方向都自由，而挂件只允许横向移动 - 它是放在地上的东西，纵向位置
+ * 由地面线决定（见 props/layout.ts 的 dragResult）。用系统拖拽再把 y 拽回来是
+ * 和操作系统的拖拽循环打架，而且拖动过程中挂件会先浮起来再弹回去。
+ *
+ * 代价是每一次 pointermove 都要发一个事件出去。可以接受：拖动是低频操作，
+ * 而且宠物窗口只在钳出来的位置真的变了之后才下发窗口移动。
+ */
 /** 按下的起点，CSS 客户区坐标。null = 当前没有按下。 */
 let pressAt: { x: number; y: number } | null = null;
-/** 这一次按下已经交给系统拖拽了。之后的 pointerup 不再算点击。 */
+/** 已经越过阈值、进入拖拽。之后的 pointerup 不再算点击。 */
 let dragging = false;
+/**
+ * 按下时「光标屏幕 x - 窗口屏幕 x」。
+ *
+ * 拖动时用它反推窗口该去哪：`窗口 x = 光标屏幕 x - 抓握偏移`。
+ * 不用位移累加 - 窗口是被我们自己挪动的，累加会把每一次微小的取整误差攒起来，
+ * 拖久了光标就跑到挂件外面去了。
+ */
+let grabOffset: number | null = null;
 
 window.addEventListener('pointerdown', (e) => {
   // 落在贴图之外（包围盒的透明角落）不算按到挂件。这里能收到事件说明穿透已经
@@ -180,23 +198,34 @@ window.addEventListener('pointerdown', (e) => {
   if (!hitsSprite(e.clientX, e.clientY)) return;
   pressAt = { x: e.clientX, y: e.clientY };
   dragging = false;
+  grabOffset = null;
+  // 窗口的屏幕 x 要现问一次：轮询到的那份可能已经过时（用户刚拖完又按下）。
+  const wantScreenX = e.screenX;
+  void probeSelf()
+    .then((m) => {
+      if (m) grabOffset = wantScreenX - m.x;
+    })
+    .catch(() => undefined);
 });
 
 window.addEventListener('pointermove', (e) => {
-  if (!pressAt || dragging) return;
-  if (Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) < PROP_DRAG_THRESHOLD_PX) return;
-  dragging = true;
-  pressAt = null;
-  // 交给系统的拖拽循环。这之后 webview 收不到任何指针事件，所以状态要先清干净。
-  void dragSelf().catch((err: unknown) => {
-    console.error('[cyber-cat] 开始拖动挂件失败：', err);
-  });
+  if (!pressAt) return;
+  if (!dragging) {
+    if (Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) < PROP_DRAG_THRESHOLD_PX) return;
+    dragging = true;
+  }
+  if (grabOffset === null) return; // 还没问到窗口位置，这几帧先不动
+  // 只报 x。钳制（工作区、与另一件挂件的关系）由宠物窗口做 - 它才知道兄弟在哪。
+  void emitToWindow(PET_WINDOW_LABEL, PROP_EVENT_DRAG, { kind, x: e.screenX - grabOffset });
 });
 
 window.addEventListener('pointerup', (e) => {
   const start = pressAt;
+  const wasDragging = dragging;
   pressAt = null;
-  if (!start || dragging) return;
+  dragging = false;
+  grabOffset = null;
+  if (!start || wasDragging) return;
   if (Math.hypot(e.clientX - start.x, e.clientY - start.y) >= PROP_DRAG_THRESHOLD_PX) return;
   // 点了挂件。**只发一个事件**：添粮是世界层的用户动作，必须走同一个 step。
   void emitToWindow(PET_WINDOW_LABEL, PROP_EVENT_CLICKED, kind);
@@ -204,6 +233,8 @@ window.addEventListener('pointerup', (e) => {
 
 window.addEventListener('pointercancel', () => {
   pressAt = null;
+  dragging = false;
+  grabOffset = null;
 });
 
 function hitsSprite(clientX: number, clientY: number): boolean {

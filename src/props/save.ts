@@ -22,11 +22,18 @@ export class PropsSaveError extends Error {
   }
 }
 
+/**
+ * 只存 x 与可见性。**纵向不存** - 它是派生量，由地面线与贴图高度算出来
+ * （layout.ts 的 groundedY），存进去就多了一份会过期的真相。
+ *
+ * 早先连 y 一起存，代价当场就看到了：往存档里写一个任意的 y，挂件就浮在半空，
+ * 而猫仍然按地面线走过去吃饭，两者对不上。
+ */
 export function serializeProps(state: PropsState): string {
   return JSON.stringify({
     version: PROPS_SAVE_VERSION,
-    bowl: state.bowl,
-    bed: state.bed,
+    bowl: { x: state.bowl.x, visible: state.bowl.visible },
+    bed: { x: state.bed.x, visible: state.bed.visible },
   });
 }
 
@@ -48,7 +55,9 @@ function placement(raw: unknown, kind: PropKind): PropPlacement {
     throw new PropsSaveError(`${kind}.visible 应为布尔值，实际为 ${JSON.stringify(visible)}`);
   }
   // 逐字段重建：多余字段被丢掉，缺失字段当场炸。
-  return { x: num(p, 'x', kind), y: num(p, 'y', kind), visible };
+  // y 给 0 是占位：调用方读档之后必须走一遍 groundedPropsState 把它算回地面线
+  // （见 app/props.ts 的 boot）。这里不算，是因为纯存档层不知道地面线在哪。
+  return { x: num(p, 'x', kind), y: 0, visible };
 }
 
 /**

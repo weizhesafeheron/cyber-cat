@@ -138,7 +138,7 @@ export const PROP_POLL_MS = 48;
 export const PROP_POSITION_WATCH_MS = 500;
 
 /** 挂件摆放的存档格式版本。结构变更时递增。 */
-export const PROPS_SAVE_VERSION = 1;
+export const PROPS_SAVE_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // 窗口标签与事件名
@@ -162,10 +162,26 @@ export const PET_WINDOW_LABEL = 'pet';
 export const PROP_EVENT_READY = 'prop-ready';
 /** 用户点了挂件。食盆 = 添粮。 */
 export const PROP_EVENT_CLICKED = 'prop-clicked';
-/** 用户把挂件拖到了新位置。 */
+/**
+ * 用户正在拖挂件，载荷是他希望的窗口左上角屏幕 x。
+ *
+ * **只有 x。** 纵向由地面线决定，不是用户的选择（见 layout.ts 的 dragResult）。
+ * 由宠物窗口收下、钳好、再下发窗口移动 - 钳制要看另一件挂件在哪，
+ * 而挂件窗口不知道兄弟窗口的位置，那份状态只有宠物窗口有。
+ */
+export const PROP_EVENT_DRAG = 'prop-drag';
+
+/** 挂件回报自己被系统挪到了哪（换屏、分辨率变化）。拖拽不走这条。 */
 export const PROP_EVENT_MOVED = 'prop-moved';
 /** 宠物窗口下发给挂件的视图状态（目前只有碗里的份数）。 */
 export const PROP_EVENT_SYNC = 'prop-sync';
+
+/** `PROP_EVENT_DRAG` 的载荷。 */
+export interface PropDragPayload {
+  readonly kind: PropKind;
+  /** 希望的窗口左上角屏幕 x，逻辑像素。 */
+  readonly x: number;
+}
 
 /** `PROP_EVENT_MOVED` 的载荷。坐标是窗口客户区左上角的屏幕逻辑坐标。 */
 export interface PropMovedPayload {

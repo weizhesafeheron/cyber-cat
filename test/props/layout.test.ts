@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   PROP_GAP_PX,
+  dragResult,
+  groundedPropsState,
   PROP_KINDS,
   PROP_REACH_SPRITE,
   PROP_SCALE,
@@ -20,7 +22,7 @@ import {
   samePropsState,
   withPlacement,
 } from '../../src/props/index.js';
-import type { PropKind, PropPlacement, ScreenRect } from '../../src/props/index.js';
+import type { PropKind, PropPlacement, PropsState, ScreenRect } from '../../src/props/index.js';
 import { TARGET_SCALE } from '../../src/app/stage.js';
 import { groundScreenY } from '../../src/app/motion.js';
 import { GROUND, H, W } from '../../src/render/index.js';
@@ -321,5 +323,117 @@ describe('挂件的高度', () => {
     const a = groundedY('bowl', GROUND_Y, SPRITE_SCALE);
     const b = groundedY('bed', GROUND_Y, SPRITE_SCALE);
     expect(a - b).toBe((PROP_SPRITE.bed.h - PROP_SPRITE.bowl.h) * SPRITE_SCALE);
+  });
+});
+
+describe('拖动：只动横向，永不重合', () => {
+  const at = (bowlX: number, bedX: number): PropsState => ({
+    bowl: { x: bowlX, y: 900, visible: true },
+    bed: { x: bedX, y: 900, visible: true },
+  });
+
+  it('纵向一步都不动 - 挂件是放在地上的东西', () => {
+    const s = at(400, 800);
+    const next = dragResult('bowl', 600, s, DESKTOP);
+    expect(next.bowl.y).toBe(s.bowl.y);
+    expect(next.bed.y).toBe(s.bed.y);
+  });
+
+  it('横向跟着走', () => {
+    const next = dragResult('bowl', 600, at(400, 1200), DESKTOP);
+    expect(next.bowl.x).toBe(600);
+  });
+
+  it('拖不出工作区 - 出去了用户就再也拖不回来', () => {
+    expect(dragResult('bowl', -9999, at(400, 1200), DESKTOP).bowl.x).toBe(DESKTOP.x);
+    const far = dragResult('bowl', 99999, at(400, 1200), DESKTOP);
+    expect(far.bowl.x + propWindowSize('bowl').w).toBe(DESKTOP.x + DESKTOP.w);
+  });
+
+  it('中心越过另一件就交换，不是叠在一起', () => {
+    // 食盆在左、猫窝在右。把食盆一路拖到猫窝右边。
+    const s = at(400, 800);
+    const bedCenter = 800 + propWindowSize('bed').w / 2;
+    const next = dragResult('bowl', bedCenter + 100, s, DESKTOP);
+    // 食盆去了右边，猫窝接手食盆原来的位置
+    expect(next.bowl.x).toBeGreaterThan(next.bed.x);
+    const myOldCenter = 400 + propWindowSize('bowl').w / 2;
+    expect(next.bed.x + propWindowSize('bed').w / 2).toBe(myOldCenter);
+  });
+
+  it('交换之后两件仍然不重合', () => {
+    const s = at(400, 800);
+    const bedCenter = 800 + propWindowSize('bed').w / 2;
+    const next = dragResult('bowl', bedCenter + 5, s, DESKTOP);
+    const left = next.bowl.x < next.bed.x ? 'bowl' : 'bed';
+    const right = left === 'bowl' ? 'bed' : 'bowl';
+    expect(next[right].x).toBeGreaterThanOrEqual(next[left].x + propWindowSize(left).w);
+  });
+
+  it('没越过中心就不交换，而且被挡在间隔外 - 不许压在另一件上', () => {
+    const s = at(400, 800);
+    const bedCenter = 800 + propWindowSize('bed').w / 2;
+    // 想去的位置让中心差一点点才到对方中心：不交换，且被挡住
+    const next = dragResult('bowl', bedCenter - 1 - propWindowSize('bowl').w / 2, s, DESKTOP);
+    expect(next.bed.x).toBe(s.bed.x);
+    expect(next.bowl.x + propWindowSize('bowl').w).toBe(next.bed.x - PROP_GAP_PX);
+  });
+
+  it('一路往对方身上拖，停在间隔外一步都不越界', () => {
+    const s = at(400, 800);
+    let cur = s;
+    for (let want = 400; want < 800; want += 7) {
+      cur = dragResult('bowl', want, cur, DESKTOP);
+      const gap = cur.bed.x - (cur.bowl.x + propWindowSize('bowl').w);
+      expect(gap, `拖到 ${want} 时间隔只有 ${gap}`).toBeGreaterThanOrEqual(PROP_GAP_PX);
+    }
+  });
+
+  it('藏起来的挂件不参与交换 - 看不见的东西突然跳一下更莫名', () => {
+    const s: PropsState = {
+      bowl: { x: 400, y: 900, visible: true },
+      bed: { x: 800, y: 900, visible: false },
+    };
+    const next = dragResult('bowl', 1500, s, DESKTOP);
+    expect(next.bowl.x).toBe(1500);
+    expect(next.bed.x).toBe(s.bed.x);
+  });
+
+  it('反向也能换回来（交换不是单程票）', () => {
+    let s = at(400, 800);
+    const bedCenter = 800 + propWindowSize('bed').w / 2;
+    s = dragResult('bowl', bedCenter + 100, s, DESKTOP);
+    expect(s.bowl.x).toBeGreaterThan(s.bed.x);
+    // 再把食盆拖回猫窝左边
+    const bedCenter2 = s.bed.x + propWindowSize('bed').w / 2;
+    s = dragResult('bowl', bedCenter2 - propWindowSize('bowl').w - 50, s, DESKTOP);
+    expect(s.bowl.x).toBeLessThan(s.bed.x);
+  });
+});
+
+describe('纵向永远由地面线决定', () => {
+  it('存档里带着任意的 y 也会被拉回地面线', () => {
+    const floating: PropsState = {
+      bowl: { x: 300, y: 100, visible: true },
+      bed: { x: 700, y: 4000, visible: true },
+    };
+    const fixed = groundedPropsState(floating, GROUND_Y, SPRITE_SCALE);
+    for (const kind of PROP_KINDS) {
+      const lastRowTop = fixed[kind].y + (PROP_SPRITE[kind].h - 1) * SPRITE_SCALE;
+      expect(lastRowTop, `${kind} 没踩在地面线上`).toBe(Math.round(GROUND_Y));
+      // x 与可见性不动
+      expect(fixed[kind].x).toBe(floating[kind].x);
+      expect(fixed[kind].visible).toBe(floating[kind].visible);
+    }
+  });
+
+  it('两件挂件拉回之后底边在同一条线上', () => {
+    const fixed = groundedPropsState(
+      { bowl: { x: 0, y: 1, visible: true }, bed: { x: 400, y: 2, visible: true } },
+      GROUND_Y,
+      SPRITE_SCALE,
+    );
+    const bottom = (k: PropKind): number => fixed[k].y + propWindowSize(k).h;
+    expect(bottom('bowl')).toBe(bottom('bed'));
   });
 });

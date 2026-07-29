@@ -73,6 +73,9 @@ fn prop_label(kind: &str) -> String {
 }
 
 /// 摆放一个挂件窗口：挪到位并决定显示还是隐藏。见 `platform::place_prop`。
+///
+/// 挂件的拖动**不走系统的拖拽循环**，也是经这条命令一步步挪的：挂件只允许横向
+/// 移动（它是放在地上的东西，纵向由地面线决定），而系统拖拽两个方向都自由。
 #[tauri::command]
 fn place_prop(app: AppHandle, kind: String, x: f64, y: f64, visible: bool) -> Result<(), String> {
     let label = prop_label(&kind);
@@ -80,12 +83,6 @@ fn place_prop(app: AppHandle, kind: String, x: f64, y: f64, visible: bool) -> Re
         .get_webview_window(&label)
         .ok_or_else(|| format!("找不到挂件窗口 {label}"))?;
     platform::place_prop(&window, x, y, visible)
-}
-
-/// 把**调用方自己那个窗口**交给系统的拖拽循环。挂件靠它实现「拖到桌面任意位置」。
-#[tauri::command]
-fn drag_prop(window: WebviewWindow) -> Result<(), String> {
-    platform::start_drag(&window)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -100,7 +97,6 @@ pub fn run() {
             adopt::open_adoption,
             adopt::close_adoption,
             place_prop,
-            drag_prop,
             save::save_world,
             save::load_world,
             save::save_props,
