@@ -30,6 +30,8 @@
         display: flex;
         flex-direction: column;
         user-select: none;
+        /* 让开自绘的标题条（src/chrome/）。高度只有一份，见 adopt.html 同处注释 */
+        padding-top: var(--chrome-h);
       }
 
       /* 抬头钉在上面，日记本身滚动 - 翻到第三十天时还要知道这是谁的日记 */
@@ -131,7 +133,7 @@
       <p id="empty" hidden></p>
       <div id="days"></div>
     </main>
-    <footer>按 Esc 关闭</footer>
+    <footer>按 Esc 关闭 · 拖右下角改大小</footer>
 
     <script type="module" src="/src/diary/main.ts"></script>
   </body>

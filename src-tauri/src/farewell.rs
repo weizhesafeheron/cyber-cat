@@ -46,6 +46,8 @@ pub fn open_farewell(app: AppHandle, width: f64, height: f64) -> Result<(), Stri
     .center()
     // 不可缩放：里面两块列表各自滚动，窗口尺寸是按内容排好的（见 constants.ts）。
     .resizable(false)
+    // 无边框：标题栏由页面自己画（src/chrome/）。见 docs/adr/0013-自绘标题栏.md。
+    .decorations(false)
     .maximizable(false)
     .minimizable(false)
     .focused(true)

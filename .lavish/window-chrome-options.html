@@ -1,0 +1,360 @@
+<title>弹出窗口的标题栏：四个方案</title>
+<style>
+  :root {
+    --bg: #0b0e1a;
+    --card: #161c34;
+    --line: #2c3a68;
+    --ink: #d8dcf0;
+    --dim: #aab3d8;
+    --faint: #5b6488;
+    --cyan: #4deeea;
+    --yellow: #ffd94a;
+    --pink: #ff8fb0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 24px 80px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    line-height: 1.7;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: 0.5px; }
+  .sub { color: var(--dim); margin: 0 0 4px; }
+  .note { color: var(--faint); font-size: 13px; margin: 0 0 28px; }
+  h2 { font-size: 15px; color: var(--cyan); margin: 34px 0 12px; letter-spacing: 1px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 18px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0 0 16px;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .card.pick { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(77, 238, 234, 0.25); }
+  .card h3 { font-size: 15px; margin: 14px 16px 2px; }
+  .card .tag { font-size: 11px; color: var(--faint); margin: 0 16px 10px; letter-spacing: 0.5px; }
+  .card p { font-size: 13px; color: var(--dim); margin: 0 16px 10px; }
+  .card ul { margin: 0 16px; padding-left: 18px; font-size: 13px; }
+  .card li { margin: 3px 0; }
+  .good { color: #8fe3a8; }
+  .bad { color: var(--pink); }
+  .badge {
+    display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--cyan); color: var(--cyan); margin: 0 16px 8px; letter-spacing: 0.5px;
+  }
+
+  /* ---- 窗口模型：所有方案共用一套骨架，只换顶部 ---- */
+  .mock { margin: 0; background: #06080f; border-bottom: 1px solid var(--line); }
+  .win { margin: 14px 16px; border-radius: 8px; overflow: hidden; background: var(--bg); border: 1px solid #000; }
+  .lights { display: flex; gap: 6px; align-items: center; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .r { background: #ff5f57; } .y { background: #febc2e; } .g { background: #28c840; }
+
+  /* A 系统标题栏（现状） */
+  .bar-sys {
+    height: 30px; display: flex; align-items: center; padding: 0 10px;
+    background: linear-gradient(180deg, #3a3a3c, #2c2c2e);
+    border-bottom: 1px solid #1b1b1d;
+  }
+  .bar-sys .t { flex: 1; text-align: center; font-size: 12px; color: #cfcfd2; margin-right: 40px; }
+
+  /* B 透明标题栏 */
+  .bar-transparent {
+    height: 30px; display: flex; align-items: center; padding: 0 10px;
+    background: var(--bg); border-bottom: none;
+  }
+
+  /* C 自绘像素标题条 */
+  .bar-pixel {
+    height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+    background: var(--card); border-bottom: 1px solid var(--line);
+  }
+  .bar-pixel .paw { width: 12px; height: 12px; image-rendering: pixelated; }
+  .bar-pixel .t { flex: 1; font-size: 12px; color: var(--dim); letter-spacing: 1px; }
+  .bar-pixel .x {
+    width: 18px; height: 18px; display: grid; place-items: center;
+    border: 1px solid var(--line); border-radius: 3px; color: var(--faint);
+    /* line-height 必须压回 1：body 的 1.7 会让 × 的行盒高过这个 18px 的框，
+       布局审计报的就是那 3px 裁切 */
+    font-size: 12px; line-height: 1;
+  }
+
+  /* 窗口内容占位：模仿领养页 */
+  .body-adopt { height: 132px; position: relative; background: linear-gradient(180deg, #101736 0%, #0b0e1a 72%); }
+  .rain { position: absolute; inset: 0; opacity: 0.5; }
+  .rain i { position: absolute; width: 1px; height: 9px; background: #9aa6d8; transform: rotate(12deg); }
+  .catbox { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); }
+  .catbox svg { display: block; image-rendering: pixelated; }
+  .lines { padding: 10px 12px 12px; }
+  .lines .l1 { font-size: 11px; color: var(--yellow); }
+  .lines .l2 { font-size: 13px; color: var(--cyan); margin-top: 4px; }
+  .lines .l3 { display: flex; gap: 5px; margin-top: 7px; }
+  .lines .l3 span { font-size: 10px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--faint); font-weight: 600; font-size: 12px; letter-spacing: 0.5px; }
+  td code { color: var(--cyan); font-size: 12px; }
+  .scroll { overflow-x: auto; }
+
+  form { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-top: 26px; }
+  form h2 { margin-top: 0; }
+  label.opt { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; font-size: 14px; cursor: pointer; }
+  label.opt input { margin-top: 5px; }
+  label.opt b { color: var(--ink); font-weight: 600; }
+  label.opt em { color: var(--faint); font-style: normal; font-size: 12px; display: block; }
+  .extra { margin-top: 12px; }
+  .extra summary { cursor: pointer; color: var(--dim); font-size: 13px; }
+  textarea {
+    width: 100%; margin-top: 8px; min-height: 62px; background: var(--bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-family: inherit; font-size: 13px;
+  }
+  button.send {
+    margin-top: 14px; background: var(--cyan); color: #06202a; border: 0; border-radius: 6px;
+    padding: 9px 18px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer;
+  }
+  @media (prefers-color-scheme: light) {
+    /* 这一页刻意只有深色：它模拟的是应用自己的深色窗口，浅色底会看不出对比 */
+  }
+</style>
+
+<div class="wrap">
+  <h1>弹出窗口的标题栏：四个方案</h1>
+  <p class="sub">领养窗口与日记窗口现在用的是 macOS 的系统标题栏，你说上边框有点丑。</p>
+  <p class="note">
+    下面四个方案我都先确认过 Tauri 2.11 真的支持（<code>titleBarStyle</code> 的三个取值、<code>hiddenTitle</code>、<code>decorations</code>，构建器上都有透传）。
+    模型里的猫和雨是按应用自己的配色画的示意，不是截图。
+  </p>
+
+  <h2>四个方案</h2>
+  <div class="grid">
+
+    <!-- A 现状 -->
+    <div class="card">
+      <div class="mock">
+        <div class="win">
+          <div class="bar-sys">
+            <div class="lights"><i class="dot r"></i><i class="dot y"></i><i class="dot g"></i></div>
+            <div class="t">有猫停在你面前</div>
+          </div>
+          <div class="body-adopt">
+            <div class="rain">
+              <i style="left:12%;top:8%"></i><i style="left:28%;top:34%"></i><i style="left:44%;top:12%"></i>
+              <i style="left:61%;top:44%"></i><i style="left:77%;top:20%"></i><i style="left:88%;top:56%"></i>
+            </div>
+            <div class="catbox">
+              <svg width="54" height="42" viewBox="0 0 18 14">
+                <g fill="#e8a35c">
+                  <rect x="4" y="5" width="10" height="6"/><rect x="11" y="2" width="5" height="5"/>
+                  <rect x="11" y="1" width="1" height="1"/><rect x="15" y="1" width="1" height="1"/>
+                  <rect x="3" y="3" width="1" height="3"/><rect x="5" y="11" width="2" height="2"/><rect x="11" y="11" width="2" height="2"/>
+                </g>
+                <g fill="#2b2f4a"><rect x="12" y="4" width="1" height="1"/><rect x="14" y="4" width="1" height="1"/></g>
+              </svg>
+            </div>
+          </div>
+          <div class="lines">
+            <div class="l1">雨声里有脚步。</div>
+            <div class="l2">奶牛猫</div>
+            <div class="l3"><span>一刻不停</span><span>独来独往</span><span>闻见就冲</span></div>
+          </div>
+        </div>
+      </div>
+      <h3>A · 保持现状</h3>
+      <p class="tag">系统标题栏</p>
+      <p>灰色的 macOS 标题栏压在雨夜上面，和页面配色完全断开。</p>
+      <ul>
+        <li class="good">零改动、零风险</li>
+        <li class="bad">就是你说的那个「有点丑」</li>
+      </ul>
+    </div>
+
+    <!-- B 透明标题栏 -->
+    <div class="card pick">
+      <span class="badge">我的推荐</span>
+      <div class="mock">
+        <div class="win">
+          <div class="bar-transparent">
+            <div class="lights"><i class="dot r"></i><i class="dot y"></i><i class="dot g"></i></div>
+          </div>
+          <div class="body-adopt">
+            <div class="rain">
+              <i style="left:12%;top:8%"></i><i style="left:28%;top:34%"></i><i style="left:44%;top:12%"></i>
+              <i style="left:61%;top:44%"></i><i style="left:77%;top:20%"></i><i style="left:88%;top:56%"></i>
+            </div>
+            <div class="catbox">
+              <svg width="54" height="42" viewBox="0 0 18 14">
+                <g fill="#e8e8ee">
+                  <rect x="4" y="5" width="10" height="6"/><rect x="11" y="2" width="5" height="5"/>
+                  <rect x="11" y="1" width="1" height="1"/><rect x="15" y="1" width="1" height="1"/>
+                  <rect x="3" y="3" width="1" height="3"/><rect x="5" y="11" width="2" height="2"/><rect x="11" y="11" width="2" height="2"/>
+                </g>
+                <g fill="#2b2f4a"><rect x="6" y="6" width="3" height="3"/><rect x="12" y="4" width="1" height="1"/><rect x="14" y="4" width="1" height="1"/></g>
+              </svg>
+            </div>
+          </div>
+          <div class="lines">
+            <div class="l1">雨声里有脚步。</div>
+            <div class="l2">奶牛猫</div>
+            <div class="l3"><span>一刻不停</span><span>独来独往</span><span>闻见就冲</span></div>
+          </div>
+        </div>
+      </div>
+      <h3>B · 标题栏透明 + 藏掉标题文字</h3>
+      <p class="tag">titleBarStyle: Transparent · hiddenTitle</p>
+      <p>灰条变成页面自己的底色，交通灯留在原位。窗口顶部只剩三颗灯浮在深蓝上。</p>
+      <ul>
+        <li class="good">改两行配置，不用自己处理拖动</li>
+        <li class="good">关窗方式没变，不会有人找不到</li>
+        <li class="bad">macOS 专属，Windows 上仍是系统标题栏</li>
+        <li class="bad">顶部会空出约 30px 的纯色带</li>
+      </ul>
+    </div>
+
+    <!-- C 自绘像素标题条 -->
+    <div class="card">
+      <div class="mock">
+        <div class="win">
+          <div class="bar-pixel">
+            <svg class="paw" width="12" height="12" viewBox="0 0 5 4"><g fill="#8a86a8"><rect x="0" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="4" y="0" width="1" height="1"/><rect x="1" y="1" width="3" height="1"/></g></svg>
+            <div class="t">有猫停在你面前</div>
+            <div class="x">×</div>
+          </div>
+          <div class="body-adopt">
+            <div class="rain">
+              <i style="left:12%;top:8%"></i><i style="left:28%;top:34%"></i><i style="left:44%;top:12%"></i>
+              <i style="left:61%;top:44%"></i><i style="left:77%;top:20%"></i><i style="left:88%;top:56%"></i>
+            </div>
+            <div class="catbox">
+              <svg width="54" height="42" viewBox="0 0 18 14">
+                <g fill="#9b96c8">
+                  <rect x="4" y="5" width="10" height="6"/><rect x="11" y="2" width="5" height="5"/>
+                  <rect x="11" y="1" width="1" height="1"/><rect x="15" y="1" width="1" height="1"/>
+                  <rect x="3" y="3" width="1" height="3"/><rect x="5" y="11" width="2" height="2"/><rect x="11" y="11" width="2" height="2"/>
+                </g>
+                <g fill="#2b2f4a"><rect x="12" y="4" width="1" height="1"/><rect x="14" y="4" width="1" height="1"/></g>
+              </svg>
+            </div>
+          </div>
+          <div class="lines">
+            <div class="l1">雨声里有脚步。</div>
+            <div class="l2">奶牛猫</div>
+            <div class="l3"><span>一刻不停</span><span>独来独往</span><span>闻见就冲</span></div>
+          </div>
+        </div>
+      </div>
+      <h3>C · 完全自绘像素标题条</h3>
+      <p class="tag">decorations: false + 自己画</p>
+      <p>一条 28px 的深色窄条，左边一枚像素爪印，右边自绘的关闭按钮。两个平台完全一致。</p>
+      <ul>
+        <li class="good">外观全在我们手里，和像素风一致</li>
+        <li class="good">Windows 与 macOS 长得一样</li>
+        <li class="bad">要自己接拖动（<code>data-tauri-drag-region</code>）与关闭按钮</li>
+        <li class="bad">自绘的关闭按钮不如交通灯那么「一看就懂」</li>
+      </ul>
+    </div>
+
+    <!-- D 无边框 -->
+    <div class="card">
+      <div class="mock">
+        <div class="win">
+          <div class="body-adopt" style="height:150px">
+            <div class="rain">
+              <i style="left:12%;top:8%"></i><i style="left:28%;top:34%"></i><i style="left:44%;top:12%"></i>
+              <i style="left:61%;top:44%"></i><i style="left:77%;top:20%"></i><i style="left:88%;top:56%"></i>
+              <i style="left:20%;top:66%"></i><i style="left:52%;top:70%"></i>
+            </div>
+            <div class="catbox">
+              <svg width="54" height="42" viewBox="0 0 18 14">
+                <g fill="#c9c4d8">
+                  <rect x="4" y="5" width="10" height="6"/><rect x="11" y="2" width="5" height="5"/>
+                  <rect x="11" y="1" width="1" height="1"/><rect x="15" y="1" width="1" height="1"/>
+                  <rect x="3" y="3" width="1" height="3"/><rect x="5" y="11" width="2" height="2"/><rect x="11" y="11" width="2" height="2"/>
+                </g>
+                <g fill="#2b2f4a"><rect x="12" y="4" width="1" height="1"/><rect x="14" y="4" width="1" height="1"/></g>
+              </svg>
+            </div>
+          </div>
+          <div class="lines">
+            <div class="l1">雨声里有脚步。</div>
+            <div class="l2">奶牛猫</div>
+            <div class="l3"><span>一刻不停</span><span>独来独往</span><span>闻见就冲</span></div>
+          </div>
+        </div>
+      </div>
+      <h3>D · 完全没有标题栏</h3>
+      <p class="tag">decorations: false，不画任何条</p>
+      <p>整扇窗就是内容，圆角直接切在雨夜上。靠 Esc、或页面自己的按钮关闭。</p>
+      <ul>
+        <li class="good">最干净，最像「一扇会呼吸的窗」</li>
+        <li class="bad">领养窗口没有可见的关闭入口 - 而关掉它等于退出应用，这条路不能没有</li>
+        <li class="bad">窗口拖不动（除非再补拖动区）</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>三扇窗各自的顾虑</h2>
+  <div class="scroll">
+    <table>
+      <tr><th style="width:110px">窗口</th><th>为什么它的标题栏不能随便去掉</th></tr>
+      <tr>
+        <td><b>领养</b></td>
+        <td>关掉它 = <b>退出应用</b>（还没有猫，没什么可留下的）。所以必须有一个明显的关闭入口，否则用户想放弃时会以为程序卡死了。</td>
+      </tr>
+      <tr>
+        <td><b>日记</b></td>
+        <td>可缩放（用户想拉长看更多天）。<code>decorations: false</code> 之后系统的缩放边框也没了，要自己补 - 或者接受不能缩放。</td>
+      </tr>
+      <tr>
+        <td><b>告别页</b></td>
+        <td>同领养：它是「再养一只」的唯一入口，关闭入口不能含糊。</td>
+      </tr>
+    </table>
+  </div>
+
+  <h2>我为什么推荐 B</h2>
+  <p class="sub" style="max-width:760px">
+    它去掉的正是你嫌丑的那一块（灰色渐变条 + 系统字体的标题），而**不动任何交互** -
+    交通灯还在老地方，拖动、缩放、关闭全归系统管，没有一处需要我重新实现。
+    C 更好看，但它把「关窗、拖动、缩放」三件系统行为搬到我们自己手里，
+    每一件都有平台差异，而这三扇窗都是一次性流程 - 为它们担这份维护成本不划算。
+  </p>
+  <p class="note" style="max-width:760px">
+    如果你要的就是「像素风到底」，我也可以做 C，只是我会把它限定在<b>领养页与告别页</b>（不可缩放，只需要拖动与关闭），日记页保留 B。
+  </p>
+
+  <form data-lavish-question="chrome" onsubmit="event.preventDefault();
+    const f = new FormData(event.currentTarget);
+    const choice = f.get('chrome');
+    const note = (f.get('note') || '').toString().trim();
+    if (!choice) return;
+    const map = {
+      A: '保持现状（系统标题栏）',
+      B: '方案 B：标题栏透明 + 隐藏标题（titleBarStyle Transparent + hiddenTitle）',
+      C: '方案 C：完全自绘像素标题条（decorations false，自接拖动与关闭）',
+      D: '方案 D：完全没有标题栏（decorations false，不画条）',
+      BC: '混合：领养页与告别页用 C 自绘像素条，日记页用 B 透明标题栏'
+    };
+    window.lavish.queuePrompt('弹出窗口的标题栏就按这个做：' + map[choice] + (note ? ('。补充：' + note) : ''), {
+      tag: 'choice', text: '标题栏方案：' + choice, element: event.currentTarget,
+      data: { question: 'chrome', answer: choice, note }
+    });
+  ">
+    <h2>你选哪个</h2>
+    <label class="opt"><input type="radio" name="chrome" value="B" checked><span><b>B · 标题栏透明 + 藏标题</b><em>改动最小，交互一点不动。我的推荐</em></span></label>
+    <label class="opt"><input type="radio" name="chrome" value="C"><span><b>C · 完全自绘像素条</b><em>最像素风，两平台一致，但拖动与关闭要我自己接</em></span></label>
+    <label class="opt"><input type="radio" name="chrome" value="BC"><span><b>混合</b><em>领养页与告别页自绘，日记页透明（它要能缩放）</em></span></label>
+    <label class="opt"><input type="radio" name="chrome" value="D"><span><b>D · 完全没有标题栏</b><em>最干净，但领养页会失去可见的关闭入口</em></span></label>
+    <label class="opt"><input type="radio" name="chrome" value="A"><span><b>A · 先不动</b><em>还有别的事更值得先做</em></span></label>
+    <details class="extra">
+      <summary>补充点什么（可选）</summary>
+      <textarea name="note" placeholder="比如：顶部那 30px 空带能不能压到 20px、想要圆角更大、爪印换成别的图案……"></textarea>
+    </details>
+    <button class="send" type="submit">选好了，发给我</button>
+  </form>
+</div>

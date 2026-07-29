@@ -22,8 +22,16 @@ pub const DIARY_LABEL: &str = "diary";
 ///
 /// **两个入口共用这一个命令**：托盘菜单的「猫咪日记」，以及猫头顶那个可点的
 /// 回归气泡。两者点开的是同一页，不该有两套窗口生命周期。
+/// 尺寸**四个数全由前端给**，包括下限。日记页自绘了标题栏，而标题条的高度只在
+/// src/chrome/constants.ts 有一份 - 下限要把它算进去，写死在这里就成了第二份。
 #[tauri::command]
-pub fn open_diary(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+pub fn open_diary(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+    min_width: f64,
+    min_height: f64,
+) -> Result<(), String> {
     // 已经开着就把它拿到前面来，不再建第二个。托盘与气泡可能被连着点两次。
     if let Some(existing) = app.get_webview_window(DIARY_LABEL) {
         let _ = existing.unminimize();
@@ -42,8 +50,14 @@ pub fn open_diary(app: AppHandle, width: f64, height: f64) -> Result<(), String>
         .center()
         // 可缩放：日记是一列文字，用户想拉长看更多天是合理的。
         // 但给一个下限 - 再窄下去每行会断成两三截。
+        //
+        // **无边框窗口上这条只对 macOS 有效**：tao 给无边框窗口摘掉了 WS_THICKFRAME，
+        // Windows 那边四边根本拖不动，缩放全靠页面右下角那个自绘的把手，
+        // 而它自己也钳同一对下限（src/chrome/resize.ts）。
         .resizable(true)
-        .min_inner_size(320.0, 320.0)
+        .min_inner_size(min_width, min_height)
+        // 无边框：标题栏由页面自己画（src/chrome/）。见 docs/adr/0013-自绘标题栏.md。
+        .decorations(false)
         .maximizable(false)
         .focused(true)
         // 不置顶。日记是一页可以慢慢看的东西，不是提示 - 压在用户所有窗口之上

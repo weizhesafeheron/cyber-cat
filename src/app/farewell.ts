@@ -1,3 +1,4 @@
+import { withChrome } from '../chrome/constants.js';
 import { FAREWELL_H, FAREWELL_W } from '../farewell/constants.js';
 import { emptyMemorial, enshrine, sameCat } from '../memorial/index.js';
 import type { Memorial } from '../memorial/index.js';
@@ -35,7 +36,7 @@ export interface FarewellPorts {
 export const tauriFarewellPorts: FarewellPorts = {
   loadMemorial,
   saveMemorial,
-  openFarewell: () => openFarewell(FAREWELL_W, FAREWELL_H),
+  openFarewell: () => openFarewell(FAREWELL_W, withChrome(FAREWELL_H)),
 };
 
 /** 一只猫的身份键。用来记住「这一只的告别页已经处理过了」。 */

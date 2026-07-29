@@ -10,7 +10,14 @@
  * 文案里不出现「生成」「创建」「随机」「抽取」这类词 - 那会把一次相遇变成一次配置。
  */
 import { CatDisplay } from '../app/display.js';
-import { announceAdopted, closeAdoption, contentReady, inTauri } from '../app/ipc.js';
+import {
+  announceAdopted,
+  cancelAdoption,
+  closeAdoption,
+  contentReady,
+  inTauri,
+} from '../app/ipc.js';
+import { mountChrome } from '../chrome/index.js';
 import { faceDir, walkSpeedFor } from '../app/motion.js';
 import { GROUND_FROM_BOTTOM } from '../app/stage.js';
 import { ACTIONS, CatRenderer, makeCat, makeMicro, stepMicro } from '../render/index.js';
@@ -249,6 +256,29 @@ matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('cha
  * 对隐藏窗口不触发 - 把首帧放进 rAF 会死锁在「窗口永远不显示」上。
  * 这个坑宠物窗口踩过两次，见 lib.rs 的 content_ready。
  */
+/*
+ * 标题条要在量夜幕高度之前挂上去：它是 fixed 的，但它会把 body 的内容往下推
+ * （body 的 padding-top），而 applyGeometry 量的正是 #night 的宽度。
+ *
+ * 关闭按钮走 cancel_adoption 而不是 close_adoption：后者的含义是「领养走完了」，
+ * 用它关窗会让应用以为已经有猫（adopt.rs 里那面旗子），首次启动时留下一个
+ * 没有猫的空进程。
+ */
+mountChrome({
+  close: {
+    hint: '先不养猫（会退出）',
+    close: () => {
+      if (!inTauri) {
+        console.info('[cyber-cat] 浏览器调试模式：真机上这里会放弃领养');
+        return;
+      }
+      void cancelAdoption().catch((err: unknown) => {
+        console.error('[cyber-cat] 放弃领养失败：', err);
+      });
+    },
+  },
+});
+
 applyGeometry();
 walkIn();
 render(0);

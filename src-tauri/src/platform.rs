@@ -7,7 +7,7 @@
 //! - docs/research/2026-07-29-macos-hit-test/report.md
 //! - docs/research/2026-07-29-windows-transparent-window/report.md
 
-use tauri::{App, LogicalPosition, WebviewWindow};
+use tauri::{App, LogicalPosition, LogicalSize, WebviewWindow};
 
 /// 一个窗口的几何读数，全部是**逻辑像素**（点）。
 ///
@@ -560,6 +560,17 @@ pub fn move_window(window: &WebviewWindow, x: f64, y: f64) -> Result<(), String>
     let inset_y = f64::from(inner.y - outer.y) / scale;
     window
         .set_position(LogicalPosition::new(x - inset_x, y - inset_y))
+        .map_err(|e| e.to_string())
+}
+
+/// 把窗口的客户区改成给定的逻辑尺寸。
+///
+/// 只有日记窗口用得到：它自绘了标题栏，于是**四边的系统缩放框在 Windows 上没了**
+/// （tao 给无边框窗口摘掉 `WS_THICKFRAME`），右下角那个把手是唯一的缩放入口。
+/// 由前端按指针位移算出尺寸再调这里 - 与挂件拖拽同一条做法（见 src/chrome/resize.ts）。
+pub fn resize_window(window: &WebviewWindow, w: f64, h: f64) -> Result<(), String> {
+    window
+        .set_size(LogicalSize::new(w, h))
         .map_err(|e| e.to_string())
 }
 

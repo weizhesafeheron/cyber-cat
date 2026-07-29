@@ -69,6 +69,9 @@ pub fn open_adoption(
         .center()
         // 不可缩放：里面的雨夜画面按固定尺寸排的，拉大只会露出空白。
         .resizable(false)
+        // 无边框：标题栏由页面自己画（src/chrome/）。见 docs/adr/0013-自绘标题栏.md。
+        // 系统那条灰色渐变条压在深蓝雨夜上面，是这一页唯一一处与配色断开的地方。
+        .decorations(false)
         .maximizable(false)
         .minimizable(false)
         .focused(true)
@@ -98,6 +101,23 @@ pub fn open_adoption(
     });
 
     Ok(())
+}
+
+/// 放弃领养：用户点了自绘标题栏上的关闭按钮。
+///
+/// 与 `close_adoption` 只差一件事：**不立 `AdoptionDone` 那面旗子**。
+/// 旗子的含义是「领养走完了」，而这里恰恰是没走完，所以窗口销毁时的处理器要照常
+/// 执行放弃该做的事 - 切回附属模式，首次启动还要退出应用。
+///
+/// 有了自绘标题栏之后这条路才需要一个命令：以前用户是点系统的交通灯关窗，
+/// 那条路根本不经过前端。
+#[tauri::command]
+pub fn cancel_adoption(app: AppHandle) -> Result<(), String> {
+    match app.get_webview_window(ADOPT_LABEL) {
+        Some(window) => window.close().map_err(|e| format!("关闭领养窗口失败：{e}")),
+        // 已经没有窗口了：用户可能同时按了别的什么。不算错误。
+        None => Ok(()),
+    }
 }
 
 /// 关掉领养窗口。由领养窗口在把身份交回宠物窗口之后调用。

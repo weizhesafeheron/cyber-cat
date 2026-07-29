@@ -266,17 +266,52 @@ export async function onAdoptAnother(handler: () => void): Promise<void> {
  * 失败只记录：日记打不开是「看不到日记」，不该连带影响猫的日常运行。
  * 浏览器里调试时直接跳过 - 没有第二个窗口可开。
  */
-export async function openDiary(width: number, height: number): Promise<void> {
+export async function openDiary(
+  width: number,
+  height: number,
+  minWidth: number,
+  minHeight: number,
+): Promise<void> {
   if (!inTauri) {
     console.info('[cyber-cat] 浏览器调试模式：真机上这里会打开日记窗口');
     return;
   }
   try {
     const invoke = await invoker();
-    await invoke<void>('open_diary', { width, height });
+    await invoke<void>('open_diary', { width, height, minWidth, minHeight });
   } catch (err) {
     console.error('[cyber-cat] 打开日记窗口失败：', err);
   }
+}
+
+/**
+ * 把**调用方自己的窗口**改成给定的客户区尺寸，逻辑像素。
+ *
+ * 只有日记页会调：它自绘了标题栏，而 Windows 上无边框窗口没有系统缩放框
+ * （见 src/chrome/resize.ts 顶部），右下角那个把手是唯一的缩放入口。
+ *
+ * 失败只记录：这条命令在拖动过程中每帧都可能调到，一次失败不该打断拖动，
+ * 更不该在控制台里刷屏 - 所以错误不往上抛。
+ */
+export async function resizeSelf(width: number, height: number): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const invoke = await invoker();
+    await invoke<void>('resize_self', { width, height });
+  } catch (err) {
+    console.error('[cyber-cat] 缩放窗口失败：', err);
+  }
+}
+
+/**
+ * 放弃领养（点了自绘标题栏上的关闭按钮）。
+ *
+ * 与 closeAdoption 是两条不同的路：那条说的是「领养走完了」，这条说的是「不养了」，
+ * Rust 侧靠这个区别决定要不要退出应用（见 adopt.rs）。
+ */
+export async function cancelAdoption(): Promise<void> {
+  const invoke = await invoker();
+  await invoke<void>('cancel_adoption');
 }
 
 /** 关掉日记窗口（由日记页自己调）。理由同 closeAdoption。 */

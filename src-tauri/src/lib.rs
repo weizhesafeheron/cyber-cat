@@ -100,6 +100,16 @@ fn move_stage(window: WebviewWindow, x: f64, y: f64) -> Result<(), String> {
     platform::move_window(&window, x, y)
 }
 
+/// 把**调用方自己的窗口**改成给定的客户区尺寸，逻辑像素。
+///
+/// 只有日记窗口会调：自绘标题栏之后系统的缩放框在 Windows 上不存在了，
+/// 右下角的把手是唯一的缩放入口（见 `platform::resize_window`）。
+/// 不接受 label 参数 - 一扇窗口只能改自己的尺寸。
+#[tauri::command]
+fn resize_self(window: WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+    platform::resize_window(&window, width, height)
+}
+
 // --- 桌面挂件（ticket 08）------------------------------------------------
 //
 // 三个命令都由前端驱动：摆放存档在前端（屏幕坐标不能进世界存档），
@@ -136,9 +146,11 @@ pub fn run() {
             stage_metrics,
             input_idle,
             move_stage,
+            resize_self,
             foreground_window,
             adopt::open_adoption,
             adopt::close_adoption,
+            adopt::cancel_adoption,
             farewell::open_farewell,
             farewell::close_farewell,
             notify::notify,

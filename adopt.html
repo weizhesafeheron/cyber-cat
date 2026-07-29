@@ -29,6 +29,14 @@
         font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
         user-select: none;
       }
+      /*
+       * 让开自绘的标题条（fixed 在窗口顶部，src/chrome/）。
+       * 那个高度由 mountChrome 写进 --chrome-h，只有一份 - 别在这里写死。
+       * 窗口高度那边也加了同一段（withChrome），所以雨夜与文字的排版一像素都没动。
+       */
+      body {
+        padding-top: var(--chrome-h);
+      }
       /* 雨夜。猫在里面走动，走出边界的部分被裁掉，才有「从画面外走来」 */
       #night {
         position: relative;

@@ -39,7 +39,8 @@
       body {
         display: flex;
         flex-direction: column;
-        padding: 18px 22px 16px;
+        /* 上边距 = 自绘标题条 + 原来那 18。高度只有一份，见 adopt.html 同处注释 */
+        padding: calc(var(--chrome-h) + 18px) 22px 16px;
       }
 
       /* --- 遗照与陪伴记录 --- */

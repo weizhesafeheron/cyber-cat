@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "chrome",
+  "description": "三扇弹出窗口（领养、日记、告别）自绘标题栏所需的那一条权限：按住标题条拖窗口。data-tauri-drag-region 走的是 core 窗口插件的 start_dragging，而它**不在 core:window:default 里面** - 漏了它的症状是标题条按下去毫无反应，而且只在真机上看得见。拿系统的窗口拖拽而不是自己按指针位移调位置：那条路自带贴边与跨屏，每次拖动只有一次跨进程调用。缩放与关窗都走应用自己的命令（resize_self / close_diary / cancel_adoption 等），在 Rust 侧执行，因此这里只要这一条。单独一份而不是加进 default.json，是因为 default.json 里还有宠物窗口，而宠物窗口整窗都是穿透的、从不接受拖动 - 那扇窗口不该拿到这条权限。",
+  "windows": ["adopt", "diary", "farewell"],
+  "permissions": ["core:window:allow-start-dragging"]
+}

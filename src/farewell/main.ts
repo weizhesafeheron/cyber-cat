@@ -14,6 +14,7 @@
  * 的样式注释里 - 那些是「安静」在这一页真正的落点，改样式前先读一遍。
  */
 import { announceAdoptAnother, closeFarewell, contentReady, inTauri } from '../app/ipc.js';
+import { mountChrome } from '../chrome/index.js';
 import { loadMemorial } from '../app/persist.js';
 import { emptyMemorial } from '../memorial/index.js';
 import type { Memorial } from '../memorial/index.js';
@@ -208,6 +209,17 @@ async function boot(): Promise<void> {
   renderArchive();
   ui.note.textContent = '再养一只不会有任何惩罚，它们都还在档案里。';
 }
+
+/*
+ * 自绘的标题条。这一页不可缩放，所以没有把手。
+ *
+ * 也接一下 Esc：与日记同一条手势。关掉告别页不退出应用（farewell.rs），
+ * 所以这里不像领养窗口那样需要在提示里警告什么。
+ */
+mountChrome({ close: { hint: '关闭', close: () => void closeFarewell() } });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') void closeFarewell();
+});
 
 applyGeometry();
 void boot()

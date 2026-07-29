@@ -1,0 +1,118 @@
+/*
+ * 自绘标题条的样式。三扇弹出窗口共用这一份。
+ *
+ * 配色沿用领养页那套（深靛蓝 + 青 + 黄 + 报警粉），那套已经验收过；
+ * 关闭按钮的悬停色用报警粉 #f652a0，是这一页里唯一一处「按下去会失去什么」的动作。
+ *
+ * **这里不写 body 的内边距。** 标题条是 fixed 的，内容要让开的那 28 像素由各页
+ * 自己声明（`padding-top: var(--chrome-h)`）- 三个页面的 body 内边距各不相同
+ * （告别页还有左右和下边距），在这里统一声明会与页面自己的 padding 打架，
+ * 而两份样式表谁先谁后取决于打包器，那种 bug 只在 build 之后出现。
+ * 高度这个数由 mountChrome 写进 --chrome-h，只有一份（chrome/constants.ts）。
+ *
+ * 圆角一律不加：无边框窗口在 macOS 上是直角，CSS 上的圆角只会在四角露出桌面
+ * （要真圆角得开 transparent，那会把窗口拖进另一套合成路径）。
+ * 而直角本来就更像素 - 这一版四个方案里选 C 就是要这个。
+ */
+
+.chrome {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  height: var(--chrome-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 3px 0 9px;
+  background: #161c34;
+  border-bottom: 1px solid #2c3a68;
+  user-select: none;
+  -webkit-user-select: none;
+  /* 拖动区上不要出现文本光标。drag.js 会 preventDefault，但指针形状要自己给 */
+  cursor: default;
+}
+
+.chrome-paw {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: #4deeea;
+  opacity: 0.75;
+}
+
+.chrome-title {
+  /* min-width: 0 是必须的：flex 子项默认不肯缩到内容以下，长标题会把关闭按钮挤出去 */
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #aab3d8;
+  /* 行高压回 1：页面上的 1.7 会让文字的行盒高过 28 的条子，把字裁掉一角 */
+  line-height: 1;
+}
+
+.chrome-x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #5b6488;
+  cursor: pointer;
+}
+.chrome-x:hover {
+  border-color: #f652a0;
+  color: #f652a0;
+}
+.chrome-x:focus-visible {
+  outline: none;
+  border-color: #4deeea;
+  color: #4deeea;
+}
+
+/*
+ * 窗口边框。
+ *
+ * 无边框窗口在深色桌面上没有边界，整扇窗会和背景糊在一起。
+ * 单独一层 fixed 覆盖物而不是 body 的 inset 阴影：内嵌阴影画在背景之上、
+ * 内容之下，而领养页的雨夜画布是贴着窗口上沿铺满的，会把左上角那一段盖掉。
+ */
+.chrome-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  border: 1px solid #2c3a68;
+  pointer-events: none;
+}
+
+/*
+ * 右下角的缩放把手。只有日记窗口有。
+ *
+ * 它必须画在最上层：日记的 main 是滚动区，滚动条会压在这个角上，
+ * 而把手比滚动条更需要被点中（滚轮和键盘都能滚，缩放只有这一个入口）。
+ */
+.chrome-grip {
+  position: fixed;
+  right: 1px;
+  bottom: 1px;
+  z-index: 21;
+  width: var(--chrome-grip);
+  height: var(--chrome-grip);
+  /* 比页脚那行提示（#3d456b）亮一档：它是 Windows 上唯一的缩放入口，
+     不能低调到看不见 */
+  color: #5b6488;
+  cursor: nwse-resize;
+  /* 拖动中指针会滑出这个 14×14 的小方块，触摸/触控板上还会被当成滚动手势 */
+  touch-action: none;
+}
+.chrome-grip:hover {
+  color: #4deeea;
+}

@@ -1,3 +1,4 @@
+import { CHROME_H } from '../chrome/constants.js';
 import { H, W } from '../render/index.js';
 
 /**
@@ -89,6 +90,19 @@ export const SPRITE_H = H;
  */
 export const DIARY_W = 420;
 export const DIARY_H = 560;
+
+/**
+ * 缩放的下限，逻辑像素（含自绘标题条那 28）。
+ *
+ * 宽度 360 是「每行不断成两三截」的下限：日记条目左边有一列 40 宽的时刻，
+ * 再窄下去正文只剩不到 300，中文一行放不下一句完整的话。
+ * 高度 320 只是「还看得见一条」的下限 - 拉到这么小的人是想把它当便签摆在角上。
+ *
+ * 这两个数会一路传到 Rust 的 min_inner_size（open_diary 的参数），
+ * 右下角把手也钳同一对（src/chrome/resize.ts）。**只有这一份。**
+ */
+export const DIARY_MIN_W = 360;
+export const DIARY_MIN_H = 320 + CHROME_H;
 
 /**
  * 界面上最多显示多少条。

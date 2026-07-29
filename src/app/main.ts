@@ -32,8 +32,11 @@ import type { RenderIntent, UserAction, World } from '../world/index.js';
 import { ADOPT_H, ADOPT_W } from '../adopt/constants.js';
 import { beginAdoption } from '../adopt/flow.js';
 import type { AdoptedIdentity } from '../adopt/identity.js';
+import { withChrome } from '../chrome/constants.js';
 import {
   DIARY_H,
+  DIARY_MIN_H,
+  DIARY_MIN_W,
   DIARY_W,
   bubbleVisible,
   bubbleBob,
@@ -333,7 +336,7 @@ let bubbleRect: SpriteRect | null = null;
  */
 function showDiary(): void {
   bubbleArmedAt = null;
-  void openDiary(DIARY_W, DIARY_H);
+  void openDiary(DIARY_W, withChrome(DIARY_H), DIARY_MIN_W, DIARY_MIN_H);
 }
 
 /**
@@ -1012,7 +1015,7 @@ const gate: AdoptionGate = {
       // 放弃领养要不要退出应用，取决于此刻有没有别的路可走，而 `booted` 正好是
       // 「猫已经就位过」：首次启动时还是 false（没有猫，退出），
       // 告别页之后再领养时是 true（托盘里还能再打开告别页，不该退出）。
-      openAdoption: () => openAdoption(ADOPT_W, ADOPT_H, !booted),
+      openAdoption: () => openAdoption(ADOPT_W, withChrome(ADOPT_H), !booted),
     });
   },
   saveWorld,
@@ -1042,7 +1045,7 @@ async function adoptAnother(): Promise<void> {
     // 落地，它仍然活着等着同一个事件；再挂一条的话两条会在同一个事件上一起落地，
     // 结果是连着领养两只猫，第二只当场把第一只覆盖掉。
     // 反过来说，正因为原来那条等待还活着，重新开出来的窗口选完猫照样能走通。
-    await openAdoption(ADOPT_W, ADOPT_H, false).catch((err: unknown) => {
+    await openAdoption(ADOPT_W, withChrome(ADOPT_H), false).catch((err: unknown) => {
       console.error('[cyber-cat] 重新打开领养窗口失败：', err);
     });
     return;

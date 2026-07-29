@@ -14,12 +14,13 @@
  *
  * 代价：日记打开着的时候不会自己刷新。可以接受 - 用户是来翻看的，不是来盯着的。
  */
-import { contentReady, closeDiary, inTauri } from '../app/ipc.js';
+import { contentReady, closeDiary, inTauri, resizeSelf } from '../app/ipc.js';
+import { mountChrome } from '../chrome/index.js';
 import { loadWorld } from '../app/persist.js';
 import { makeCat } from '../render/index.js';
 import { companionDays, worldNow } from '../world/index.js';
 import type { World } from '../world/index.js';
-import { DIARY_VISIBLE_ENTRIES } from './constants.js';
+import { DIARY_MIN_H, DIARY_MIN_W, DIARY_VISIBLE_ENTRIES } from './constants.js';
 import { groupDiary } from './text.js';
 import type { DiaryDay } from './text.js';
 
@@ -82,6 +83,22 @@ function renderMissing(): void {
 // 按 Esc 关窗。日记是一页看完就走的东西，伸手去点标题栏是多余的一步。
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') void closeDiary();
+});
+
+/*
+ * 自绘的标题条 + 右下角的缩放把手。
+ *
+ * 三扇弹出窗口里只有这一扇给把手：日记是一列可以拉长的文字，另外两扇的排版
+ * 是按固定尺寸摆好的（resizable(false)）。把手是这一版**唯一**的缩放入口 -
+ * 无边框窗口在 Windows 上连四边都拖不动（见 src/chrome/resize.ts 顶部）。
+ */
+mountChrome({
+  close: { hint: '关闭日记', close: () => void closeDiary() },
+  resize: {
+    minW: DIARY_MIN_W,
+    minH: DIARY_MIN_H,
+    apply: (w, h) => void resizeSelf(w, h),
+  },
 });
 
 /**
