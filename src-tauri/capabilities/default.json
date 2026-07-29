@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "宠物窗口所需的最小权限集",
-  "windows": ["pet"],
+  "description": "宠物窗口与领养窗口所需的最小权限集。领养窗口要用事件通道把选定的猫交回宠物窗口，因此也必须列在这里 - 漏了它 emit 会被权限系统拦掉，表现为领养完之后什么都没发生。",
+  "windows": ["pet", "adopt"],
   "permissions": ["core:default"]
 }

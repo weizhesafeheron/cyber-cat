@@ -6,7 +6,7 @@
  * **猫的状态一步都不在这里演化** - 全部经由世界层的 `step`（ADR 0001）。
  * **逐帧位置一步都不回写世界层** - 那条通路会破坏离线等价性（ADR 0007）。
  *
- * 领养流程见 ticket 07，真正的抚摸见 ticket 10，爬前台窗口见 ticket 12。
+ * 真正的抚摸见 ticket 10，爬前台窗口见 ticket 12。
  */
 import {
   ACTIONS,
@@ -18,13 +18,27 @@ import {
   makeMicro,
   stepMicro,
 } from '../render/index.js';
-import type { ActionKey, RenderResult } from '../render/index.js';
+import type { ActionKey, Cat, MicroState, RenderResult } from '../render/index.js';
 import { clamp } from '../render/rng.js';
-import { MS_PER_HOUR, createWorld, renderIntentOf, step, worldNow } from '../world/index.js';
+import { MS_PER_HOUR, renderIntentOf, step, worldNow } from '../world/index.js';
 import type { RenderIntent, UserAction, World } from '../world/index.js';
+import { ADOPT_H, ADOPT_W } from '../adopt/constants.js';
+import { beginAdoption } from '../adopt/flow.js';
+import type { AdoptedIdentity } from '../adopt/identity.js';
+import { ensureWorld, requestAdoption } from './adoption.js';
+import type { AdoptionGate } from './adoption.js';
 import { CursorTracker } from './cursor.js';
 import { CatDisplay } from './display.js';
-import { inTauri, moveStage, petReady, probeCursor, probeStage, setPassThrough } from './ipc.js';
+import {
+  contentReady,
+  inTauri,
+  moveStage,
+  openAdoption,
+  probeCursor,
+  probeStage,
+  setPassThrough,
+  waitForAdopted,
+} from './ipc.js';
 import {
   ALL_MICRO_ON,
   applyMicroSwitches,
@@ -42,11 +56,6 @@ import { PawCanvas } from './paws.js';
 import { loadWorld, onTrayAction, pushTrayStatus, saveWorld } from './persist.js';
 import { TARGET_SCALE } from './stage.js';
 import { trayStatus } from './status.js';
-
-/** 尚无领养流程（ticket 07），先写死品种与 Seed。 */
-const PLACEHOLDER_BREED = 'orange' as const;
-const PLACEHOLDER_SEED = 20260728;
-const PLACEHOLDER_NAME = '小猫';
 
 /** 单帧用于推进动画相位的最大时长。掉帧时不要让动作跳一大段。 */
 const MAX_ANIM_DT = 0.05;
@@ -134,16 +143,27 @@ applyGeometry();
 /** 本地时区偏移，分钟（东八区 = 480）。JS 的 getTimezoneOffset 符号相反。 */
 const tzOffsetMinutes = (): number => -new Date().getTimezoneOffset();
 
-let world: World = createWorld({
-  breed: PLACEHOLDER_BREED,
-  seed: PLACEHOLDER_SEED,
-  name: PLACEHOLDER_NAME,
-  bornAt: Date.now(),
-  tzOffsetMinutes: tzOffsetMinutes(),
-});
+/**
+ * 这只猫。
+ *
+ * **领养完成（或读到存档）之前它们并不存在** - 所以是 `!` 而不是给一只占位猫。
+ * ticket 04 曾经在这里写死一只橘猫（seed 20260728），代价是启动时会有一瞬间画的
+ * 是那只不属于用户的猫；ticket 07 之后没有占位猫，那一瞬间也随之消失。
+ *
+ * 不变量：读这三个变量的所有通路都在 `boot()` 里 install 之后才可达
+ * （帧循环由 startLoop 起，而 startLoop 认 `booted`）。
+ */
+let world!: World;
+let cat!: Cat;
+let micro!: MicroState;
 
-let cat = makeCat(world.identity.breed, world.identity.seed);
-let micro = makeMicro(world.identity.seed);
+/** 把猫装进来。外观与性格一律由「品种 + Seed」重建，不从存档里读派生值。 */
+function install(w: World): void {
+  // 时区跟随当前机器：用户换了时区（或过了夏令时），猫的作息该跟着用户的白天走。
+  world = { ...w, tzOffsetMinutes: tzOffsetMinutes() };
+  cat = makeCat(world.identity.breed, world.identity.seed);
+  micro = makeMicro(world.identity.seed);
+}
 
 /** 待结算的用户动作。托盘点击与鼠标点击都是异步来的，攒到下一帧一起交给 step。 */
 let pending: UserAction[] = [];
@@ -363,6 +383,8 @@ async function bootStage(): Promise<void> {
 }
 
 let looping = false;
+/** 猫是否已经就位（读到存档或领养完成）。领养期间帧循环绝不能起来。 */
+let booted = false;
 
 /**
  * 启动动画循环。
@@ -373,7 +395,7 @@ let looping = false;
  * 画的内容，看起来就是「窗口在屏但完全透明」。
  */
 function startLoop(): void {
-  if (looping) return;
+  if (looping || !booted) return;
   looping = true;
   lastFrameMs = performance.now();
   lastWallMs = Date.now();
@@ -401,20 +423,12 @@ function primeMotion(action: ActionKey | null): void {
 }
 
 /**
- * 读存档并补算离线时段。
+ * 补算离线时段。
  *
  * 补算与常驻运行调的是同一个 `step`，只是 elapsedMs 大得多 -
  * 不存在「离线版模拟器」（ADR 0001）。
  */
-async function bootWorld(): Promise<void> {
-  const saved = await loadWorld();
-  if (saved) {
-    // 时区跟随当前机器：用户换了时区（或过了夏令时），猫的作息该跟着用户的白天走。
-    world = { ...saved, tzOffsetMinutes: tzOffsetMinutes() };
-    cat = makeCat(world.identity.breed, world.identity.seed);
-    micro = makeMicro(world.identity.seed);
-  }
-
+async function catchUp(): Promise<void> {
   const away = Math.min(MAX_CATCHUP_MS, Math.max(0, Date.now() - worldNow(world)));
   const r = step(world, away, {});
   world = r.world;
@@ -485,35 +499,70 @@ void onTrayAction((id) => {
   else if (id === 'medicate') enqueue({ type: 'medicate' });
 });
 
-// 启动顺序：同步画出第一帧 → 摆好舞台位置 → 通知 Rust 显示窗口 → 读存档补算
-//          → 启动动画循环。
-//
-// **首帧、显示窗口与启动循环这三步的先后不能变。** 窗口以 visible: false 启动，而
-// requestAnimationFrame 对隐藏窗口不触发。这个约束踩过两次坑：
-//   1. 把「通知显示」放进 rAF 回调 → 死锁，窗口永远不出现（应用与托盘都正常）。
-//   2. 在窗口显示前就启动循环 → 窗口出现了但完全透明，因为画布上只有一帧
-//      在隐藏期间画的内容，循环的回调一直排队没执行。
-//
-// 摆舞台插在显示之前：窗口还看不见时挪它是免费的，显示之后再挪用户会看到猫从
-// 屏幕中间跳到底下。它是一次纯内存的 IPC（不读文件），推迟量可以忽略，
-// 而且失败会被自己吞掉，不会连带挡住窗口显示。
-//
-// 读存档必须放在「通知显示」之后：它要读文件，放在前面会把首帧连带窗口一起推迟。
-// 代价是存档里如果是另一只猫，首帧会有一瞬间画的是占位猫 - ticket 07 落地后
-// 占位猫消失，这个瞬间也随之消失。
-{
+/**
+ * 谁来养这只猫。
+ *
+ * 浏览器里直接打开 index.html 调试时没有第二个窗口可开，随手挑一只猫顶上 -
+ * 这条路只为调渲染与运动层，跟真机的领养流程无关，所以大声说出来。
+ */
+const gate: AdoptionGate = {
+  loadWorld,
+  adopt: async (): Promise<AdoptedIdentity> => {
+    if (!inTauri) {
+      const { candidate } = beginAdoption(Math.random);
+      console.info('[cyber-cat] 浏览器调试模式：随手挑了一只猫，真机上这里是领养窗口', candidate);
+      return { ...candidate, name: '调试猫' };
+    }
+    return requestAdoption({
+      waitForAdopted,
+      openAdoption: () => openAdoption(ADOPT_W, ADOPT_H),
+    });
+  },
+  saveWorld,
+  now: Date.now,
+  tzOffsetMinutes,
+};
+
+/**
+ * 启动顺序：确定是哪只猫 → 画出第一帧 → 摆好舞台位置 → 通知 Rust 显示窗口
+ *          → 补算离线时段 → 启动动画循环。
+ *
+ * **确定是哪只猫必须排在最前面。** 首次启动时这一步会停在领养窗口上等用户挑完，
+ * 期间宠物窗口还是 `visible: false`（tauri.conf.json），所以「领养完成前不显示猫」
+ * 是结构上的保证，不需要谁记得别画。
+ * 代价是有存档时启动多等一次读文件 - 曾经为了省掉这次等待把读存档挪到显示窗口
+ * 之后，代价是首帧画的是占位猫；现在没有占位猫可画了，这笔交易反过来了。
+ *
+ * **首帧、显示窗口与启动循环这三步的先后不能变。** 窗口以 visible: false 启动，而
+ * requestAnimationFrame 对隐藏窗口不触发。这个约束踩过两次坑：
+ *   1. 把「通知显示」放进 rAF 回调 → 死锁，窗口永远不出现（应用与托盘都正常）。
+ *   2. 在窗口显示前就启动循环 → 窗口出现了但完全透明，因为画布上只有一帧
+ *      在隐藏期间画的内容，循环的回调一直排队没执行。
+ *
+ * 摆舞台插在显示之前：窗口还看不见时挪它是免费的，显示之后再挪用户会看到猫从
+ * 屏幕中间跳到底下。它是一次纯内存的 IPC（不读文件），推迟量可以忽略，
+ * 而且失败会被自己吞掉，不会连带挡住窗口显示。
+ */
+async function boot(): Promise<void> {
+  install(await ensureWorld(gate));
+
   const intent = renderIntentOf(world);
   primeMotion(intent.action);
   currentAction = motion.playing;
   draw(intent, 0, performance.now());
+
+  await bootStage();
+  await contentReady();
+  await catchUp();
+  booted = true;
+  startLoop();
 }
-void bootStage()
-  .then(petReady)
-  .then(bootWorld)
-  .then(startLoop)
-  .catch((err) => {
-    console.error('[cyber-cat] 启动失败：', err);
-  });
+
+void boot().catch((err) => {
+  // 领养失败也走这里：窗口留在隐藏状态，托盘还在，用户可以退出重来。
+  // 不兜底给一只猫 - 那会让用户拿到一只不是他选的猫，而且再也回不到领养流程。
+  console.error('[cyber-cat] 启动失败：', err);
+});
 
 // 兜底：窗口从隐藏变为可见时确保循环在跑（例如被系统遮挡后恢复）。
 // startLoop 自带幂等保护 - 不要直接 requestAnimationFrame，那会多起一条帧链。

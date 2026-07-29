@@ -42,6 +42,9 @@ export function cssSizeFor(deviceScale: number, dpr: number): { w: number; h: nu
   return { w: (W * deviceScale) / dpr, h: (H * deviceScale) / dpr };
 }
 
+/** 默认的可用空间就是整个窗口客户区。宠物窗口的舞台就是它。 */
+const windowBox = (): CssBox => ({ w: window.innerWidth, h: window.innerHeight });
+
 export class CatDisplay {
   private readonly src: HTMLCanvasElement;
   private readonly srcCtx: CanvasRenderingContext2D;
@@ -50,9 +53,17 @@ export class CatDisplay {
   private deviceScale = 1;
   private dpr = 1;
 
+  /**
+   * `boxOf` 给出画布可以占用的 CSS 空间，用来钳制放大倍数。
+   *
+   * 默认是整个窗口 - 宠物窗口里画布就是铺满舞台的。领养窗口不一样：
+   * 猫只占上半截的夜幕，按整窗钳制会在分数 dpr 下算出比夜幕更高的画布，
+   * 猫的头会被裁掉。每帧调一次而不是记下来，是为了跨屏与系统缩放变化后自动正确。
+   */
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly targetScale: number,
+    private readonly boxOf: () => CssBox = windowBox,
   ) {
     // 源画布固定为渲染缓冲的原始尺寸，放大在 drawImage 阶段做
     this.src = document.createElement('canvas');
@@ -69,13 +80,10 @@ export class CatDisplay {
   applyScale(): void {
     const dpr = window.devicePixelRatio || 1;
     this.dpr = dpr;
-    // 以窗口客户区为上限，避免画布溢出窗口把猫裁掉。
+    // 以可用空间为上限，避免画布溢出把猫裁掉。
     // 舞台化之后宽度方向不会再触发钳制（舞台是三倍精灵宽），高度仍然会 -
     // 舞台高度的余量就是按这条算的，见 stage.ts。
-    this.deviceScale = deviceScaleFor(this.targetScale, dpr, {
-      w: window.innerWidth,
-      h: window.innerHeight,
-    });
+    this.deviceScale = deviceScaleFor(this.targetScale, dpr, this.boxOf());
     const { w, h } = cssSizeFor(this.deviceScale, dpr);
     this.canvas.width = W * this.deviceScale;
     this.canvas.height = H * this.deviceScale;

@@ -232,10 +232,21 @@ export function createMotion(geom: StageGeometry, stageAt: ScreenPoint): MotionS
   };
 }
 
-function walkSpeed(cat: Cat, geom: StageGeometry): number {
+/**
+ * 这只猫的走路速度，CSS 像素每秒。
+ *
+ * 导出是给领养窗口用的（src/adopt/arrival.ts）：那边的猫也要走进画面，
+ * 而「速度与步频必须成正比」这条约束只能有一处实现 - 抄第二份的话，
+ * 两个窗口里同一只猫会一个走得实、一个滑步。
+ */
+export function walkSpeedFor(cat: Cat, spriteScale: number): number {
   // 基准取动作库给的 travel：腿的相位是照着它调的，换成别的值就成了滑步。
   const base = ACTIONS.walk.travel ?? 22;
-  return base * geom.spriteScale * (SPEED_BASE + cat.personality.active * SPEED_ACTIVE_SPAN);
+  return base * spriteScale * (SPEED_BASE + cat.personality.active * SPEED_ACTIVE_SPAN);
+}
+
+function walkSpeed(cat: Cat, geom: StageGeometry): number {
+  return walkSpeedFor(cat, geom.spriteScale);
 }
 
 function restAfterLeg(active: number, rnd: () => number): number {
