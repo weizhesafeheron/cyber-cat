@@ -29,7 +29,7 @@ const SHADOW_RGB = '21,17,38';
 const ZZZ_RGB = new Set(['157,184,255', '111,227,255']);
 /** 尘土色 #8a86a8 */
 const DUST_RGB = '138,134,168';
-/** 食盆色 */
+/** 食盆的五档色。挂件独立成窗口之后，这些颜色不该再出现在猫的缓冲里。 */
 const BOWL_RGB = new Set(['61,79,138', '44,58,104', '35,44,82', '201,138,75', '224,164,94']);
 
 describe('掩膜与像素同源', () => {
@@ -111,17 +111,30 @@ describe('装饰与道具不进掩膜', () => {
     expect(dust, '没有找到尘土像素，测试没有实际生效').toBeGreaterThan(0);
   });
 
-  it('食盆不算摸到猫', () => {
+  it('猫的缓冲里不再有食盆 - 它是独立的挂件窗口（ADR 0004）', () => {
+    // 这条测试原先断言的是反面：「食盆像素不该进掩膜」。
+    // 那时食盆画在猫的精灵缓冲里、由 Pose.bowl 给位置，掩膜要把它排除掉。
+    // 挂件改成独立窗口之后，猫的缓冲里压根不该再出现食盆 - 盆的位置由用户拖动
+    // 决定，猫的渲染器无从知道。像素画搬到了 src/props/art.ts。
+    for (const breed of BREED_KEYS) {
+      const cat = makeCat(breed, 20260728);
+      for (const t of [0, 0.5, 1.3, 2.7]) {
+        const res = renderer.render(cat, ACTIONS.eat.make(t, cat, MI));
+        for (let i = 0; i < W * H; i++) {
+          if (res.pixels[i * 4 + 3] !== 255) continue;
+          expect(
+            BOWL_RGB.has(colorAt(res, i)),
+            `${breed} t=${t} 像素 ${i % W},${(i / W) | 0} 还是食盆的颜色`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('吃饭姿态本身仍然画得出猫（上一条不是因为整帧空了才通过）', () => {
     const cat = makeCat('orange', 20260728);
     const res = renderer.render(cat, ACTIONS.eat.make(0.5, cat, MI));
-    let bowl = 0;
-    for (let i = 0; i < W * H; i++) {
-      if (res.pixels[i * 4 + 3] !== 255) continue;
-      if (!BOWL_RGB.has(colorAt(res, i))) continue;
-      bowl++;
-      expect(res.alphaMask[i], '食盆像素不该进掩膜').toBe(0);
-    }
-    expect(bowl, '没有找到食盆像素，测试没有实际生效').toBeGreaterThan(10);
+    expect(maskBbox(res.alphaMask).n).toBeGreaterThan(150);
   });
 });
 

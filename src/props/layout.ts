@@ -1,0 +1,198 @@
+import { clamp } from '../render/rng.js';
+import {
+  PROP_DEFAULT_VISIBLE,
+  PROP_DEFAULT_X_RATIO,
+  PROP_REACH_SPRITE,
+  PROP_SPRITE,
+  propWindowSize,
+} from './constants.js';
+import { PROP_KINDS } from './types.js';
+import type { PropKind, PropPlacement, PropsState, ScreenRect } from './types.js';
+
+/**
+ * 挂件的摆放几何。
+ *
+ * 纯函数，只做屏幕坐标的算术，不碰窗口也不碰存档 - 因此「猫该站到食盆哪一侧」
+ * 这类手感判断可以直接测（test/props/layout.test.ts），不需要真机。
+ *
+ * 坐标一律是**屏幕逻辑坐标**（CSS 像素，桌面左上角为原点），与运动层同一个坐标系。
+ * 挂件的 `x` / `y` 指窗口客户区左上角，不是贴图中心 - 窗口位置是我们唯一能
+ * 直接下发给系统的量，以它为准就不会出现「两份位置真相」。
+ */
+
+/**
+ * 挂件贴图中心的屏幕 x。
+ *
+ * 用**标称窗口宽度**算，不用画布的实际宽度：分数 dpi 下画布会被整数缩放规则钳
+ * 小一档（见 propDeviceScale），但画布在窗口里是居中的，中心不动。
+ * 反过来若按实际画布宽算，同一个挂件在 100% 与 150% 缩放的屏幕上会给出不同的
+ * 中心，猫的落点就会跟着抖。
+ */
+export function propCenterX(kind: PropKind, placement: PropPlacement): number {
+  return placement.x + propWindowSize(kind).w / 2;
+}
+
+/**
+ * 让挂件的**最后一个精灵行**落在猫脚下的地面线上时，窗口客户区的 y。
+ *
+ * 挂件与猫是两个窗口，各自贴着自己的位置，所以「站在同一条地上」这件事必须靠
+ * 算术对齐 - 差几个像素就会读成挂件浮空或者陷进地里。
+ * `groundY` 取运动层的 `groundScreenY(geom)`，`spriteScale` 取同一份几何，
+ * 两个窗口在同一块屏幕上会拿到同一个整数缩放，因此对得上。
+ */
+export function groundedY(kind: PropKind, groundY: number, spriteScale: number): number {
+  return groundY + spriteScale - PROP_SPRITE[kind].h * spriteScale;
+}
+
+/** 首次启动时的摆放：踩在地面线上，食盆偏右、猫窝偏左。 */
+export function defaultPlacement(
+  kind: PropKind,
+  work: ScreenRect,
+  groundY: number,
+  spriteScale: number,
+): PropPlacement {
+  const center = work.x + work.w * PROP_DEFAULT_X_RATIO[kind];
+  return clampPlacement(kind, {
+    x: Math.round(center - propWindowSize(kind).w / 2),
+    y: Math.round(groundedY(kind, groundY, spriteScale)),
+    visible: PROP_DEFAULT_VISIBLE,
+  }, work);
+}
+
+export function defaultPropsState(
+  work: ScreenRect,
+  groundY: number,
+  spriteScale: number,
+): PropsState {
+  return {
+    bowl: defaultPlacement('bowl', work, groundY, spriteScale),
+    bed: defaultPlacement('bed', work, groundY, spriteScale),
+  };
+}
+
+/**
+ * 把挂件整个钳进工作区。
+ *
+ * **只在启动摆放与读档时用，不在用户拖动之后用。** 用户把食盆拖到哪儿是他的
+ * 决定（ADR 0004 的「布置领地」），当场纠回去只会让人觉得窗口在跟自己抢。
+ * 读档时必须钳：上次是在 4K 外接屏上摆的，这次只有笔记本屏，不钳的话挂件在
+ * 屏幕外，用户既看不见也拖不回来。
+ */
+export function clampPlacement(
+  kind: PropKind,
+  placement: PropPlacement,
+  work: ScreenRect,
+): PropPlacement {
+  const size = propWindowSize(kind);
+  return {
+    x: clamp(placement.x, work.x, work.x + Math.max(0, work.w - size.w)),
+    y: clamp(placement.y, work.y, work.y + Math.max(0, work.h - size.h)),
+    visible: placement.visible,
+  };
+}
+
+export function clampPropsState(state: PropsState, work: ScreenRect): PropsState {
+  return {
+    bowl: clampPlacement('bowl', state.bowl, work),
+    bed: clampPlacement('bed', state.bed, work),
+  };
+}
+
+/**
+ * 猫要走到哪个屏幕 x 才算「在这个挂件跟前」。
+ *
+ * 食盆在猫的**近侧**停下（`PROP_REACH_SPRITE`），于是猫低头的方向正好朝着盆口 -
+ * 走过去的那一侧决定朝向，朝向决定低头的方向，三者自然一致。
+ * 猫窝的 reach 是 0，猫直接站到垫子中间。
+ *
+ * `limits` 是猫横向可达的屏幕 x 区间。近侧落点越界时改从另一侧靠近 -
+ * 食盆贴着屏幕右边缘时，猫只能从左边过去。两侧都越界就钳住，剩下的由运动层的
+ * 「走不动了就算到了」兜住，不会让猫永远走不到而一直播走路。
+ */
+export function approachX(
+  kind: PropKind,
+  placement: PropPlacement,
+  catX: number,
+  limits: { readonly min: number; readonly max: number },
+  spriteScale: number,
+): number {
+  const center = propCenterX(kind, placement);
+  const reach = PROP_REACH_SPRITE[kind] * spriteScale;
+  if (reach === 0) return clamp(center, limits.min, limits.max);
+  const side = catX >= center ? 1 : -1;
+  const near = center + side * reach;
+  if (near >= limits.min && near <= limits.max) return near;
+  const far = center - side * reach;
+  if (far >= limits.min && far <= limits.max) return far;
+  return clamp(near, limits.min, limits.max);
+}
+
+/**
+ * 世界层说猫想去某个挂件时，运动层该把它送到的屏幕 x。
+ *
+ * 挂件隐藏时返回 null - 没有这个空间锚点，猫就照旧自己漫游。
+ * **失效方向是「猫不去了」而不是「猫走到一个不存在的位置」**：用户把食盆藏起来
+ * 之后，猫在原地吃饭并不奇怪（画面上根本没有盆），而走去屏幕上某个空位置吃饭
+ * 就成了灵异现象。
+ */
+export function anchorScreenX(
+  kind: PropKind,
+  state: PropsState,
+  catX: number,
+  limits: { readonly min: number; readonly max: number },
+  spriteScale: number,
+): number | null {
+  const placement = state[kind];
+  if (!placement.visible) return null;
+  return approachX(kind, placement, catX, limits, spriteScale);
+}
+
+/** 换掉一个挂件的摆放，返回新的整体状态。不改原对象。 */
+export function withPlacement(
+  state: PropsState,
+  kind: PropKind,
+  patch: Partial<PropPlacement>,
+): PropsState {
+  return { ...state, [kind]: { ...state[kind], ...patch } };
+}
+
+/**
+ * 挂件贴图的设备缩放倍数：目标倍数 × dpr 后取整，并按窗口客户区钳住。
+ *
+ * 与 display.ts 的 `deviceScaleFor` 是同一条约束的另一份实例：**每个源像素必须
+ * 占据整数个物理像素**，否则 dpr = 1.5 时 3 × 1.5 = 4.5，单个像素横跨非整数个
+ * 物理像素，像素风立刻破功（mvp-scope 第 8 节）。
+ *
+ * 没有直接复用那个函数，是因为它把精灵尺寸写成了模块级的 72×56 常量 -
+ * 那是猫的尺寸，挂件各有自己的。共用的是规则，不是尺寸。
+ */
+export function propDeviceScale(
+  sprite: { readonly w: number; readonly h: number },
+  targetScale: number,
+  dpr: number,
+  box: { readonly w: number; readonly h: number },
+): number {
+  const fit = Math.min(
+    Math.floor((box.w * dpr) / sprite.w),
+    Math.floor((box.h * dpr) / sprite.h),
+  );
+  return Math.max(1, Math.min(Math.max(1, Math.round(targetScale * dpr)), Math.max(1, fit)));
+}
+
+/** 该设备缩放下贴图占的 CSS 尺寸。 */
+export function propCssSize(
+  sprite: { readonly w: number; readonly h: number },
+  deviceScale: number,
+  dpr: number,
+): { w: number; h: number } {
+  return { w: (sprite.w * deviceScale) / dpr, h: (sprite.h * deviceScale) / dpr };
+}
+
+/** 两份摆放是否一致。用来避免把没变化的位置反复写盘、反复下发窗口移动。 */
+export function samePlacement(a: PropPlacement, b: PropPlacement): boolean {
+  return a.x === b.x && a.y === b.y && a.visible === b.visible;
+}
+
+export function samePropsState(a: PropsState, b: PropsState): boolean {
+  return PROP_KINDS.every((kind) => samePlacement(a[kind], b[kind]));
+}

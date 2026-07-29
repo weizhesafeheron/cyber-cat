@@ -9,10 +9,12 @@
 
 use tauri::{App, LogicalPosition, WebviewWindow};
 
-/// 舞台窗口的几何读数，全部是**逻辑像素**（点）。
+/// 一个窗口的几何读数，全部是**逻辑像素**（点）。
 ///
 /// 一次 IPC 把窗口位置、尺寸与桌面工作区一起给出去：前端要用它们做减法
 /// （猫的屏幕位置 = 舞台位置 + 舞台内位置），分几次取会拿到不同时刻的值。
+///
+/// 挂件窗口也用同一个读数（回读自己被拖到哪儿了），所以字段名不带 stage。
 #[derive(serde::Serialize)]
 pub struct StageMetrics {
     /// 客户区原点，桌面坐标。
@@ -144,7 +146,20 @@ pub fn cursor_in_window(window: &WebviewWindow) -> Result<(f64, f64), String> {
     ))
 }
 
-/// 读舞台窗口的几何与桌面工作区。
+/// 挂件窗口创建后的平台设置。
+///
+/// 与宠物窗口同样的两条：关阴影、穿透初值为「开」。
+/// 穿透初值尤其不能省 - 挂件窗口是贴图的包围盒，四角是透明的，
+/// 前端做出第一次命中判定之前不该截获桌面上的点击（ADR 0006）。
+/// 前端挂掉的后果是「挂件点不动」，而不是「桌面上多了两块死区」。
+pub fn configure_prop_window(window: &WebviewWindow) {
+    let _ = window.set_shadow(false);
+    if let Err(e) = set_pass_through(window, true) {
+        eprintln!("[cyber-cat] 初始化挂件穿透失败，它可能挡住桌面的点击：{e}");
+    }
+}
+
+/// 读窗口自己的几何与桌面工作区。
 ///
 /// **一律用窗口自己的 `scale_factor` 换算成逻辑像素**，而不是显示器的 -
 /// 前端拿到的值要和 `window.innerWidth` / CSS 像素同一个坐标系，那个坐标系由
@@ -187,14 +202,15 @@ pub fn stage_metrics(window: &WebviewWindow) -> Result<StageMetrics, String> {
     })
 }
 
-/// 把舞台窗口的**客户区原点**挪到桌面上的某个逻辑坐标。
+/// 把窗口的**客户区原点**挪到桌面上的某个逻辑坐标。
 ///
-/// 前端只在猫走到舞台边缘时才调（带滞后，见 src/app/motion.ts）。
-/// 窗口位置变更是跨进程的窗口服务器操作，每帧调既贵又会与合成不同步产生抖动。
+/// 舞台窗口只在猫走到边缘时才调（带滞后，见 src/app/motion.ts）；
+/// 挂件窗口只在摆放变化时调。窗口位置变更是跨进程的窗口服务器操作，
+/// 每帧调既贵又会与合成不同步产生抖动。
 ///
 /// `set_position` 设的是**外框**原点，所以要减掉客户区相对外框的偏移。
 /// 无边框窗口下两者通常相同，但这条不保证 - 差一次就会让猫和光标的换算整体偏移。
-pub fn move_stage(window: &WebviewWindow, x: f64, y: f64) -> Result<(), String> {
+pub fn move_window(window: &WebviewWindow, x: f64, y: f64) -> Result<(), String> {
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
     let inner = window.inner_position().map_err(|e| e.to_string())?;
     let outer = window.outer_position().map_err(|e| e.to_string())?;
@@ -203,4 +219,32 @@ pub fn move_stage(window: &WebviewWindow, x: f64, y: f64) -> Result<(), String> 
     window
         .set_position(LogicalPosition::new(x - inset_x, y - inset_y))
         .map_err(|e| e.to_string())
+}
+
+/// 摆放一个挂件窗口：先挪到位，再决定显示还是隐藏。
+///
+/// **顺序不能颠倒。** 先显示后挪位置的话，用户会看到挂件在屏幕上跳一下 -
+/// 与宠物窗口「摆好位置再 show」是同一条经验（见 pet_ready 的注释）。
+///
+/// 挪不动不阻止显示：挂件留在默认位置也比不出现好，但要报出来 -
+/// 猫的落点是按前端记的位置算的，位置不对会出现「猫走到一个空地方吃饭」。
+pub fn place_prop(window: &WebviewWindow, x: f64, y: f64, visible: bool) -> Result<(), String> {
+    if let Err(e) = move_window(window, x, y) {
+        eprintln!("[cyber-cat] 挪动挂件窗口失败，它会留在原处：{e}");
+    }
+    if visible {
+        window.show().map_err(|e| e.to_string())
+    } else {
+        window.hide().map_err(|e| e.to_string())
+    }
+}
+
+/// 把窗口交给操作系统的拖拽循环。
+///
+/// 挂件靠这个实现「拖到桌面任意位置」。自己在 pointermove 里逐帧 set_position
+/// 也能做，但每一步都是一次 IPC 加一次跨进程窗口操作，拖起来是拽不动的。
+/// 代价是拖拽期间前端收不到任何指针事件，也没有「拖完了」的回调 -
+/// 所以挂件窗口要回读自己的位置（见 src/app/prop-main.ts）。
+pub fn start_drag(window: &WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
 }

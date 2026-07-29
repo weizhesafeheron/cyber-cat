@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ACTIONS, makeCat, makeMicro, stepMicro } from '../../src/render/index.js';
 import { step } from '../../src/world/index.js';
-import { TICK, feedEvery, makeWorld, runTicks } from './helpers.js';
+import { TICK, feedEvery, findSeed, makeWorld, runTicks } from './helpers.js';
 
 /**
  * renderIntent 是世界层与渲染层之间的那道缝。
@@ -100,5 +100,75 @@ describe('renderIntent 能被渲染层直接消费', () => {
       patch: { bowl: 2, needs: { hunger: 20, energy: 80, mood: 60 } },
     });
     expect(step(w, TICK).renderIntent.action).toBe('eat');
+  });
+});
+
+/**
+ * 挂件锚点：世界层说「猫想去哪个挂件」，**只给名字，不给坐标**。
+ *
+ * 这是「喂食与睡觉是空间行为」（ADR 0004）的世界层一侧。
+ * 坐标进了世界层，同一份存档在不同分辨率的机器上就会演化出不同的猫，
+ * 离线推演的可回放性当场失效（ADR 0001）- 所以这一组还顺带守着「只有名字」。
+ */
+describe('renderIntent 的挂件锚点', () => {
+  const AWAKE = { hunger: 90, energy: 70, mood: 60 };
+  const anchorOf = (patch: Partial<ReturnType<typeof makeWorld>>, hour = 18): unknown =>
+    step(makeWorld({ hour, patch }), 0).renderIntent.anchor;
+
+  it('锚点只可能是挂件的名字或 null，永远不是坐标', () => {
+    const feed = feedEvery(6);
+    let current = makeWorld({ hour: 5 });
+    const seen = new Set<unknown>();
+    for (let i = 0; i < 48 * 20; i++) {
+      const r = step(current, TICK, feed(i));
+      current = r.world;
+      seen.add(r.renderIntent.anchor);
+    }
+    // 长跑里三种取值都出现过，且没有第四种。
+    expect(new Set(seen)).toEqual(new Set([null, 'bed', 'bowl']));
+  });
+
+  it('睡着 → 猫窝：困了走回窝里睡，不是随地趴下', () => {
+    expect(anchorOf({ sleeping: true, needs: { hunger: 70, energy: 40, mood: 60 } }, 2)).toBe('bed');
+  });
+
+  it('正在吃 → 食盆', () => {
+    expect(anchorOf({ activity: 'eat', needs: AWAKE })).toBe('bowl');
+  });
+
+  it('碗里有粮且已经够饿 → 食盆（这是给运动层的提前量）', () => {
+    // 30 远低于任何性格的开吃阈值（最低 45），所以任何猫都成立。
+    expect(anchorOf({ bowl: 2, needs: { hunger: 30, energy: 70, mood: 60 } })).toBe('bowl');
+  });
+
+  it('不够饿就没有锚点 - 粮放在盆里也不去，这就是「不饿的晚点再说」', () => {
+    // 95 高于任何性格的开吃阈值（最高 80）。
+    expect(anchorOf({ bowl: 2, needs: { hunger: 95, energy: 70, mood: 60 } })).toBeNull();
+  });
+
+  it('碗是空的、也还没饿到有可视表现 → 没有锚点，猫自己漫游', () => {
+    expect(anchorOf({ bowl: 0, needs: { hunger: 40, energy: 70, mood: 60 } })).toBeNull();
+  });
+
+  it('饿到有可视表现 → 食盆，即使碗是空的（「在食盆边徘徊」是字面意思）', () => {
+    expect(anchorOf({ bowl: 0, needs: { hunger: 10, energy: 70, mood: 60 } })).toBe('bowl');
+  });
+
+  it('生病没有锚点 - 蔫着趴在原地才是病的读数，不该爬起来走回窝', () => {
+    expect(anchorOf({ sick: true, sickHours: 4, needs: { hunger: 10, energy: 60, mood: 25 } })).toBeNull();
+  });
+
+  it('死后没有锚点', () => {
+    expect(anchorOf({ dead: true, needs: AWAKE })).toBeNull();
+  });
+
+  it('贪吃度决定同一个饥饿度下要不要去食盆', () => {
+    // 60 落在两只猫的开吃阈值之间，所以差别只可能来自贪吃度 -
+    // 与 test/world/invitation.test.ts 里那条进食时机测试同一套取值。
+    const greedy = findSeed('orange', (p) => p.greedy > 0.93);
+    const picky = findSeed('orange', (p) => p.greedy < 0.07);
+    const patch = { bowl: 2, needs: { hunger: 60, energy: 70, mood: 60 } };
+    expect(step(makeWorld({ seed: greedy, hour: 18, patch }), 0).renderIntent.anchor).toBe('bowl');
+    expect(step(makeWorld({ seed: picky, hour: 18, patch }), 0).renderIntent.anchor).toBeNull();
   });
 });

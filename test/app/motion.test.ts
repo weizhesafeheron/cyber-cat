@@ -71,6 +71,13 @@ interface RunOpts {
   now?: number;
   /** 随机源种子。 */
   seed?: number;
+  /**
+   * 挂件锚点的屏幕 x。默认 null = 没有锚点，自由漫游。
+   *
+   * 传函数是为了模拟真实情况：食盆的落点取决于猫从哪一侧靠近
+   * （见 props/layout.ts 的 approachX），所以它每帧都要按当前位置重算。
+   */
+  anchorX?: number | null | ((state: MotionState) => number | null);
 }
 
 interface Frame {
@@ -87,6 +94,9 @@ function run(
   const cat = opts.cat ?? NORMAL;
   const g = opts.g ?? geom();
   const rnd = mulberry32(opts.seed ?? 1);
+  const fixedAnchor = typeof opts.anchorX === 'function' ? null : opts.anchorX ?? null;
+  const anchorOf =
+    typeof opts.anchorX === 'function' ? opts.anchorX : (): number | null => fixedAnchor;
   let state = start;
   let now = opts.now ?? 0;
   const frames: Frame[] = [];
@@ -97,6 +107,7 @@ function run(
       dt,
       now,
       action: opts.action === undefined ? 'walk' : opts.action,
+      anchorX: anchorOf(state),
       cat,
       geom: g,
       rnd,
@@ -296,6 +307,127 @@ describe('抵达目标后交还控制', () => {
     const { frames } = run(createMotion(g, stage), { frames: 2000, seed: 11 });
     const stuck = frames.filter((f) => f.state.playing === 'walk' && f.moved === 0);
     expect(stuck).toHaveLength(0);
+  });
+});
+
+describe('走向挂件（锚点）', () => {
+  const g = geom();
+  const start = (): MotionState => createMotion(g, centeredStage(g));
+
+  it('给了锚点就往那儿走，不再随机漫游', () => {
+    const s = start();
+    const target = s.x + 400;
+    const { end, frames } = run(s, { frames: 600, anchorX: target, seed: 5 });
+    expect(end.x).toBeCloseTo(target, 6);
+    // 一路上只朝一个方向走，不会像自由漫游那样来回挑目标。
+    const dirs = new Set(frames.filter((f) => f.moved > 0).map((f) => f.state.dir));
+    expect(dirs).toEqual(new Set([1]));
+  });
+
+  it('锚点在左边时朝左走', () => {
+    const s = start();
+    const target = s.x - 300;
+    const { end } = run(s, { frames: 600, anchorX: target, seed: 5 });
+    expect(end.x).toBeCloseTo(target, 6);
+    expect(end.dir).toBe(-1);
+  });
+
+  it('没到之前一律播走路，世界层要什么动作都先放一放', () => {
+    const s = start();
+    const target = s.x + 500;
+    // 世界层说「吃饭」，但猫还在半路上 - 这一条就是「猫在屏幕左边、食盆在右边，
+    // 猫却在原地吃了」那个画面的守卫。
+    const { frames } = run(s, { frames: 200, action: 'eat', anchorX: target, seed: 5 });
+    for (const f of frames) {
+      if (Math.abs(f.state.x - target) < 1e-6) continue;
+      expect(f.state.playing, `离锚点还有 ${target - f.state.x} 像素就开吃了`).toBe('walk');
+    }
+    // 对照组：这段时间里确实还没走到，否则上面的循环等于没跑。
+    expect(Math.abs(frames[frames.length - 1]!.state.x - target)).toBeGreaterThan(1);
+  });
+
+  it('走到了才播世界层要的动作，而且位置就钉在锚点上', () => {
+    const s = start();
+    const target = s.x + 200;
+    const { frames } = run(s, { frames: 1200, action: 'eat', anchorX: target, seed: 5 });
+    const arrival = frames.findIndex((f) => f.state.playing === 'eat');
+    expect(arrival).toBeGreaterThan(0);
+    expect(frames[arrival - 1]!.state.playing).toBe('walk');
+    expect(frames[arrival]!.state.x).toBeCloseTo(target, 6);
+    // 走过去的路上留了爪印（抵达那一刻还没淡完）。
+    expect(frames[arrival]!.state.paws.length).toBeGreaterThan(0);
+    // 之后一直在吃，位置一步不动。
+    for (const f of frames.slice(arrival)) {
+      expect(f.state.playing).toBe('eat');
+      expect(f.state.x).toBeCloseTo(target, 6);
+    }
+  });
+
+  it('到了锚点之后世界层说走路，改播站立呼吸 - 不原地踏步也不走开', () => {
+    const s = start();
+    const target = s.x + 120;
+    const { frames } = run(s, { frames: 1800, action: 'walk', anchorX: target, seed: 5 });
+    const arrival = frames.findIndex((f) => Math.abs(f.state.x - target) < 1e-6);
+    expect(arrival).toBeGreaterThan(0);
+    for (const f of frames.slice(arrival + 1)) {
+      expect(f.state.playing, '到了挂件跟前还在播走路').toBe('idle');
+      expect(f.state.x).toBeCloseTo(target, 6);
+    }
+  });
+
+  it('锚点换了（用户把食盆拖走）猫会跟过去', () => {
+    const s = start();
+    const first = s.x + 150;
+    const arrived = run(s, { frames: 900, action: 'eat', anchorX: first, seed: 5 }).end;
+    expect(arrived.playing).toBe('eat');
+    const moved = arrived.x - 260;
+    const after = run(arrived, { frames: 900, action: 'eat', anchorX: moved, now: 1e5, seed: 5 });
+    expect(after.end.x).toBeCloseTo(moved, 6);
+    expect(after.end.playing).toBe('eat');
+    // 中间确实又走了一段，不是瞬移过去的。
+    expect(after.frames.some((f) => f.state.playing === 'walk')).toBe(true);
+  });
+
+  it('挂件被拖到屏幕外时不会永远走不到 - 钳进可达范围就算到了', () => {
+    const s = start();
+    // 远在桌面之外的锚点。钳进可达范围之后猫会走到最靠近它的那一侧站住。
+    const { end, frames } = run(s, { frames: 4000, action: 'eat', anchorX: 99_999, seed: 5 });
+    expect(end.playing).toBe('eat');
+    expect(end.x).toBeLessThanOrEqual(g.work.x + g.work.w);
+    // 一旦开始吃就不再走 - 不会在墙边一直播走路。
+    const firstEat = frames.findIndex((f) => f.state.playing === 'eat');
+    expect(firstEat).toBeGreaterThan(0);
+    expect(Math.max(...frames.slice(firstEat).map((f) => f.moved))).toBe(0);
+  });
+
+  it('走向挂件的路上不消耗一次性动作的时间线，到了才从头播', () => {
+    const s = start();
+    const target = s.x + 500;
+    const period = ACTIONS.stretch.period ?? 0;
+    // 走过去要几秒，比伸懒腰整个动作还长。到了之后必须还能完整播一遍。
+    const { frames } = run(s, {
+      frames: Math.ceil((period + 6) * 60),
+      action: 'stretch',
+      anchorX: target,
+      seed: 5,
+    });
+    const arrival = frames.findIndex((f) => f.state.playing === 'stretch');
+    expect(arrival).toBeGreaterThan(period * 60); // 抵达确实晚于一个动作周期
+    expect(frames[arrival]!.state.shot?.t).toBe(0); // 从头开始，不是接着半路的进度
+  });
+
+  it('猫已离开时锚点不起作用', () => {
+    const s = start();
+    const { end } = run(s, { frames: 60, action: null, anchorX: s.x + 300 });
+    expect(end.playing).toBeNull();
+    expect(end.x).toBe(s.x);
+  });
+
+  it('锚点不改变纯函数性质：不动传进来的状态', () => {
+    const s = start();
+    const snapshot = JSON.stringify(s);
+    run(s, { frames: 300, action: 'eat', anchorX: s.x + 300 });
+    expect(JSON.stringify(s)).toBe(snapshot);
   });
 });
 
@@ -700,6 +832,9 @@ describe('世界层与运动层接起来跑', () => {
         dt: dt * r.renderIntent.timeScale,
         now,
         action: r.renderIntent.action,
+        // 这一组测的是「没有挂件时猫自己怎么动」。挂件锚点接上之后的跨层行为
+        // 在 test/app/prop-anchor.test.ts。
+        anchorX: null,
         cat,
         geom: g,
         rnd,

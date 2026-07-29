@@ -1,5 +1,7 @@
+import { PropsSaveError, parseProps, serializeProps } from '../props/index.js';
 import { SaveFormatError, parseWorld, serializeWorld } from '../world/index.js';
 import { inTauri } from './ipc.js';
+import type { PropsState } from '../props/index.js';
 import type { World } from '../world/index.js';
 
 /**
@@ -59,6 +61,51 @@ export async function saveWorld(world: World): Promise<void> {
     await invoke('save_world', { contents: serializeWorld(world) });
   } catch (err) {
     console.error('[cyber-cat] 写存档失败：', err);
+  }
+}
+
+/**
+ * 读挂件摆放。
+ *
+ * 返回 null 表示「按默认位置摆」。**摆放与世界分两个文件**：屏幕坐标不能进 World
+ * （那会让世界层不再平台无关，见 props/save.ts 的说明），而且家具的生命周期比猫长 -
+ * 换一只猫不该让用户重新摆一遍食盆。
+ *
+ * 与读世界存档同样的策略：读坏了大声报错但不抛出，退回默认摆放。
+ * 一份坏掉的摆放不该让应用起不来，但也绝不能静默 - 否则用户会以为自己摆的位置
+ * 无声无息地被忘了。
+ */
+export async function loadProps(): Promise<PropsState | null> {
+  if (!inTauri) return null;
+  let text: string | null;
+  try {
+    const invoke = await getInvoke();
+    text = await invoke<string | null>('load_props');
+  } catch (err) {
+    console.error('[cyber-cat] 读取挂件摆放失败，本次按默认位置摆：', err);
+    return null;
+  }
+  if (text == null) return null;
+
+  try {
+    return parseProps(text);
+  } catch (err) {
+    if (err instanceof PropsSaveError) {
+      console.error('[cyber-cat] 挂件摆放无法解析，按默认位置摆：', err.message);
+      return null;
+    }
+    throw err;
+  }
+}
+
+/** 写挂件摆放。失败只记录不抛出 - 摆放写不进去不该打断猫的日常运行。 */
+export async function saveProps(state: PropsState): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const invoke = await getInvoke();
+    await invoke('save_props', { contents: serializeProps(state) });
+  } catch (err) {
+    console.error('[cyber-cat] 写挂件摆放失败：', err);
   }
 }
 

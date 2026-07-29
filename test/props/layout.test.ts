@@ -1,0 +1,297 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import {
+  PROP_KINDS,
+  PROP_REACH_SPRITE,
+  PROP_SCALE,
+  PROP_SPRITE,
+  anchorScreenX,
+  approachX,
+  clampPlacement,
+  clampPropsState,
+  defaultPlacement,
+  defaultPropsState,
+  groundedY,
+  propCenterX,
+  propCssSize,
+  propDeviceScale,
+  propWindowLabel,
+  propWindowSize,
+  samePropsState,
+  withPlacement,
+} from '../../src/props/index.js';
+import type { PropKind, PropPlacement, ScreenRect } from '../../src/props/index.js';
+import { TARGET_SCALE } from '../../src/app/stage.js';
+import { groundScreenY } from '../../src/app/motion.js';
+import { GROUND, H, W } from '../../src/render/index.js';
+
+/**
+ * 挂件的摆放几何。
+ *
+ * 全是纯算术，所以「猫该站到食盆哪一侧、挂件踩不踩在地上」这类只能在真机上
+ * 看出来的东西，在这里都能直接断言。
+ */
+
+/** 一个 1920x1080 的桌面。与 test/app/motion.test.ts 同一块假屏幕。 */
+const DESKTOP: ScreenRect = { x: 0, y: 0, w: 1920, h: 1080 };
+const SPRITE_SCALE = 3;
+/** 猫脚下的地面线。挂件的下沿要落在这一行上。 */
+const GROUND_Y = groundScreenY({
+  w: 648,
+  h: 200,
+  spriteScale: SPRITE_SCALE,
+  work: DESKTOP,
+});
+
+describe('与配置和猫的一致性', () => {
+  it('挂件与猫用同一个放大倍数 - 否则两边的像素格不一样大', () => {
+    expect(PROP_SCALE).toBe(TARGET_SCALE);
+  });
+
+  it('tauri.conf.json 里两个挂件窗口的标签与尺寸就是常量算出来的那些', () => {
+    // JSON 配置没法 import 常量，只能反过来由测试守着。
+    // 标签不一致的症状是「挂件永远不出现」且没有任何报错；
+    // 尺寸不一致的症状是猫走到食盆旁边一点点的地方吃饭。
+    const conf = JSON.parse(
+      readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+    ) as { app: { windows: { label: string; width: number; height: number }[] } };
+    for (const kind of PROP_KINDS) {
+      const label = propWindowLabel(kind);
+      const win = conf.app.windows.find((w) => w.label === label);
+      expect(win, `配置里没有 ${label} 窗口`).toBeDefined();
+      const size = propWindowSize(kind);
+      expect(win!.width, `${label} 宽度`).toBe(size.w);
+      expect(win!.height, `${label} 高度`).toBe(size.h);
+    }
+  });
+
+  it('挂件窗口的 url 带上了自己的 kind - 一个页面服务两个挂件', () => {
+    const conf = JSON.parse(
+      readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+    ) as { app: { windows: { label: string; url: string }[] } };
+    for (const kind of PROP_KINDS) {
+      const win = conf.app.windows.find((w) => w.label === propWindowLabel(kind));
+      expect(win!.url).toBe(`prop.html?kind=${kind}`);
+    }
+  });
+
+  it('挂件窗口以隐藏启动 - 摆好位置之前不该被看见', () => {
+    const conf = JSON.parse(
+      readFileSync(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+    ) as { app: { windows: { label: string; visible: boolean; transparent: boolean }[] } };
+    for (const kind of PROP_KINDS) {
+      const win = conf.app.windows.find((w) => w.label === propWindowLabel(kind));
+      expect(win!.visible, `${kind} 应当以隐藏启动`).toBe(false);
+      expect(win!.transparent, `${kind} 必须是透明窗口`).toBe(true);
+    }
+  });
+});
+
+describe('默认摆放', () => {
+  it('两个挂件的下沿都落在猫脚下的地面线上', () => {
+    for (const kind of PROP_KINDS) {
+      const p = defaultPlacement(kind, DESKTOP, GROUND_Y, SPRITE_SCALE);
+      // 贴图最后一个精灵行的顶边 = 窗口下沿 - 一行。它要与地面线重合。
+      const lastRowTop = p.y + (PROP_SPRITE[kind].h - 1) * SPRITE_SCALE;
+      expect(lastRowTop, `${kind} 没踩在地面线上`).toBe(Math.round(GROUND_Y));
+    }
+  });
+
+  it('地面线的算法与猫一致：离工作区下沿是 H - GROUND 个精灵像素', () => {
+    // 对照组：上一条依赖 GROUND_Y 本身是对的。这里独立算一遍。
+    expect(GROUND_Y).toBe(DESKTOP.y + DESKTOP.h - (H - GROUND) * SPRITE_SCALE);
+  });
+
+  it('食盆在右、猫窝在左，中间留出一大段给猫走', () => {
+    const s = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
+    const bowl = propCenterX('bowl', s.bowl);
+    const bed = propCenterX('bed', s.bed);
+    expect(bowl).toBeGreaterThan(bed);
+    // 中间那段路超过一个舞台宽（648），也就是说猫走过去一定会带动舞台滚动。
+    expect(bowl - bed).toBeGreaterThan(W * PROP_SCALE * 3);
+  });
+
+  it('默认就显示 - 首次启动看不见食盆的话，「点食盆添粮」没有入口', () => {
+    const s = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
+    expect(s.bowl.visible).toBe(true);
+    expect(s.bed.visible).toBe(true);
+  });
+
+  it('小屏上两个挂件仍然整个在屏幕里', () => {
+    const tiny: ScreenRect = { x: 0, y: 0, w: 800, h: 600 };
+    const s = defaultPropsState(tiny, tiny.y + tiny.h - 18, SPRITE_SCALE);
+    for (const kind of PROP_KINDS) {
+      const size = propWindowSize(kind);
+      expect(s[kind].x).toBeGreaterThanOrEqual(tiny.x);
+      expect(s[kind].x + size.w).toBeLessThanOrEqual(tiny.x + tiny.w);
+    }
+  });
+
+  it('负坐标的屏幕（左侧外接屏）也摆得进去', () => {
+    const left: ScreenRect = { x: -1920, y: -200, w: 1920, h: 1080 };
+    const s = defaultPropsState(left, left.y + left.h - 18, SPRITE_SCALE);
+    for (const kind of PROP_KINDS) {
+      expect(s[kind].x).toBeGreaterThanOrEqual(left.x);
+      expect(s[kind].x + propWindowSize(kind).w).toBeLessThanOrEqual(left.x + left.w);
+    }
+  });
+});
+
+describe('钳进工作区', () => {
+  const outside: PropPlacement = { x: 5000, y: 5000, visible: true };
+
+  it('屏幕外的摆放被拉回屏幕内 - 否则用户既看不见也拖不回来', () => {
+    const p = clampPlacement('bowl', outside, DESKTOP);
+    const size = propWindowSize('bowl');
+    expect(p.x + size.w).toBe(DESKTOP.w);
+    expect(p.y + size.h).toBe(DESKTOP.h);
+  });
+
+  it('屏幕内的摆放一动不动 - 用户摆在哪儿是他的决定', () => {
+    const inside: PropPlacement = { x: 300, y: 400, visible: false };
+    expect(clampPlacement('bed', inside, DESKTOP)).toEqual(inside);
+    const state = { bowl: inside, bed: inside };
+    expect(samePropsState(clampPropsState(state, DESKTOP), state)).toBe(true);
+  });
+
+  it('钳制不改变显示状态', () => {
+    expect(clampPlacement('bowl', { ...outside, visible: false }, DESKTOP).visible).toBe(false);
+  });
+
+  it('屏幕比挂件还窄时贴左，不产生负的可用宽度', () => {
+    const sliver: ScreenRect = { x: 100, y: 0, w: 20, h: 20 };
+    expect(clampPlacement('bed', { x: 0, y: 0, visible: true }, sliver).x).toBe(100);
+  });
+});
+
+describe('猫的落点', () => {
+  const limits = { min: 108, max: 1812 };
+  const at = (x: number): PropPlacement => ({ x, y: 900, visible: true });
+
+  it('食盆：猫停在自己那一侧，离盆心 PROP_REACH_SPRITE 个精灵像素', () => {
+    const bowl = at(900);
+    const center = propCenterX('bowl', bowl);
+    const reach = PROP_REACH_SPRITE.bowl * SPRITE_SCALE;
+    // 猫在右边 → 停在盆的右侧
+    expect(approachX('bowl', bowl, center + 400, limits, SPRITE_SCALE)).toBe(center + reach);
+    // 猫在左边 → 停在盆的左侧
+    expect(approachX('bowl', bowl, center - 400, limits, SPRITE_SCALE)).toBe(center - reach);
+  });
+
+  it('落点是稳定的：站定之后再算一次不会跳到另一侧', () => {
+    const bowl = at(900);
+    const center = propCenterX('bowl', bowl);
+    const first = approachX('bowl', bowl, center + 400, limits, SPRITE_SCALE);
+    expect(approachX('bowl', bowl, first, limits, SPRITE_SCALE)).toBe(first);
+    const other = approachX('bowl', bowl, center - 400, limits, SPRITE_SCALE);
+    expect(approachX('bowl', bowl, other, limits, SPRITE_SCALE)).toBe(other);
+  });
+
+  it('猫窝：reach 为 0，猫站在垫子正中间（睡在窝里，不是窝旁边）', () => {
+    const bed = at(600);
+    expect(approachX('bed', bed, 100, limits, SPRITE_SCALE)).toBe(propCenterX('bed', bed));
+    expect(approachX('bed', bed, 1800, limits, SPRITE_SCALE)).toBe(propCenterX('bed', bed));
+  });
+
+  it('食盆贴着屏幕右边缘时改从左侧靠近', () => {
+    const bowl = at(limits.max);
+    const center = propCenterX('bowl', bowl);
+    const reach = PROP_REACH_SPRITE.bowl * SPRITE_SCALE;
+    // 猫从右边过来，但右侧落点已经出了可达范围。
+    const x = approachX('bowl', bowl, center + 10, limits, SPRITE_SCALE);
+    expect(x).toBe(center - reach);
+    expect(x).toBeLessThanOrEqual(limits.max);
+  });
+
+  it('两侧都不可达时钳住，仍然落在可达范围内', () => {
+    // 极窄的可达范围：两侧落点都出界。
+    const narrow = { min: 500, max: 502 };
+    const bowl = at(400);
+    const x = approachX('bowl', bowl, 501, narrow, SPRITE_SCALE);
+    expect(x).toBeGreaterThanOrEqual(narrow.min);
+    expect(x).toBeLessThanOrEqual(narrow.max);
+  });
+
+  it('隐藏的挂件没有锚点 - 猫照旧自己漫游，不会走去一个空位置', () => {
+    const state = { bowl: { x: 900, y: 900, visible: false }, bed: at(300) };
+    expect(anchorScreenX('bowl', state, 500, limits, SPRITE_SCALE)).toBeNull();
+    expect(anchorScreenX('bed', state, 500, limits, SPRITE_SCALE)).not.toBeNull();
+  });
+});
+
+describe('不可变更新', () => {
+  it('withPlacement 返回新对象，不改原状态', () => {
+    const state = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
+    const before = JSON.stringify(state);
+    const next = withPlacement(state, 'bowl', { visible: false });
+    expect(JSON.stringify(state)).toBe(before);
+    expect(next.bowl.visible).toBe(false);
+    // 没碰的那个挂件保持原样
+    expect(next.bed).toEqual(state.bed);
+    // 只改 visible 不该动坐标
+    expect(next.bowl.x).toBe(state.bowl.x);
+  });
+
+  it('samePropsState 认得出「一模一样」与「差一点」', () => {
+    const a = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
+    expect(samePropsState(a, { ...a })).toBe(true);
+    expect(samePropsState(a, withPlacement(a, 'bed', { x: a.bed.x + 1 }))).toBe(false);
+    expect(samePropsState(a, withPlacement(a, 'bed', { visible: !a.bed.visible }))).toBe(false);
+  });
+});
+
+describe('像素缩放', () => {
+  /** 真机上会遇到的 dpr 档位。与 test/app/display.test.ts 同一组。 */
+  const REAL_DPRS = [1, 1.25, 1.5, 2, 2.5, 3] as const;
+
+  it('任何 dpr 下缩放都是整数，且画布放得进窗口', () => {
+    for (const kind of PROP_KINDS) {
+      const sprite = PROP_SPRITE[kind];
+      const box = propWindowSize(kind);
+      for (const dpr of REAL_DPRS) {
+        const scale = propDeviceScale(sprite, PROP_SCALE, dpr, box);
+        expect(Number.isInteger(scale), `${kind} dpr=${dpr}`).toBe(true);
+        expect(scale).toBeGreaterThanOrEqual(1);
+        const css = propCssSize(sprite, scale, dpr);
+        expect(css.w, `${kind} dpr=${dpr} 画布宽 ${css.w} 超出窗口 ${box.w}`).toBeLessThanOrEqual(
+          box.w,
+        );
+        expect(css.h, `${kind} dpr=${dpr} 画布高 ${css.h} 超出窗口 ${box.h}`).toBeLessThanOrEqual(
+          box.h,
+        );
+      }
+    }
+  });
+
+  it('每个源像素占整数个物理像素 - 像素风不破功的那条约束', () => {
+    for (const kind of PROP_KINDS) {
+      for (const dpr of REAL_DPRS) {
+        const scale = propDeviceScale(PROP_SPRITE[kind], PROP_SCALE, dpr, propWindowSize(kind));
+        // 画布的后备缓冲是 sprite * scale 个物理像素，CSS 宽是它除以 dpr，
+        // 于是一个源像素占 scale 个物理像素 - 整数，与 dpr 是不是分数无关。
+        expect(Number.isInteger(scale)).toBe(true);
+      }
+    }
+  });
+
+  it('窗口给得再小也不会算出 0 倍（那会画出一张空图）', () => {
+    const kind: PropKind = 'bed';
+    expect(propDeviceScale(PROP_SPRITE[kind], PROP_SCALE, 1, { w: 1, h: 1 })).toBe(1);
+  });
+});
+
+describe('挂件的高度', () => {
+  it('两个挂件都很矮 - 与猫的窗口谁盖谁是平台行为，重叠区必须小', () => {
+    // 蜷睡的猫大约 26 个精灵行高（H - 30）。挂件高过它的一半就会在
+    // 「挂件盖住猫」那种叠放下把猫挡掉大半。
+    for (const kind of PROP_KINDS) {
+      expect(PROP_SPRITE[kind].h, `${kind} 太高了`).toBeLessThan(13);
+    }
+  });
+
+  it('groundedY 对同一个地面线给出的下沿位置只与贴图高度有关', () => {
+    const a = groundedY('bowl', GROUND_Y, SPRITE_SCALE);
+    const b = groundedY('bed', GROUND_Y, SPRITE_SCALE);
+    expect(a - b).toBe((PROP_SPRITE.bed.h - PROP_SPRITE.bowl.h) * SPRITE_SCALE);
+  });
+});

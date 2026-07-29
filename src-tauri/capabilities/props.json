@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "props",
+  "description": "桌面挂件窗口所需的最小权限集。只要事件总线：挂件窗口靠 emitTo 把点击与新位置报给宠物窗口，靠 listen 收回碗里的份数。动窗口（摆放、显示隐藏、拖拽）一律走应用自己的命令，在 Rust 侧执行，因此不需要 core:window 的写权限。",
+  "windows": ["prop-bowl", "prop-bed"],
+  "permissions": ["core:event:default"]
+}

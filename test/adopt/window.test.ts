@@ -64,9 +64,17 @@ describe('领养完成前不显示猫', () => {
 });
 
 describe('打包产物里有领养页', () => {
-  it('adopt.html 显式列进了 rollup 的入口', () => {
-    // 漏掉它：开发时一切正常（devUrl 直接给文件），打包后领养窗口一片空白。
-    expect(viteConfig).toContain("page('adopt.html')");
+  it('三个入口页都显式列进了 rollup 的入口', () => {
+    // 漏掉任何一页：开发时一切正常（devUrl 直接给文件），打包后那个窗口一片空白，
+    // 而且不报错 - 挂件窗口本来就是透明的，领养那条路又只有删掉存档重启才走得到。
+    //
+    // 断言的是「这一页在 input 里」，不绑具体写法（相对路径还是 URL 辅助函数）：
+    // 合并 #8 与 #9 时两边的写法不同，绑写法的断言在那次合并里失败了一次，
+    // 而入口其实是齐的。
+    const input = /input:\s*\{([^}]*)\}/.exec(viteConfig)?.[1] ?? '';
+    for (const page of ['index.html', 'adopt.html', 'prop.html']) {
+      expect(input, `${page} 不在 rollup 的 input 里`).toContain(page);
+    }
   });
 
   it('领养窗口在权限清单里', () => {

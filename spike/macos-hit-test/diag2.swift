@@ -2,7 +2,7 @@
 import AppKit
 import WebKit
 
-/// 左半不透明、右半完全透明的自绘视图 —— 同一个视图内制造 alpha 差异
+/// 左半不透明、右半完全透明的自绘视图 - 同一个视图内制造 alpha 差异
 final class HalfView: NSView {
     override var isOpaque: Bool { false }
     override func draw(_ dirty: NSRect) {

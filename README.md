@@ -9,10 +9,29 @@
 
 ## 当前状态
 
-**设计与技术调研已完成，尚无实现代码。**
+**开发中。** 猫已经在桌面上生活了：会自己走动、吃饭、睡觉、生病、死亡，关机期间的时段会在下次启动时补算回来。
 
-仓库里现在只有设计文档和验证用的原型。
-下一步是搭 Tauri 骨架，第一件事是验证 macOS 侧的窗口点击穿透行为（见 [ADR 0006](docs/adr/0006-alpha-mask-hit-testing.md) 的影响一节）。
+已完成的票（GitHub issues）：
+
+| # | 内容 |
+|---|---|
+| 01 | Spike：验证 macOS 宠物窗口的点击穿透行为 |
+| 02 | 预重构：渲染核心模块化并输出 alpha 掩膜 |
+| 03 | 骨架：桌面上出现一只会呼吸的猫 |
+| 04 | 选择性点击穿透：猫身上可点，其余穿透 |
+| 05 | 世界内核：状态演化 + 存档 + 离线推演 |
+| 06 | 自主行为与完整动作库（含爪印） |
+| 07 | 领养与身份：七品种 + Seed + 起名 |
+| 08 | 食盆与猫窝挂件 + 喂食 |
+
+接下来是抚摸与拖拽、光标即逗猫棒、猫爬到前台窗口上、猫咪日记、托盘完整化，以及 Windows 打包与真机验收。
+
+```bash
+npm install
+npm run app:dev     # 起开发版（Tauri）
+npm test            # 全套测试
+npm run harness     # 渲染核心的人工验证页，每个品种 × 每个动作
+```
 
 ## 文档
 
@@ -32,6 +51,9 @@
 - [0004](docs/adr/0004-desktop-as-territory.md) 废弃虚拟场景，真实桌面就是猫的领地
 - [0005](docs/adr/0005-window-geometry-without-permission.md) 用 CGWindowList 读窗口几何，不迁移到 ScreenCaptureKit
 - [0006](docs/adr/0006-alpha-mask-hit-testing.md) 用 alpha 掩膜逐帧命中测试实现选择性点击穿透
+- [0007](docs/adr/0007-stage-window-and-motion-layer.md) 舞台窗口跟随猫，逐帧位移独立于世界层
+- [0008](docs/adr/0008-behaviour-beat-separate-from-need-tick.md) 行为节拍与需求步长分离，各用一条随机流
+- [0009](docs/adr/0009-prop-anchors-across-layers.md) 世界层用挂件名表达空间诉求，抵达判定归运动层
 
 ## 原型
 

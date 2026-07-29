@@ -10,6 +10,12 @@ import { GROUND_FROM_BOTTOM } from './stage.js';
  * 世界层给的是 30 分钟粒度的意图（`renderIntent.action`），而「走过去」是逐帧的事 -
  * 位置、朝向、抵达判定、爪印都需要帧时钟。
  *
+ * 挂件（食盆、猫窝）就是「送到那里」的字面意思：世界层说「它想去食盆」
+ * （只有名字，没有坐标），应用层把名字换算成一个屏幕 x 传进 `anchorX`，
+ * 这一层负责在世界层动嘴之前把猫送到那儿。**世界层对「吃不吃」的权威一点没动** -
+ * 它照旧在整步上自己判定，不需要任何「猫到了吗」的回信。需要回信才能吃的话，
+ * 离线补算就吃不了饭了（补算时没有屏幕，也没有帧）。
+ *
  * 不变量（改代码时不要破坏）：
  * - **运动层绝不写世界层。** 这个文件里没有任何 `World` 的引用，输入只有
  *   `ActionKey`（intent 的投影）与 `Cat`（由品种+Seed 重建），编译期就断掉了
@@ -109,6 +115,14 @@ export interface MotionInput {
   readonly now: number;
   /** 世界层的意图动作。**只读** - 运动层不回写世界。 */
   readonly action: ActionKey | null;
+  /**
+   * 猫这一刻该待的屏幕 x（挂件跟前）。null = 没有空间诉求，照旧自己漫游。
+   *
+   * 由应用层把世界层的 `renderIntent.anchor`（只有挂件名，没有坐标）经挂件层
+   * 换算而来。**运动层刻意只收一个数**：它不需要知道挂件是什么、有几个、
+   * 藏起来了没有 - 那些是挂件层的事，塞进来只会让这一层跟着挂件一起变。
+   */
+  readonly anchorX: number | null;
   /** 这只猫。只读性格与体型。 */
   readonly cat: Cat;
   readonly geom: StageGeometry;
@@ -198,6 +212,18 @@ function clampStage(p: ScreenPoint, geom: StageGeometry): ScreenPoint {
 }
 
 /**
+ * 猫在桌面工作区内横向可达的屏幕 x 区间（锚点是精灵的横向中心，所以两端各留半个精灵宽）。
+ *
+ * 导出是给挂件层用的：食盆的落点必须落在这个区间里，否则猫走不到那儿
+ * （挂件被拖到屏幕最边上时会发生）。**只算工作区，不算舞台** - 舞台会跟着猫滚动，
+ * 「这一帧能走到哪」是另一回事，见 roamBounds。
+ */
+export function reachableX(geom: StageGeometry): { min: number; max: number } {
+  const half = (W * geom.spriteScale) / 2;
+  return { min: geom.work.x + half, max: geom.work.x + geom.work.w - half };
+}
+
+/**
  * 猫这一帧可以走到的屏幕 x 范围。
  *
  * 两重约束的交集：桌面工作区（不走出屏幕），以及当前的舞台（不走出画布被裁掉
@@ -206,8 +232,9 @@ function clampStage(p: ScreenPoint, geom: StageGeometry): ScreenPoint {
  */
 function roamBounds(state: MotionState, geom: StageGeometry): { min: number; max: number } {
   const half = (W * geom.spriteScale) / 2;
-  const min = Math.max(geom.work.x + half, state.stage.x + half);
-  const max = Math.min(geom.work.x + geom.work.w - half, state.stage.x + geom.w - half);
+  const work = reachableX(geom);
+  const min = Math.max(work.min, state.stage.x + half);
+  const max = Math.min(work.max, state.stage.x + geom.w - half);
   // 交集为空只可能出现在舞台被拖到工作区之外的时候，取中点保证后续算术有定义。
   if (max < min) {
     const mid = (min + max) / 2;
@@ -300,12 +327,54 @@ function nextStage(
   return want.x === stage.x && want.y === stage.y ? stage : want;
 }
 
+/** 一次位移之后落下的爪印与新的步距余额。走路与走向挂件走的是同一套。 */
+interface PawTrail {
+  readonly paws: readonly PawPrint[];
+  readonly strideLeft: number;
+  readonly pawSide: 1 | -1;
+}
+
+/**
+ * 走了 `moved` 个 CSS 像素之后该落下的爪印。
+ *
+ * 按路程而不是按时间，所以走得快的猫脚印不会变密；
+ * 单帧最多落 8 枚是掉帧兜底 - dt 异常大时一帧可能跨过好几个步距。
+ */
+function dropPaws(
+  trail: PawTrail,
+  x: number,
+  moved: number,
+  geom: StageGeometry,
+  now: number,
+): PawTrail {
+  if (moved <= 0) return trail;
+  const stride = PAW_STRIDE_SPRITE * geom.spriteScale;
+  const y = groundScreenY(geom);
+  let strideLeft = trail.strideLeft - moved;
+  let pawSide = trail.pawSide;
+  const dropped: PawPrint[] = [];
+  while (strideLeft <= 0 && dropped.length < 8) {
+    strideLeft += stride;
+    pawSide = pawSide === 1 ? -1 : 1;
+    dropped.push({ x, y, at: now, side: pawSide });
+  }
+  if (dropped.length === 0) return { ...trail, strideLeft };
+  return { paws: [...trail.paws, ...dropped], strideLeft, pawSide };
+}
+
 /**
  * 推进一帧。纯函数，返回新状态，不改动入参。
  *
- * 世界层说「走路」时，这里负责挑目标、逐帧推进、抵达后**交还控制**
- * （不再推位置，改播站立呼吸并歇一会，等世界层下一个整步改主意）。
- * 其余动作原样放行 - 它们的位移都在动作自己的 pose 里。
+ * 三种情况，优先级从高到低：
+ *
+ * 1. **有锚点且还没走到**（`anchorX`）：不管世界层要什么动作，先播走路把猫送过去。
+ *    这是「猫走到食盆前才吃」的落点 - 世界层保留「吃不吃」的权威，
+ *    运动层保证它动嘴的那一刻人在盆前（ADR 0004 + 0007）。
+ * 2. **有锚点且已经到了**：原样播世界层要的动作，位置钉住。世界层说走路时改播
+ *    站立呼吸 - 猫已经在它该在的地方，原地踏步是最假的画面。
+ * 3. **没有锚点**：照旧自己漫游。世界层说走路就挑目标、逐帧推进、抵达后交还控制
+ *    （改播站立呼吸并歇一会，等世界层下一个整步改主意）；其余动作原样放行，
+ *    它们的位移都在动作自己的 pose 里。
  */
 export function stepMotion(state: MotionState, input: MotionInput): MotionState {
   const { dt, now, cat, geom, rnd } = input;
@@ -328,15 +397,28 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
   let dir = state.dir;
   let targetX = state.targetX;
   let restS = state.restS;
-  let strideLeft = state.strideLeft;
-  let pawSide = state.pawSide;
-  let paws = state.paws;
+  let trail: PawTrail = { paws: state.paws, strideLeft: state.strideLeft, pawSide: state.pawSide };
   let playing: ActionKey = input.action;
   let shot = state.shot;
 
-  // 一次性动作：播一遍就完，之后站着等世界层改主意。
+  /**
+   * 锚点先钳进可达范围再判定。
+   *
+   * 钳完之后「走不到」这种情况就不存在了：舞台会跟着猫滚动，而舞台被工作区钳住，
+   * 所以工作区内的任何 x 都走得到。少了这一步就得额外记一个「在这儿卡住了」的
+   * 状态，否则挂件被拖到屏幕外时猫会永远播走路。
+   */
+  const goal = input.anchorX === null ? null : clamp(input.anchorX, bounds.min, bounds.max);
+  const approaching = goal !== null && Math.abs(x - goal) > ARRIVE_EPS;
+
   const def = ACTIONS[input.action];
-  if (!def.loop) {
+  if (approaching) {
+    // 路上不推进一次性动作的时间线，到了才从头播。
+    // 不清掉的话，从桌面另一头走过来的十几秒会把三秒的动作在半路上播完，
+    // 猫抵达时那个动作已经「播过了」，等于白走一趟。
+    shot = null;
+  } else if (!def.loop) {
+    // 一次性动作：播一遍就完，之后站着等世界层改主意。
     const wasT = shot?.action === input.action ? shot.t : null;
     const t = wasT === null ? 0 : wasT + Math.max(0, dt);
     shot = { action: input.action, t };
@@ -358,7 +440,32 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
     shot = null;
   }
 
-  if (input.action !== 'walk') {
+  const stepLen = walkSpeed(cat, geom) * Math.max(0, dt);
+
+  if (approaching) {
+    // --- 一、走向挂件 ---
+    playing = 'walk';
+    targetX = goal;
+    restS = 0;
+    dir = goal! > x ? 1 : -1;
+    // dt = 0 时不推进（启动路径会用 dt = 0 推一帧只为算出 playing）。
+    if (stepLen > 0) {
+      // 最后一帧只走到锚点为止，不冲过去再拉回来。
+      const next = clamp(x + dir * Math.min(stepLen, Math.abs(goal! - x)), bounds.min, bounds.max);
+      const moved = Math.abs(next - x);
+      x = next;
+      trail = dropPaws(trail, x, moved, geom, now);
+    }
+  } else if (goal !== null) {
+    // --- 二、已经在挂件跟前 ---
+    targetX = null;
+    restS = 0;
+    // 世界层说走路，但猫已经在它想在的地方：站着。原地踏步是最假的画面。
+    // （在食盆边小幅踱步会更像猫，但那要求「吃的时候一定在盆前」这条硬约束
+    //  改成带半径的判定，留给手感调优，当前先保证约束。）
+    if (input.action === 'walk') playing = 'idle';
+  } else if (input.action !== 'walk') {
+    // --- 三、自由漫游：原地动作 ---
     targetX = null;
     restS = 0;
   } else if (restS > 0) {
@@ -366,33 +473,17 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
     restS = Math.max(0, restS - dt);
     playing = 'idle';
   } else {
+    // --- 三、自由漫游：走一段路 ---
     if (targetX == null) targetX = pickTarget(x, active, bounds, geom, rnd);
     const delta = targetX - x;
     if (delta !== 0) dir = delta > 0 ? 1 : -1;
     playing = 'walk';
 
-    // dt = 0 时什么都不判定。启动路径上会用 dt = 0 推一帧来把 playing 算出来，
-    // 那一帧不该顺手把「已经到了」这个结论也做掉。
-    const stepLen = walkSpeed(cat, geom) * Math.max(0, dt);
     if (stepLen > 0) {
-      // 最后一帧只走到目标为止，不冲过去再拉回来 - 那会是一次肉眼可见的抽动。
       const next = clamp(x + dir * Math.min(stepLen, Math.abs(delta)), bounds.min, bounds.max);
       const moved = Math.abs(next - x);
       x = next;
-
-      if (moved > 0) {
-        strideLeft -= moved;
-        const y = groundScreenY(geom);
-        const stride = PAW_STRIDE_SPRITE * geom.spriteScale;
-        const dropped: PawPrint[] = [];
-        // 上限保护：dt 异常大时一帧可能跨过好几个步距。
-        while (strideLeft <= 0 && dropped.length < 8) {
-          strideLeft += stride;
-          pawSide = pawSide === 1 ? -1 : 1;
-          dropped.push({ x, y, at: now, side: pawSide });
-        }
-        if (dropped.length > 0) paws = [...paws, ...dropped];
-      }
+      trail = dropPaws(trail, x, moved, geom, now);
 
       // 到了、或者走不动了（被工作区/舞台钳住）都把控制交还回去：
       // 位置不再推进，改播站立呼吸并歇一会，等世界层下一个整步改主意。
@@ -404,10 +495,22 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
     }
   }
 
-  paws = prune(paws, now);
+  const paws = prune(trail.paws, now);
   const stage = nextStage(state.stage, geom, x, dir);
 
-  return { ...state, x, dir, targetX, restS, playing, shot, stage, paws, strideLeft, pawSide };
+  return {
+    ...state,
+    x,
+    dir,
+    targetX,
+    restS,
+    playing,
+    shot,
+    stage,
+    paws,
+    strideLeft: trail.strideLeft,
+    pawSide: trail.pawSide,
+  };
 }
 
 /**

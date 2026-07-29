@@ -1,4 +1,4 @@
-import { drawBowl, drawDust, drawZzz } from './decor.js';
+import { drawDust, drawZzz } from './decor.js';
 import { FORMS } from './poses.js';
 import { Raster } from './raster.js';
 import type { Cat, Pose, RenderResult } from './types.js';
@@ -30,9 +30,6 @@ export class CatRenderer {
   render(cat: Cat, pose: Pose): RenderResult {
     const r = this.raster;
     r.clear();
-
-    // 食盆先画，会被猫压住（deprecated，见 decor.ts）。
-    if (pose.bowl) drawBowl(r, pose.bowl);
 
     const form = FORMS[pose.form ?? 'stand'];
     const anchors = form(r, cat, pose);

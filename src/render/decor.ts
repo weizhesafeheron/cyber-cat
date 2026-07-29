@@ -1,23 +1,13 @@
-import { GROUND, KIND_DECOR, KIND_PROP, type Raster } from './raster.js';
+import { GROUND, KIND_DECOR, type Raster } from './raster.js';
 import { clamp } from './rng.js';
 
 /**
- * 食盆。
+ * 猫身上的装饰件。
  *
- * @deprecated 食盆已由 ADR 0004 改为独立的桌面挂件窗口。
- * 这里保留仅为与原型渲染保持等价，ticket 08 落地后应整体删除。
- * 标记为 KIND_PROP，因此不进命中掩膜 - 点食盆不该算摸到猫。
+ * 这里曾经还有一个 `drawBowl` - 原型时代食盆画在猫的精灵缓冲里。
+ * 挂件改成独立窗口之后（ADR 0004、ticket 08）它搬去了 src/props/art.ts，
+ * 因为食盆的位置由用户拖动决定，猫的渲染器无从知道。
  */
-export function drawBowl(r: Raster, x: number): void {
-  for (let dx = -4; dx <= 4; dx++) r.px(x + dx, GROUND - 1, '#3d4f8a', KIND_PROP);
-  for (let dx = -5; dx <= 5; dx++) {
-    r.px(x + dx, GROUND, '#2c3a68', KIND_PROP);
-    r.px(x + dx, GROUND + 1, '#232c52', KIND_PROP);
-  }
-  for (let dx = -3; dx <= 3; dx++) r.px(x + dx, GROUND - 2, '#c98a4b', KIND_PROP);
-  r.px(x - 1, GROUND - 3, '#e0a45e', KIND_PROP);
-  r.px(x + 2, GROUND - 3, '#e0a45e', KIND_PROP);
-}
 
 /** 3x3 的 Z 字形。 */
 const Z_GLYPH: readonly (readonly [number, number])[] = [

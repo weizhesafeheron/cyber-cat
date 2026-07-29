@@ -83,7 +83,7 @@ def read_png(path):
 def orange_bbox(path, sample_step=1):
     """找出「橘猫毛色」像素的包围盒与重心 x。
 
-    按色相判断而不是精确 RGB —— 截图经过色彩配置转换，值会整体偏移。
+    按色相判断而不是精确 RGB - 截图经过色彩配置转换，值会整体偏移。
     """
     w, h, ch, rows = read_png(path)
     xs = []
