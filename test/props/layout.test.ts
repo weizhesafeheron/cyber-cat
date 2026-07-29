@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  PROP_GAP_PX,
   PROP_KINDS,
   PROP_REACH_SPRITE,
   PROP_SCALE,
@@ -9,7 +10,6 @@ import {
   approachX,
   clampPlacement,
   clampPropsState,
-  defaultPlacement,
   defaultPropsState,
   groundedY,
   propCenterX,
@@ -89,8 +89,9 @@ describe('与配置和猫的一致性', () => {
 
 describe('默认摆放', () => {
   it('两个挂件的下沿都落在猫脚下的地面线上', () => {
+    const s = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
     for (const kind of PROP_KINDS) {
-      const p = defaultPlacement(kind, DESKTOP, GROUND_Y, SPRITE_SCALE);
+      const p = s[kind];
       // 贴图最后一个精灵行的顶边 = 窗口下沿 - 一行。它要与地面线重合。
       const lastRowTop = p.y + (PROP_SPRITE[kind].h - 1) * SPRITE_SCALE;
       expect(lastRowTop, `${kind} 没踩在地面线上`).toBe(Math.round(GROUND_Y));
@@ -102,13 +103,40 @@ describe('默认摆放', () => {
     expect(GROUND_Y).toBe(DESKTOP.y + DESKTOP.h - (H - GROUND) * SPRITE_SCALE);
   });
 
-  it('食盆在右、猫窝在左，中间留出一大段给猫走', () => {
+  it('两件家具并排贴在右侧，猫窝在最外侧，间隔是定好的那一段', () => {
+    // 产品要求：摆在一起、稍作间隔、贴屏幕最右侧 - 挂件是常驻的，摆中间会挡内容。
     const s = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
-    const bowl = propCenterX('bowl', s.bowl);
-    const bed = propCenterX('bed', s.bed);
-    expect(bowl).toBeGreaterThan(bed);
-    // 中间那段路超过一个舞台宽（648），也就是说猫走过去一定会带动舞台滚动。
-    expect(bowl - bed).toBeGreaterThan(W * PROP_SCALE * 3);
+    const right = (kind: PropKind): number => s[kind].x + propWindowSize(kind).w;
+
+    expect(s.bed.x).toBeGreaterThan(s.bowl.x);
+    expect(s.bed.x - right('bowl')).toBe(PROP_GAP_PX);
+    for (const kind of PROP_KINDS) {
+      expect(s[kind].x, `${kind} 没贴到右侧`).toBeGreaterThan(DESKTOP.x + (DESKTOP.w * 2) / 3);
+    }
+  });
+
+  it('贴边贴到猫刚好还能站进去为止，不会再往外', () => {
+    // 猫的锚点是精灵横向中心，精灵不能出屏，所以它能站到的最右位置离右沿有半个身子。
+    // 真按留白贴死的话猫窝中心会落在那条线之外，猫会歪着躺在垫子边上（实测 30 像素）。
+    const s = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
+    const catHalf = (W * SPRITE_SCALE) / 2;
+    const reachMax = DESKTOP.x + DESKTOP.w - catHalf;
+    const bedCenter = propCenterX('bed', s.bed);
+    expect(bedCenter).toBeLessThanOrEqual(reachMax);
+    // 而且是贴着这条线，不是随便留一大截
+    expect(reachMax - bedCenter).toBeLessThan(SPRITE_SCALE);
+  });
+
+  it('间隔不小于猫躺在垫子上比垫子宽出的那部分 - 否则睡着的猫会压住食盆', () => {
+    const catHalf = (W * SPRITE_SCALE) / 2;
+    const bedHalf = propWindowSize('bed').w / 2;
+    expect(PROP_GAP_PX).toBeGreaterThanOrEqual(catHalf - bedHalf);
+
+    // 按真实摆放算一遍：猫躺在垫子中间时，它的身体左沿不该越过食盆右沿。
+    const s = defaultPropsState(DESKTOP, GROUND_Y, SPRITE_SCALE);
+    const catLeft = propCenterX('bed', s.bed) - catHalf;
+    const bowlRight = propCenterX('bowl', s.bowl) + propWindowSize('bowl').w / 2;
+    expect(catLeft).toBeGreaterThan(bowlRight);
   });
 
   it('默认就显示 - 首次启动看不见食盆的话，「点食盆添粮」没有入口', () => {

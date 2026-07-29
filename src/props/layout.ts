@@ -1,7 +1,10 @@
+import { W as CAT_W } from '../render/index.js';
 import { clamp } from '../render/rng.js';
 import {
   PROP_DEFAULT_VISIBLE,
-  PROP_DEFAULT_X_RATIO,
+  PROP_EDGE_MARGIN_PX,
+  PROP_GAP_PX,
+  PROP_RIGHT_TO_LEFT,
   PROP_REACH_SPRITE,
   PROP_SPRITE,
   propWindowSize,
@@ -44,30 +47,54 @@ export function groundedY(kind: PropKind, groundY: number, spriteScale: number):
   return groundY + spriteScale - PROP_SPRITE[kind].h * spriteScale;
 }
 
-/** 首次启动时的摆放：踩在地面线上，食盆偏右、猫窝偏左。 */
-export function defaultPlacement(
-  kind: PropKind,
-  work: ScreenRect,
-  groundY: number,
-  spriteScale: number,
-): PropPlacement {
-  const center = work.x + work.w * PROP_DEFAULT_X_RATIO[kind];
-  return clampPlacement(kind, {
-    x: Math.round(center - propWindowSize(kind).w / 2),
-    y: Math.round(groundedY(kind, groundY, spriteScale)),
-    visible: PROP_DEFAULT_VISIBLE,
-  }, work);
-}
-
+/**
+ * 首次启动时的摆放：全部踩在地面线上，并排贴住工作区右边缘。
+ *
+ * 横向位置由 PROP_RIGHT_TO_LEFT 的顺序累加算出来，**不是每件独立算一个比例** -
+ * 独立算的话两件家具的间隔会随屏幕宽度变化，窄屏上会叠在一起。
+ * 这里的间隔是固定像素，屏幕再窄也只是一起往左挤，最后由 clampPlacement 收住。
+ *
+ * **贴边不能贴到猫站不进去的地方。** 猫的锚点是它精灵的横向中心，而精灵不能出屏，
+ * 所以它能站到的最右位置离工作区右沿有半个身子。真按 PROP_EDGE_MARGIN_PX 贴死，
+ * 猫窝的中心会落在那条线之外 - 猫要睡在垫子正中间，结果是歪 30 像素躺在垫子边上。
+ * 所以整组算完之后再统一往左让出这段身位（整组一起挪，间隔与贴边的相对关系不变）。
+ */
 export function defaultPropsState(
   work: ScreenRect,
   groundY: number,
   spriteScale: number,
 ): PropsState {
-  return {
-    bowl: defaultPlacement('bowl', work, groundY, spriteScale),
-    bed: defaultPlacement('bed', work, groundY, spriteScale),
-  };
+  const xs: Partial<Record<PropKind, number>> = {};
+  let right = work.x + work.w - PROP_EDGE_MARGIN_PX;
+  for (const kind of PROP_RIGHT_TO_LEFT) {
+    const w = propWindowSize(kind).w;
+    xs[kind] = right - w;
+    right -= w + PROP_GAP_PX;
+  }
+
+  // 猫能站到的最右位置。超出的部分整组左移。
+  const reachMax = work.x + work.w - (CAT_W * spriteScale) / 2;
+  let overflow = 0;
+  for (const kind of PROP_KINDS) {
+    const x = xs[kind];
+    if (x === undefined) throw new Error(`PROP_RIGHT_TO_LEFT 漏了 ${kind}`);
+    const center = x + propWindowSize(kind).w / 2;
+    overflow = Math.max(overflow, center - reachMax);
+  }
+
+  const out: Partial<Record<PropKind, PropPlacement>> = {};
+  for (const kind of PROP_KINDS) {
+    out[kind] = clampPlacement(
+      kind,
+      {
+        x: Math.round(xs[kind]! - overflow),
+        y: Math.round(groundedY(kind, groundY, spriteScale)),
+        visible: PROP_DEFAULT_VISIBLE,
+      },
+      work,
+    );
+  }
+  return out as PropsState;
 }
 
 /**

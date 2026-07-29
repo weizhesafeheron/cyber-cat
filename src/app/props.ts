@@ -12,7 +12,7 @@ import {
   samePropsState,
   withPlacement,
 } from '../props/index.js';
-import type { PropKind, PropMovedPayload, PropsState } from '../props/index.js';
+import type { PropKind, PropMovedPayload, PropPlacement, PropsState } from '../props/index.js';
 import { emitToWindow, listenEvent, placeProp, pushPropMenu } from './ipc.js';
 import { groundScreenY, reachableX } from './motion.js';
 import type { StageGeometry } from './motion.js';
@@ -35,10 +35,47 @@ import { loadProps, saveProps } from './persist.js';
 /** 拖动之后延迟这么久才写盘。用户连着挪几下不该写几次文件。 */
 const PERSIST_DEBOUNCE_MS = 1000;
 
+/**
+ * 这一层用到的全部平台能力，注入而非直接 import。
+ *
+ * 不是为了「可替换实现」- 只有一个实现。是为了**可测**：这里的逻辑全是
+ * 「什么时候该给窗口下发什么」，而下发本身跨进程，真机之外看不见。
+ * 曾经因为这一层没有测试，一个「首次摆放时把另一个挂件误标成已下发」的 bug
+ * 一路溜到真机，症状是猫窝永远不出现，而且没有任何报错。
+ */
+export interface PropsPorts {
+  readonly loadProps: () => Promise<PropsState | null>;
+  readonly saveProps: (state: PropsState) => Promise<void>;
+  readonly placeProp: (kind: PropKind, x: number, y: number, visible: boolean) => Promise<void>;
+  readonly pushPropMenu: (bowlVisible: boolean, bedVisible: boolean) => Promise<void>;
+  readonly emitToWindow: (label: string, name: string, payload: unknown) => Promise<void>;
+  readonly listenEvent: <T>(name: string, handler: (payload: T) => void) => Promise<void>;
+}
+
+/** 真机上的那套端口。 */
+export const tauriPropsPorts: PropsPorts = {
+  loadProps,
+  saveProps,
+  placeProp,
+  pushPropMenu,
+  emitToWindow,
+  listenEvent,
+};
+
 export class PropsHost {
   private state: PropsState;
-  /** 上一次真的下发给窗口的摆放。用来跳过没有变化的窗口移动（跨进程操作）。 */
-  private applied: PropsState | null = null;
+  /**
+   * 上一次真的下发给窗口的摆放，**按挂件分别记**。用来跳过没有变化的窗口移动
+   * （那是一次跨进程操作）。
+   *
+   * 只记「确实下发过的那些」，不能拿一整份 PropsState 去兜底：
+   * 曾经写成 `applied = { ...(applied ?? state), [kind]: p }`，第一次摆放时
+   * `applied` 是空的、于是拿 `state` 兜底 - 而 `state` 里本来就有另一个挂件的
+   * 正确摆放，这一句等于宣布它也已经下发过了。症状是**猫窝永远不显示**：
+   * 摆食盆时顺手把猫窝标记成已下发，轮到猫窝就被去重跳过，窗口一直停在
+   * Tauri 给的默认位置且 visible 仍是 false。
+   */
+  private applied: Partial<Record<PropKind, PropPlacement>> = {};
   private portions = 0;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   /**
@@ -57,7 +94,10 @@ export class PropsHost {
    * 猫会先按「没有锚点」漫游，之后突然被拽向食盆。先摆默认位置、读到存档再覆盖，
    * 中间那一下最多是挂件位置变一次，猫的行为是连续的。
    */
-  constructor(geom: StageGeometry) {
+  constructor(
+    geom: StageGeometry,
+    private readonly ports: PropsPorts = tauriPropsPorts,
+  ) {
     this.state = defaultPropsState(geom.work, groundScreenY(geom), geom.spriteScale);
   }
 
@@ -76,13 +116,13 @@ export class PropsHost {
    * 不钳的话挂件在屏幕外，用户既看不见也拖不回来。
    */
   async boot(geom: StageGeometry): Promise<void> {
-    const saved = await loadProps();
+    const saved = await this.ports.loadProps();
     this.state = saved
       ? clampPropsState(saved, geom.work)
       : defaultPropsState(geom.work, groundScreenY(geom), geom.spriteScale);
     await this.apply();
     for (const kind of PROP_KINDS) await this.sync(kind);
-    await pushPropMenu(this.state.bowl.visible, this.state.bed.visible);
+    await this.ports.pushPropMenu(this.state.bowl.visible, this.state.bed.visible);
     this.booted = true;
   }
 
@@ -95,14 +135,14 @@ export class PropsHost {
   listen(onFeed: () => void): void {
     // 挂件窗口起来了：把摆放与碗里的份数补发给它。挂件窗口会重试到收到回音为止，
     // 所以这里不需要关心两个 webview 谁先加载完。
-    void listenEvent<PropKind>(PROP_EVENT_READY, (kind) => {
+    void this.ports.listenEvent<PropKind>(PROP_EVENT_READY, (kind) => {
       void this.applyOne(kind, true);
       void this.sync(kind);
     });
-    void listenEvent<PropKind>(PROP_EVENT_CLICKED, (kind) => {
+    void this.ports.listenEvent<PropKind>(PROP_EVENT_CLICKED, (kind) => {
       if (kind === 'bowl') onFeed();
     });
-    void listenEvent<PropMovedPayload>(PROP_EVENT_MOVED, (p) => {
+    void this.ports.listenEvent<PropMovedPayload>(PROP_EVENT_MOVED, (p) => {
       if (!this.booted) return; // 见 booted 的注释：读档完成前不接受位置
       // 用户拖过的位置**不再钳回工作区**：他把食盆摆在哪儿是他的决定
       // （ADR 0004 的「布置领地」），当场纠回去只会让人觉得窗口在跟自己抢。
@@ -121,7 +161,7 @@ export class PropsHost {
     this.state = withPlacement(this.state, kind, { visible: !this.state[kind].visible });
     await this.applyOne(kind, false);
     await this.sync(kind);
-    await pushPropMenu(this.state.bowl.visible, this.state.bed.visible);
+    await this.ports.pushPropMenu(this.state.bowl.visible, this.state.bed.visible);
     this.schedulePersist();
   }
 
@@ -164,9 +204,10 @@ export class PropsHost {
   /** 下发一个挂件的位置与可见性。`force` 用于挂件窗口重启后的补发。 */
   private async applyOne(kind: PropKind, force: boolean): Promise<void> {
     const p = this.state[kind];
-    if (!force && this.applied && samePlacement(this.applied[kind], p)) return;
-    this.applied = { ...(this.applied ?? this.state), [kind]: p };
-    await placeProp(kind, p.x, p.y, p.visible).catch((err: unknown) => {
+    const prev = this.applied[kind];
+    if (!force && prev !== undefined && samePlacement(prev, p)) return;
+    this.applied = { ...this.applied, [kind]: p };
+    await this.ports.placeProp(kind, p.x, p.y, p.visible).catch((err: unknown) => {
       // 摆不上去的后果是挂件留在默认位置或者不显示，猫的锚点仍然按我们记的位置算，
       // 于是可能出现「猫走到一个空地方吃饭」。可见地报出来，不要静默。
       console.error(`[cyber-cat] 摆放挂件 ${kind} 失败：`, err);
@@ -180,7 +221,7 @@ export class PropsHost {
    * （见 prop-main.ts 的 announce），少了它猫窝会一直重试报到。
    */
   private async sync(kind: PropKind): Promise<void> {
-    await emitToWindow(propWindowLabel(kind), PROP_EVENT_SYNC, {
+    await this.ports.emitToWindow(propWindowLabel(kind), PROP_EVENT_SYNC, {
       portions: this.portions,
       visible: this.state[kind].visible,
     });
@@ -190,7 +231,7 @@ export class PropsHost {
     if (this.persistTimer != null) clearTimeout(this.persistTimer);
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      void saveProps(this.state);
+      void this.ports.saveProps(this.state);
     }, PERSIST_DEBOUNCE_MS);
   }
 }
