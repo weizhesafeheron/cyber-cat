@@ -215,7 +215,7 @@ void boot()
     console.error('[cyber-cat] 告别页初始化失败：', err);
   })
   .finally(() => {
-    void contentReady().catch((err: unknown) => {
+    void contentReady(true).catch((err: unknown) => {
       console.error('[cyber-cat] 显示告别页失败：', err);
     });
   });

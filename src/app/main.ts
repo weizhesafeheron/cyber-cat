@@ -15,6 +15,7 @@ import {
   W,
   hitTest,
   makeCat,
+  headColumn,
   makeMicro,
   stepMicro,
 } from '../render/index.js';
@@ -75,7 +76,15 @@ import {
 } from './motion.js';
 import type { MicroSwitches, MotionState, ScreenRect, StageGeometry } from './motion.js';
 import { PollingPassthrough } from './passthrough.js';
+import {
+  EAT_SAY_SPRITE,
+  sayBob,
+  saySpriteRect,
+  sayStageRect,
+  sayVisible,
+} from '../say/index.js';
 import { HeartCanvas, burstHearts, heartsInStage, stepHearts } from './hearts.js';
+import { SayCanvas } from './say.js';
 import type { Heart } from './hearts.js';
 import { PawCanvas } from './paws.js';
 import { loadWorld, onTrayAction, pushTrayStatus, saveWorld } from './persist.js';
@@ -137,6 +146,7 @@ const display = new CatDisplay(canvas, TARGET_SCALE);
 const paws = new PawCanvas(document.getElementById('paws') as HTMLCanvasElement);
 const heartCanvas = new HeartCanvas(document.getElementById('hearts') as HTMLCanvasElement);
 const bubble = new BubbleCanvas(document.getElementById('bubble') as HTMLCanvasElement);
+const say = new SayCanvas(document.getElementById('say') as HTMLCanvasElement, EAT_SAY_SPRITE);
 
 /**
  * 正在飘的爱心。**不进存档也不进世界层** - 与爪印同理，它是一次抚摸的即时回应，
@@ -199,6 +209,7 @@ function applyGeometry(): void {
   paws.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
   heartCanvas.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
   bubble.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
+  say.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
 }
 
 applyGeometry();
@@ -253,6 +264,8 @@ let lastSaveMs = 0;
 let lastTrayMs = 0;
 let lastMetricsMs = 0;
 
+/** 最近一帧里头中心的列位，精灵像素。台词气泡按它对齐尾尖。 */
+let lastHeadX = 0;
 /** 最近画出去的那一帧。命中测试必须用当前帧的掩膜（ADR 0006）。 */
 let lastFrame: RenderResult | null = null;
 /** 即时反馈的截止时刻（performance.now 时间轴）。0 = 没在反应。 */
@@ -327,6 +340,7 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
     // 猫不在了，头顶也就没有气泡可冒。死掉的猫的日记由告别页承接（ticket 13）。
     bubbleRect = null;
     bubble.clear();
+    say.clear();
     lastFrame = null;
     return null;
   }
@@ -339,6 +353,9 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
   //   faceDir 在合并之后 - 它要翻转的 dx / legOx 可能来自任何一层；
   //   微动作开关最后 - 关掉尾巴就是最终结果里尾巴不摆，不管谁设过它。
   const posed = applyMicroSwitches(faceDir({ ...base, ...intent.pose }, motion.dir), micros);
+  // 头在哪一列。台词气泡的尾巴尖按它对齐 - 由渲染层算，不在气泡那边拍一个偏移量
+  // （头的列位取决于品种的体宽，拍死会在瘦品种上偏三四个精灵像素）。
+  lastHeadX = headColumn(cat, posed, motion.dir);
   const res = renderer.render(cat, posed);
   lastFrame = res;
   display.paint(res);
@@ -350,9 +367,10 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
     heartsInStage(hearts, nowMs, motion.stage, groundScreenY(geometry()), display.spriteScale),
     display.spriteScale,
   );
-  // 气泡排在 display.place 之后：它的横向位置取自 display.originCss，
+  // 两种气泡都排在 display.place 之后：横向位置取自 display.originCss，
   // 而那个值是 place() 写的（已对齐到整数物理像素）。顺序颠倒会让气泡慢猫一帧。
   paintBubble(nowMs);
+  paintSay(nowMs);
   return res;
 }
 
@@ -375,6 +393,25 @@ function paintBubble(nowMs: number): void {
   bubbleRect = rect;
   bubble.paint(
     bubbleStageRect(rect, display.originCss, display.spriteScale, window.innerHeight),
+    display.pixelRatio,
+  );
+}
+
+/**
+ * 画这一帧的台词气泡（吃饭时的「yummy...」）。
+ *
+ * 时机跟着**吃饭动作的时相**走，用的是渲染动作的那同一个 animT - 传别的值会让气泡
+ * 与低头错开（见 say/bubble.ts）。回归气泡在的时候让位：两者位置重合，
+ * 而那个是可点的入口。
+ */
+function paintSay(nowMs: number): void {
+  if (!sayVisible(motion.playing, animT, bubbleRect !== null)) {
+    say.clear();
+    return;
+  }
+  const rect = saySpriteRect(EAT_SAY_SPRITE, lastHeadX, motion.dir, sayBob(nowMs / 1000));
+  say.paint(
+    sayStageRect(rect, display.originCss, display.spriteScale, window.innerHeight),
     display.pixelRatio,
   );
 }

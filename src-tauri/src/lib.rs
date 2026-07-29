@@ -25,16 +25,31 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 /// 所以只能靠「窗口以 visible: false 启动、内容就绪后才 show」这条框架无关的路子 -
 /// 窗口在有内容之前根本不存在，也就无从闪烁。
 ///
-/// 显示的是**调用方自己那个窗口**，所以宠物窗口与领养窗口共用这一个命令。
+/// 显示的是**调用方自己那个窗口**，所以四个窗口（宠物、领养、日记、告别）共用这一个命令。
 /// 领养窗口尤其需要它：那一页是深色的雨夜，白底闪一下比在透明窗口上更显眼。
-/// 两边都必须**同步画完第一帧再调**，不能放进 requestAnimationFrame -
+/// 都必须**同步画完第一帧再调**，不能放进 requestAnimationFrame -
 /// rAF 对隐藏窗口不触发，那样会死锁在「窗口永远不显示」上（踩过）。
 ///
 /// 如果哪天改掉这个流程，Windows 上的启动白闪会立刻回来。
+///
+/// `focus` 决定显示之后要不要抢焦点并置前，**由调用方自己声明**：
+/// - 宠物窗口传 false。它是桌面宠物，抢焦点等于打断用户正在做的事。
+/// - 领养、日记、告别页传 true。它们是用户主动打开的一页，不在前面等于没打开。
+///
+/// **建窗时的 `.focused(true)` 对这条路径无效**，这是踩过的坑：窗口是以
+/// `visible: false` 建的（防白闪），等第一屏画完才 show，而那时 build 时的
+/// 聚焦意图早就过期了，`show()` 本身既不聚焦也不置前。
+/// 症状是「点了托盘的日记，什么都没出现」- 窗口其实开在了别的窗口后面。
 #[tauri::command]
-fn content_ready(window: WebviewWindow) {
+fn content_ready(window: WebviewWindow, focus: bool) {
     if let Err(e) = window.show() {
         eprintln!("[cyber-cat] 显示窗口 {} 失败：{e}", window.label());
+    }
+    if !focus {
+        return;
+    }
+    if let Err(e) = window.set_focus() {
+        eprintln!("[cyber-cat] 聚焦窗口 {} 失败：{e}", window.label());
     }
 }
 

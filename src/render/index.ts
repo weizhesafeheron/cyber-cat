@@ -9,6 +9,7 @@ export { PALETTES, RAGDOLL_POINTS } from './palette.js';
 export {
   ACTIONS,
   ACTION_KEYS,
+  EAT_CYCLE,
   MOTION_ONLY_ACTIONS,
   type ActionKey,
   type MotionOnlyAction,
@@ -16,6 +17,7 @@ export {
 } from './actions.js';
 export { makeMicro, stepMicro, type MicroState, type MicroOpts, type MicroOut } from './micro.js';
 export { GROUND, H, W } from './raster.js';
+export { headColumn } from './poses.js';
 export { mulberry32 } from './rng.js';
 export * from './types.js';
 

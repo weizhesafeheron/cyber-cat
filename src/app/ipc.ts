@@ -30,18 +30,22 @@ async function invoker(): Promise<Invoke> {
 /**
  * 第一帧画好了，通知 Rust 显示**调用方自己这个窗口**。
  *
- * 宠物窗口与领养窗口共用：两者都以 visible: false 建出来，画完第一帧才显示
+ * 四个窗口共用：都以 visible: false 建出来，画完第一帧才显示
  * （防白闪，见 ADR 0003 与 lib.rs 的 content_ready）。
  * 必须在**同步画完第一帧之后**调，不能放进 rAF - rAF 对隐藏窗口不触发。
+ *
+ * `focus` 由调用方声明。宠物窗口传 false（桌面宠物抢焦点等于打断用户），
+ * 用户主动打开的那三页传 true - **不置前等于没打开**。
+ * 建窗时的 `.focused(true)` 对这条路径无效，理由见 lib.rs 那边的注释。
  *
  * 在 Tauri 里失败会抛：这是窗口能否显示的唯一途径，不能静默。
  * 浏览器里直接开页面调试时没有窗口要显示，跳过就好 - 早先这里会抛，
  * 结果浏览器调试只能看到静止的第一帧。
  */
-export async function contentReady(): Promise<void> {
+export async function contentReady(focus = false): Promise<void> {
   if (!inTauri) return;
   const invoke = await invoker();
-  await invoke<void>('content_ready');
+  await invoke<void>('content_ready', { focus });
 }
 
 /**

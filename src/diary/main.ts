@@ -100,7 +100,7 @@ async function boot(): Promise<void> {
     console.error('[cyber-cat] 渲染日记失败：', err);
     renderMissing();
   }
-  await contentReady();
+  await contentReady(true);
 }
 
 void boot();

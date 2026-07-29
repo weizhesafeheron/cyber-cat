@@ -31,6 +31,20 @@
         pointer-events: none;
       }
       /*
+       * 抚摸时冒的爱心与吃饭时的台词气泡。两张都铺满舞台、盖在猫之上、不收指针事件。
+       *
+       * **少了这段定位规则它们会按文档流排下去**，于是画布跑到舞台外面，
+       * 屏幕上什么都看不到而且不报错 - 透明窗口里这种缺陷完全没有症状。
+       */
+      #hearts,
+      #say {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        image-rendering: pixelated;
+        pointer-events: none;
+      }
+      /*
        * 回归气泡（ADR 0011）。舞台里的第三张画布，铺满舞台、盖在猫之上。
        *
        * `pointer-events: none` 不影响它可点：点击由 window 上的 pointerdown
@@ -65,8 +79,9 @@
     <div id="stage">
       <canvas id="paws"></canvas>
       <canvas id="cat"></canvas>
-      <!-- 爱心与气泡都在猫之上：两者都从猫头顶冒出来，压在猫身后就看不见了 -->
+      <!-- 爱心与两种气泡都在猫之上：都从猫头顶冒出来，压在猫身后就看不见了 -->
       <canvas id="hearts"></canvas>
+      <canvas id="say"></canvas>
       <canvas id="bubble"></canvas>
     </div>
     <script type="module" src="/src/app/main.ts"></script>

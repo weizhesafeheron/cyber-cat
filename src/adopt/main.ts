@@ -252,7 +252,7 @@ matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('cha
 applyGeometry();
 walkIn();
 render(0);
-void contentReady()
+void contentReady(true)
   .then(() => {
     lastFrameMs = performance.now();
     requestAnimationFrame(frame);

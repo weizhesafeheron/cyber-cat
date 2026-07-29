@@ -14,6 +14,23 @@ export interface Anchors {
 
 const CENTER_X = 34;
 
+/**
+ * 这个姿态下头中心的横向列位，精灵像素。
+ *
+ * 导出是给头顶的气泡对齐用的（src/say/）：气泡的尾巴尖要指着头那一列，
+ * 不然它指的是猫的后背。**必须与 drawStand 里那一行是同一个表达式** -
+ * 在气泡那边照抄一份的代价是：头的列位取决于品种的体宽（德文瘦、美短最宽），
+ * 拍一个固定偏移量在瘦品种上会偏三四个精灵像素，而这种偏差只有盯着看才发现。
+ *
+ * 只对站立类姿态成立（吃饭、走路、站立、扑跳都是 stand）。坐姿趴姿的头在别处，
+ * 但那些姿态目前没有气泡。
+ */
+export function headColumn(cat: Cat, p: Pose, dir: 1 | -1): number {
+  const rw = cat.bodyRW * (p.stretchX ?? 1);
+  const bx = CENTER_X + (p.dx ?? 0);
+  return bx + dir * (rw - 1) + (p.headDX ?? 0) * dir;
+}
+
 /** 四足站立。走路、伸懒腰、扑跳、吃饭都基于它。 */
 function drawStand(r: Raster, cat: Cat, p: Pose): Anchors {
   const dir = p.dir ?? 1;

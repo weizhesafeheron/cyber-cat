@@ -16,6 +16,15 @@ import type { Cat, Pose } from './types.js';
  */
 const EAT_CYCLE_S = 3.6;
 
+/**
+ * 吃饭周期里「头埋下去」的那一段，用占周期的比例表示。
+ *
+ * 导出是给台词气泡对齐用的（src/say/bubble.ts）：「随着低头弹出 yummy」这件事
+ * 要求两边说的是同一个时相。抄一份比例过去的话，改一次吃饭节奏就会有一边忘了改，
+ * 症状是气泡在猫抬着头的时候冒出来。
+ */
+export const EAT_CYCLE = { seconds: EAT_CYCLE_S, downFrom: 0.12, downTo: 0.7 } as const;
+
 const HELD_LIFT = 16;
 const HELD_DANGLE = 5;
 
@@ -234,9 +243,10 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
       const k = (t % EAT_CYCLE_S) / EAT_CYCLE_S;
       // 头的高度：0 = 抬起来（接近常态），1 = 埋进盆里。
       let down: number;
-      if (k < 0.12) down = ease(k / 0.12);
+      const { downFrom, downTo } = EAT_CYCLE;
+      if (k < downFrom) down = ease(k / downFrom);
       else if (k < 0.55) down = 1;
-      else if (k < 0.7) down = 1 - ease((k - 0.55) / 0.15);
+      else if (k < downTo) down = 1 - ease((k - 0.55) / (downTo - 0.55));
       else down = 0;
 
       // 埋头时是小幅快嚼，抬头时是大口慢嚼 - 两段的节奏不同才看得出在换动作。
