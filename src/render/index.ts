@@ -6,7 +6,14 @@ import type { Cat, Pose, RenderResult } from './types.js';
 export { BREEDS, BREED_KEYS, type BreedDef } from './breeds.js';
 export { makeCat } from './cat.js';
 export { PALETTES, RAGDOLL_POINTS } from './palette.js';
-export { ACTIONS, ACTION_KEYS, type ActionKey } from './actions.js';
+export {
+  ACTIONS,
+  ACTION_KEYS,
+  MOTION_ONLY_ACTIONS,
+  type ActionKey,
+  type MotionOnlyAction,
+  type WorldActionKey,
+} from './actions.js';
 export { makeMicro, stepMicro, type MicroState, type MicroOpts, type MicroOut } from './micro.js';
 export { GROUND, H, W } from './raster.js';
 export { mulberry32 } from './rng.js';

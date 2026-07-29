@@ -1,4 +1,4 @@
-import type { ActionKey, Cat } from '../render/index.js';
+import type { ActionKey, Cat, WorldActionKey } from '../render/index.js';
 import { clamp } from '../render/rng.js';
 import { companionDays, localDayIndex, localHourOfDay } from './clock.js';
 import {
@@ -51,7 +51,9 @@ import {
   MS_PER_HOUR,
   NEED_MAX,
   NIGHT_END_HOUR,
+  DROP_MOOD_PENALTY,
   PET_ASLEEP_MOOD_PENALTY,
+  PICK_UP_MOOD_PENALTY,
   PET_GLOW_GAIN,
   SICK_DIARY_CHANCE,
   SICK_DIARY_INTERVAL_HOURS,
@@ -204,11 +206,11 @@ function justCrossed(hours: number, threshold: number): boolean {
 }
 
 interface Weighted {
-  key: ActionKey;
+  key: WorldActionKey;
   weight: number;
 }
 
-function pickWeighted(items: readonly Weighted[], r: number): ActionKey {
+function pickWeighted(items: readonly Weighted[], r: number): WorldActionKey {
   let total = 0;
   for (const it of items) total += it.weight;
   if (total <= 0) return items[0]!.key;
@@ -255,6 +257,23 @@ export function applyAction(
       w.bond = Math.min(BOND_MAX, w.bond + BOND_GAIN_PET);
       w.stats.petCount++;
       emit(w, events, 'petted');
+      return;
+    }
+    case 'pickUp': {
+      w.lastInteractionAt = w.clock;
+      // 被拎起来必然醒。这是唯一一条**不经概率**的醒来路径 - 作息决定的醒来在
+      // decideSleep 里按节律抽签，而被端离地面不是概率问题。
+      w.sleeping = false;
+      w.needs.mood = Math.max(0, w.needs.mood - PICK_UP_MOOD_PENALTY);
+      emit(w, events, 'pickedUp');
+      return;
+    }
+    case 'drop': {
+      w.lastInteractionAt = w.clock;
+      w.needs.mood = Math.max(0, w.needs.mood - DROP_MOOD_PENALTY);
+      // 落地之后蹭回来还是走开，是逐帧的事，归运动层（它按 clingy 分化）。
+      // 世界层只发这一声，不记录「反应是哪种」- 记了就等于把帧层的决定搬进存档。
+      emit(w, events, 'dropped');
       return;
     }
     case 'medicate': {
@@ -304,7 +323,7 @@ function decideSleep(w: World, cat: Cat, hour: number): { justWoke: boolean } {
 
 /** advanceTick 交给行为节拍去落地的「这一刻该做什么」。没有则为 null。 */
 export interface TickUrge {
-  urge: ActionKey | null;
+  urge: WorldActionKey | null;
 }
 
 /**
@@ -453,7 +472,7 @@ export function advanceTick(w: World, cat: Cat, events: WorldEvent[]): TickUrge 
  * `urge` 是同一拍里刚发生的事要求的动作（刚吃完、刚醒来），优先于抽签，
  * 但仍然让位于生病与睡眠这两个持续状态。
  */
-export function advanceBeat(w: World, cat: Cat, urge: ActionKey | null = null): void {
+export function advanceBeat(w: World, cat: Cat, urge: WorldActionKey | null = null): void {
   // 生病与睡眠是持续状态，压过一切正在进行的动作。
   // 持续计数清零，是为了让状态一结束（醒过来、病好了）下一拍立刻重选 -
   // 不清的话猫会醒着却继续播睡觉的姿势。
@@ -493,13 +512,13 @@ export function advanceBeat(w: World, cat: Cat, urge: ActionKey | null = null): 
  * 这不是推理出来的，是真机上看出来的：改成节拍之后猫几乎只在站和趴之间切换，
  * 实测 120 拍里只有 4 拍在走路。除以平均持续时长之后时间占比才回到定档的样子。
  */
-function perSegment(action: ActionKey, timeShare: number): number {
+function perSegment(action: WorldActionKey, timeShare: number): number {
   const [min, max] = ACTIVITY_HOLD_BEATS[action];
   return (timeShare * 2) / (min + max);
 }
 
 /** 换动作，并按 ACTIVITY_HOLD_BEATS 抽一个持续时长。 */
-function setActivity(w: World, action: ActionKey): void {
+function setActivity(w: World, action: WorldActionKey): void {
   const [min, max] = ACTIVITY_HOLD_BEATS[action];
   const beats = min + Math.floor(rollActivity(w) * (max - min + 1));
   w.activity = action;
@@ -513,7 +532,7 @@ function setActivity(w: World, action: ActionKey): void {
  * 性格在这里必须真实起作用（issue #6）：活跃度高的猫走动与扑跳明显更多，
  * 懒猫更多趴着。深夜给扑跳额外加权，这就是「深夜偶发跑酷」。
  */
-function chooseActivity(w: World, cat: Cat, hour: number): ActionKey {
+function chooseActivity(w: World, cat: Cat, hour: number): WorldActionKey {
   // 饿了在食盆边徘徊：只在走与坐之间选，不会去跑酷。
   if (w.needs.hunger < HUNGRY_VISIBLE_THRESHOLD) {
     return rollActivity(w) < ACTIVITY_HUNGRY_WALK_CHANCE ? 'walk' : 'sit';

@@ -7,6 +7,8 @@ import {
   applyMicroSwitches,
   catInStage,
   createMotion,
+  reachableX,
+  groundScreenY,
   faceDir,
   microOptsFor,
   pawsInStage,
@@ -19,6 +21,7 @@ import {
   ACTIONS,
   ACTION_KEYS,
   CatRenderer,
+  MOTION_ONLY_ACTIONS,
   GROUND,
   H,
   W,
@@ -27,7 +30,7 @@ import {
   mulberry32,
   stepMicro,
 } from '../../src/render/index.js';
-import type { ActionKey, Cat } from '../../src/render/index.js';
+import type { ActionKey, WorldActionKey, Cat } from '../../src/render/index.js';
 import { step } from '../../src/world/index.js';
 import { TICK, feedEvery, findSeed, makeWorld } from '../world/helpers.js';
 
@@ -64,7 +67,7 @@ interface RunOpts {
   frames: number;
   /** 帧时长，秒。默认 60fps。 */
   dt?: number;
-  action?: ActionKey | null;
+  action?: WorldActionKey | null;
   cat?: Cat;
   g?: StageGeometry;
   /** 起始时刻，毫秒。 */
@@ -117,6 +120,11 @@ function run(
   return { end: state, frames, now };
 }
 
+/** 世界层会选的动作。运动层专属的（被拎起来、落地）不在其中。 */
+const WORLD_KEYS = ACTION_KEYS.filter(
+  (k) => !(MOTION_ONLY_ACTIONS as readonly ActionKey[]).includes(k),
+) as WorldActionKey[];
+
 describe('位置随时间推进', () => {
   it('世界层说走路时，猫的屏幕位置真的在变', () => {
     const start = createMotion(geom(), centeredStage());
@@ -133,29 +141,12 @@ describe('位置随时间推进', () => {
     const walking = run(start, { frames: 40 });
     expect(Math.abs(walking.end.x - start.x)).toBeGreaterThan(0);
 
-    // 换成任何非走路动作，之后每一帧的位移都必须是 0
-    for (const action of ACTION_KEYS.filter((a) => a !== 'walk')) {
+    // 换成任何非走路动作，之后每一帧的位移都必须是 0。
+    // 扑跳除外 - 它的位移是动作库声明的 leap，由运动层真的推进猫的位置。
+    for (const action of WORLD_KEYS.filter((a) => a !== 'walk' && a !== 'pounce')) {
       const held = run(walking.end, { frames: 30, action, now: walking.now });
       const maxMoved = Math.max(...held.frames.map((f) => f.moved));
       expect(maxMoved, `播 ${action} 时仍在位移`).toBe(0);
-      expect(held.end.playing, `播 ${action} 时 playing 不对`).toBe(action);
-    }
-  });
-
-  it('走路中途换成别的动作，位移必须立刻停住', () => {
-    // 回归保护：即时反馈（点猫播伸懒腰）曾经只覆盖渲染、没有喂给运动层，
-    // 结果是「一边伸懒腰一边横向漂移」。位移的唯一开关是喂进来的动作。
-    const start = createMotion(geom(), centeredStage());
-    // 先真的走起来，确认位移在发生
-    const walking = run(start, { frames: 40 });
-    expect(Math.abs(walking.end.x - start.x)).toBeGreaterThan(0);
-
-    // 换成任何非走路动作，之后每一帧的位移都必须是 0
-    for (const action of ACTION_KEYS.filter((a) => a !== 'walk')) {
-      const held = run(walking.end, { frames: 30, action, now: walking.now });
-      const maxMoved = Math.max(...held.frames.map((f) => f.moved));
-      expect(maxMoved, `播 ${action} 时仍在位移`).toBe(0);
-      expect(held.end.playing, `播 ${action} 时 playing 不对`).toBe(action);
     }
   });
 
@@ -174,7 +165,7 @@ describe('位置随时间推进', () => {
     const start = createMotion(geom(), centeredStage());
     // 走路与扑跳是唯二会真的移动猫的动作。扑跳的位移由动作库的 leap 声明、
     // 运动层驱动 - 早先它是在精灵缓冲里用 dx 做的，跳完还得滑回原点。
-    const still = ACTION_KEYS.filter((k) => k !== 'walk' && k !== 'pounce');
+    const still = WORLD_KEYS.filter((k) => k !== 'walk' && k !== 'pounce');
     for (const action of still) {
       const { end } = run(start, { frames: 120, action });
       expect(end.x, `${action} 改变了位置`).toBe(start.x);
@@ -203,7 +194,7 @@ describe('位置随时间推进', () => {
   it('一次性动作播一遍就停下来站着，不会一轮接一轮地循环', () => {
     // 用户实测：「跳完固定是蹲下的动作，然后会循环好几轮」。
     // 根因是世界层给一个动作分配十几秒，而扑跳只有 3.4 秒，被当成循环播了四五轮。
-    for (const action of ACTION_KEYS.filter((k) => !ACTIONS[k].loop)) {
+    for (const action of WORLD_KEYS.filter((k) => !ACTIONS[k].loop)) {
       const period = ACTIONS[action].period ?? 0;
       expect(period, `${action} 没有声明时长`).toBeGreaterThan(0);
       const g = geom();
@@ -643,22 +634,30 @@ describe('性格影响行为', () => {
 });
 
 describe('动作库全部接上', () => {
-  it('十个基础动作都能播出可见的猫', () => {
-    expect(ACTION_KEYS).toHaveLength(10);
+  it('每个动作都能画出可见的猫，一个都不能是空的', () => {
+    // 包括运动层专属的「被拎起来」「落地」- 它们不进世界层的抽签，但一样要画得出来。
     const renderer = new CatRenderer();
     const mi = makeMicro(1);
-    const g = geom();
     for (const key of ACTION_KEYS) {
-      const { end } = run(createMotion(g, centeredStage(g)), { frames: 10, action: key });
-      // 运动层要么原样放行，要么在走完一段路后改播站立呼吸。
-      expect(end.playing === key || (key === 'walk' && end.playing === 'idle')).toBe(true);
-      const pose = ACTIONS[end.playing!].make(1.1, NORMAL, stepMicro(mi, 0.016, {}));
-      const res = renderer.render(NORMAL, faceDir(pose, end.dir));
-      expect(res.alphaMask.some((v) => v === 255), `${key} 画出来是空的`).toBe(true);
+      for (const t of [0, 0.2, 1.1, 3.9]) {
+        const pose = ACTIONS[key].make(t, NORMAL, stepMicro(mi, 0.016, {}));
+        const res = renderer.render(NORMAL, faceDir(pose, 1));
+        expect(res.alphaMask.some((v) => v === 255), `${key} 在 t=${t} 画出来是空的`).toBe(true);
+      }
     }
   });
 
-  it('世界层长跑会用到全部十个动作', () => {
+  it('世界层的动作交给运动层，要么原样放行、要么按帧级判断改播', () => {
+    const g = geom();
+    for (const key of WORLD_KEYS) {
+      const { end } = run(createMotion(g, centeredStage(g)), { frames: 10, action: key });
+      // 走完一段路会改播站立呼吸；一次性动作播完也会。
+      const ok = end.playing === key || end.playing === 'idle';
+      expect(ok, `${key} 播成了 ${String(end.playing)}`).toBe(true);
+    }
+  });
+
+  it('世界层长跑会用到它能选的每一个动作', () => {
     // 40 天，每 4 小时添一次粮。晨昏节律、睡眠、进食、刚醒伸懒腰都在这段里出现。
     const feed = feedEvery(8);
     let world = makeWorld({ breed: 'cow', seed: findSeed('cow', (p) => p.active > 0.9), hour: 5 });
@@ -669,7 +668,11 @@ describe('动作库全部接上', () => {
       if (world.dead) throw new Error('长跑里猫死了，统计不成立');
       if (r.renderIntent.action) seen.add(r.renderIntent.action);
     }
-    expect([...seen].sort()).toEqual([...ACTION_KEYS].sort());
+    // 只比世界层会选的那些：「被拎起来」「落地」由用户的手造成，永远不该在这里出现。
+    expect([...seen].sort()).toEqual([...WORLD_KEYS].sort());
+    for (const k of MOTION_ONLY_ACTIONS) {
+      expect(seen.has(k), `世界层不该自己选 ${k}`).toBe(false);
+    }
   });
 
   it('猫已离开时不播任何动作', () => {
@@ -918,5 +921,214 @@ describe('分层边界', () => {
     expect(fresh.playing).toBeNull();
     // 重建之后照样能走
     expect(run(fresh, { frames: 60 }).end.x).not.toBe(fresh.x);
+  });
+});
+
+describe('拎起来、下落、落地反应', () => {
+  const CLINGY = makeCat('ragdoll', findSeed('ragdoll', (p) => p.clingy > 0.85));
+  const ALOOF = makeCat('black', findSeed('black', (p) => p.clingy < 0.15));
+
+  /** 拎着猫跑若干帧。`at` 给光标的屏幕位置。 */
+  function hold(
+    start: MotionState,
+    at: { x: number; y: number },
+    frames: number,
+    who: Cat = NORMAL,
+  ): MotionState {
+    let st = start;
+    const g = geom();
+    const rnd = mulberry32(3);
+    for (let i = 0; i < frames; i++) {
+      st = stepMotion(st, {
+        dt: 1 / 60,
+        now: i * 16,
+        action: 'idle',
+        anchorX: null,
+        cat: who,
+        geom: g,
+        rnd,
+        hold: at,
+      });
+    }
+    return st;
+  }
+
+  /** 松手之后跑若干帧。 */
+  function release(
+    start: MotionState,
+    frames: number,
+    who: Cat = NORMAL,
+    cursorX: number | null = null,
+    startNow = 1000,
+  ): { end: MotionState; seen: (ActionKey | null)[]; lifts: number[] } {
+    let st = start;
+    const g = geom();
+    const rnd = mulberry32(7);
+    const seen: (ActionKey | null)[] = [];
+    const lifts: number[] = [];
+    for (let i = 0; i < frames; i++) {
+      st = stepMotion(st, {
+        dt: 1 / 60,
+        now: startNow + i * 16,
+        action: 'idle',
+        anchorX: null,
+        cat: who,
+        geom: g,
+        rnd,
+        hold: null,
+        cursorX,
+      });
+      seen.push(st.playing);
+      lifts.push(st.liftY);
+    }
+    return { end: st, seen, lifts };
+  }
+
+  it('拎起来：位置跟着光标，猫离地，播悬空姿态', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const groundY = groundScreenY(g);
+    const st = hold(start, { x: start.x + 200, y: groundY - 150 }, 5);
+    expect(st.held).toBe(true);
+    expect(st.playing).toBe('held');
+    expect(st.x).toBe(start.x + 200);
+    expect(st.liftY).toBeCloseTo(150, 6);
+  });
+
+  it('拎着的时候不留爪印 - 脚没沾地', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const groundY = groundScreenY(g);
+    let st = start;
+    for (let i = 0; i < 40; i++) {
+      st = hold(st, { x: start.x + i * 12, y: groundY - 120 }, 1);
+    }
+    expect(st.paws).toHaveLength(0);
+  });
+
+  it('拎起来会打断走路：目标与歇息一起清掉', () => {
+    const g = geom();
+    const walked = run(createMotion(g, centeredStage(g)), { frames: 40, g }).end;
+    expect(walked.targetX).not.toBeNull();
+    const st = hold(walked, { x: walked.x, y: groundScreenY(g) - 80 }, 1);
+    expect(st.targetX).toBeNull();
+    expect(st.restS).toBe(0);
+  });
+
+  it('拎不出屏幕：横向钳在猫走得到的范围内，纵向不超过工作区上沿', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const far = hold(start, { x: 99999, y: -99999 }, 3);
+    const reach = reachableX(g);
+    expect(far.x).toBeLessThanOrEqual(reach.max);
+    expect(far.x).toBeGreaterThanOrEqual(reach.min);
+    // 脚最高只能到工作区上沿
+    expect(far.liftY).toBeLessThanOrEqual(groundScreenY(g) - g.work.y);
+  });
+
+  it('舞台跟着猫一起升高，而且不会跑出工作区', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const groundY = groundScreenY(g);
+    const low = hold(start, { x: start.x, y: groundY }, 2);
+    const high = hold(start, { x: start.x, y: groundY - 200 }, 2);
+    expect(high.stage.y).toBeLessThan(low.stage.y);
+    expect(high.stage.y).toBeGreaterThanOrEqual(g.work.y);
+  });
+
+  it('松手就落地，不会停在半空 - 猫可以离开地面，但不会停在那里', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 260 }, 3);
+    expect(held.liftY).toBeGreaterThan(200);
+
+    const { end, lifts } = release(held, 120);
+    expect(end.liftY).toBe(0);
+    expect(end.held).toBe(false);
+    // 中间真的经过了下落过程，不是一帧瞬移
+    expect(lifts.filter((v) => v > 0).length).toBeGreaterThan(5);
+    // 而且是加速下落：后半段每帧掉得比前半段多
+    const drops = lifts.slice(1).map((v, i) => lifts[i]! - v).filter((d) => d > 0);
+    expect(drops[drops.length - 1]!).toBeGreaterThan(drops[0]!);
+  });
+
+  it('落地那一下播压缩，之后才开始走动', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 200 }, 3);
+    const { seen } = release(held, 120, NORMAL, start.x + 400);
+    const landIdx = seen.indexOf('land');
+    expect(landIdx, '落地没有播压缩').toBeGreaterThan(0);
+    // 压缩之前都在悬空
+    expect(seen.slice(0, landIdx).every((k) => k === 'held')).toBe(true);
+  });
+
+  it('落地之后甩尾巴 - 共通的不满表现', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 120 }, 3);
+    const { end } = release(held, 40);
+    expect(end.reaction).not.toBeNull();
+    expect(end.pose.tailWave ?? 0).toBeGreaterThan(2);
+  });
+
+  it('粘人的猫蹭回光标边', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const cursorX = start.x + 300;
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 100 }, 3, CLINGY);
+    const { end } = release(held, 240, CLINGY, cursorX);
+    expect(end.reaction?.kind ?? (null as unknown)).not.toBe('aloof');
+    // 朝光标靠过去了
+    expect(Math.abs(end.x - cursorX)).toBeLessThan(Math.abs(start.x - cursorX));
+  });
+
+  it('高冷的猫朝反方向走开，最后趴下', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const cursorX = start.x + 300;
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 100 }, 3, ALOOF);
+    const { end, seen } = release(held, 240, ALOOF, cursorX);
+    // 离光标更远了
+    expect(Math.abs(end.x - cursorX)).toBeGreaterThan(Math.abs(start.x - cursorX));
+    expect(seen).toContain('lie');
+  });
+
+  it('对照组：性格真的在分化，不是两条路都走同一边', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const cursorX = start.x + 300;
+    const c = release(hold(start, { x: start.x, y: groundScreenY(g) - 100 }, 3, CLINGY), 240, CLINGY, cursorX);
+    const a = release(hold(start, { x: start.x, y: groundScreenY(g) - 100 }, 3, ALOOF), 240, ALOOF, cursorX);
+    expect(Math.sign(c.end.x - start.x)).not.toBe(Math.sign(a.end.x - start.x));
+  });
+
+  it('反应结束后把控制交还给世界层', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 60 }, 3);
+    // 反应窗口 3.2 秒，跑够 5 秒
+    const { end } = release(held, 300);
+    expect(end.reaction).toBeNull();
+    expect(end.pose).toEqual({});
+  });
+
+  it('猫已离开时，拎着的状态一并清干净', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 100 }, 3);
+    const gone = stepMotion(held, {
+      dt: 1 / 60,
+      now: 999,
+      action: null,
+      anchorX: null,
+      cat: NORMAL,
+      geom: g,
+      rnd: mulberry32(1),
+    });
+    expect(gone.playing).toBeNull();
+    expect(gone.held).toBe(false);
+    expect(gone.liftY).toBe(0);
+    expect(gone.reaction).toBeNull();
   });
 });

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIONS, ACTION_KEYS, BREED_KEYS, CatRenderer, makeCat, makeMicro, stepMicro } from '../../src/render/index.js';
+import {
+  ACTIONS,
+  ACTION_KEYS,
+  BREED_KEYS,
+  CatRenderer,
+  MOTION_ONLY_ACTIONS,
+  makeCat,
+  makeMicro,
+  stepMicro,
+} from '../../src/render/index.js';
 import type { ActionKey } from '../../src/render/index.js';
 import { loadPrototype, makeCanvasStub } from './prototype-reference.js';
 
@@ -101,6 +110,9 @@ describe('端口保真性：与 prototype 参照实现比对', () => {
       it(`${key}`, () => {
         const cat = makeCat('orange', 20260728);
         const def = ACTIONS[key];
+        // 桌面宠物新增的动作原型里压根没有，无从比对。
+        // 「新增了哪些」由下面那条封闭清单守着，所以这里跳过是安全的。
+        if (proto.ACTIONS[key] === undefined) return;
         for (const t of TIMES) {
           // 一次性动作播完就停在最后一帧，prototype 里是循环重播。
           // 这是桌面宠物刻意的偏离（见 docs/art-and-motion-decisions.md）：
@@ -134,11 +146,19 @@ describe('端口保真性：与 prototype 参照实现比对', () => {
       });
     }
 
-    it('刻意偏离的清单是封闭的 - 只有这三个一次性动作与 prototype 不同', () => {
-      // 有这条才能保证上面的 continue 不会被顺手扩大成「有差异就跳过」。
+    it('原型里没有的动作只有这两个 - 清单是封闭的', () => {
+      // 有这条才能保证上面那个 return 不会被顺手扩大成「有差异就跳过」。
+      const missing = ACTION_KEYS.filter((k) => proto.ACTIONS[k] === undefined);
+      expect([...missing].sort()).toEqual([...MOTION_ONLY_ACTIONS].sort());
+      // 而且它们必须正是「运动层专属」那两个：桌面宠物需要「被拎起来」与「落地」，
+      // 原型里没有拖拽这回事。
+      expect([...MOTION_ONLY_ACTIONS].sort()).toEqual(['held', 'land']);
+    });
+
+    it('一次性动作的清单是封闭的，且每个都给出了播完所需的时长', () => {
       const oneShot = ACTION_KEYS.filter((k) => !ACTIONS[k].loop);
-      expect([...oneShot].sort()).toEqual(['pounce', 'stretch', 'yawn']);
-      // 每个一次性动作都必须给出播完所需的时长，否则运动层不知道什么时候算完。
+      expect([...oneShot].sort()).toEqual(['land', 'pounce', 'stretch', 'yawn']);
+      // 少了 period 运动层就不知道什么时候算播完，会当成循环动作一直播。
       for (const k of oneShot) expect(ACTIONS[k].period, k).toBeGreaterThan(0);
     });
 

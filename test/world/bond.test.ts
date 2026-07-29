@@ -113,3 +113,61 @@ describe('时间推进的算术', () => {
     expect(step(w, -5 * HOUR).world).toEqual(w);
   });
 });
+
+describe('拎起来与放下', () => {
+  it('拎起来必然把猫弄醒 - 这是唯一不经概率的醒来路径', () => {
+    const asleep = makeWorld({
+      hour: 2,
+      patch: { sleeping: true, needs: { hunger: 80, energy: 20, mood: 60 } },
+    });
+    // 精力低于 ENERGY_CAN_WAKE，作息决定的醒来在这个时段几乎不可能发生
+    const still = step(asleep, TICK).world;
+    expect(still.sleeping).toBe(true);
+    // 对照：拎一下就醒
+    const woken = step(asleep, 0, { actions: [{ type: 'pickUp' }] }).world;
+    expect(woken.sleeping).toBe(false);
+  });
+
+  it('拎起来与放下都扣心情，但都不动亲密度', () => {
+    const w = makeWorld({ hour: 10, patch: { bond: 50, needs: { hunger: 80, energy: 70, mood: 80 } } });
+    const up = step(w, 0, { actions: [{ type: 'pickUp' }] }).world;
+    expect(up.needs.mood).toBeLessThan(w.needs.mood);
+    expect(up.bond).toBe(w.bond);
+
+    const down = step(up, 0, { actions: [{ type: 'drop' }] }).world;
+    expect(down.needs.mood).toBeLessThan(up.needs.mood);
+    expect(down.bond).toBe(up.bond);
+  });
+
+  it('拎起来算一次互动 - 亲密度的宽限期跟着重置', () => {
+    const w = makeWorld({ hour: 10 });
+    const later = step(w, 3 * HOUR).world;
+    const up = step(later, 0, { actions: [{ type: 'pickUp' }] }).world;
+    expect(up.lastInteractionAt).toBe(later.clock);
+  });
+
+  it('心情扣不到负数', () => {
+    const sad = makeWorld({ hour: 10, patch: { needs: { hunger: 80, energy: 70, mood: 1 } } });
+    const out = step(sad, 0, {
+      actions: [{ type: 'pickUp' }, { type: 'drop' }, { type: 'pickUp' }, { type: 'drop' }],
+    }).world;
+    expect(out.needs.mood).toBe(0);
+  });
+
+  it('猫死后拎也没用 - 死亡不可逆', () => {
+    const dead = runTicks(makeWorld({ hour: 9 }), 10 * 48).world;
+    expect(dead.dead).toBe(true);
+    const after = step(dead, 0, { actions: [{ type: 'pickUp' }, { type: 'drop' }] }).world;
+    expect(after.needs).toEqual(dead.needs);
+    expect(after.sleeping).toBe(dead.sleeping);
+  });
+
+  it('两个动作都发出事件，但都不进日记 - 那是用户的手，不是猫做的事', () => {
+    const w = makeWorld({ hour: 10 });
+    const r = step(w, 0, { actions: [{ type: 'pickUp' }, { type: 'drop' }] });
+    const kinds = r.events.map((e) => e.kind);
+    expect(kinds).toContain('pickedUp');
+    expect(kinds).toContain('dropped');
+    expect(r.world.diary).toEqual(w.diary);
+  });
+});

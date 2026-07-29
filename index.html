@@ -41,7 +41,7 @@
         bottom: 0;
         display: block;
         image-rendering: pixelated;
-        /* 禁止选中与拖拽默认行为，ticket 09 会接管拖拽 */
+        /* 禁止选中与浏览器的默认拖拽 - 拖猫由 ticket 09 自己实现 */
         user-select: none;
         -webkit-user-drag: none;
       }
@@ -51,6 +51,8 @@
     <div id="stage">
       <canvas id="paws"></canvas>
       <canvas id="cat"></canvas>
+      <!-- 爱心在猫之上：它从猫头顶冒出来，压在猫身后就看不见了 -->
+      <canvas id="hearts"></canvas>
     </div>
     <script type="module" src="/src/app/main.ts"></script>
   </body>

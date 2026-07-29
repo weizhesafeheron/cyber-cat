@@ -2,6 +2,15 @@ import type { MicroOut } from './micro.js';
 import { clamp } from './rng.js';
 import type { Cat, Pose } from './types.js';
 
+/**
+ * 被拎起来时身体抬离地面线多少个精灵像素，以及腿垂下来多长。
+ *
+ * 抬起量取到「整只猫连尾巴都离地」为止：抬得不够会读成「猫在原地站着被拽」。
+ * 垂下的长度是抬起量减去 airborne，两者之差就是腿的可见长度。
+ */
+const HELD_LIFT = 16;
+const HELD_DANGLE = 5;
+
 /** 缓入缓出。 */
 const ease = (k: number): number => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
 
@@ -54,7 +63,30 @@ export type ActionKey =
   | 'eat'
   | 'yawn'
   | 'stretch'
-  | 'pounce';
+  | 'pounce'
+  | 'held'
+  | 'land';
+
+/**
+ * 只由运动层播、**世界层永远不会选**的动作。
+ *
+ * 「被拎起来」与「落地」是用户的手造成的，不是猫自己想做的事 - 世界层的动作
+ * 抽签里不该出现它们（那等于让猫自己决定被拎起来）。运动层在拖拽期间直接播。
+ *
+ * 显式列出来是因为好几处需要区分：世界层的时长表、「长跑能用到全部动作」那条
+ * 测试、以及与 prototype 的逐帧比对（原型里没有这两个动作）。
+ */
+export const MOTION_ONLY_ACTIONS = ['held', 'land'] as const satisfies readonly ActionKey[];
+
+export type MotionOnlyAction = (typeof MOTION_ONLY_ACTIONS)[number];
+
+/**
+ * 世界层可以选的动作。
+ *
+ * 有这个类型，「世界层永远不会选被拎起来」就成了**编译期**的约束而不是一句注释：
+ * 世界层那张时长表（ACTIVITY_HOLD_BEATS）按它取键，漏一个或多一个都编译不过。
+ */
+export type WorldActionKey = Exclude<ActionKey, MotionOnlyAction>;
 
 /**
  * 动作库。t 是动作的局部时间（秒）。
@@ -326,6 +358,62 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
       };
     },
   },
+
+  held: {
+    label: '被拎起来',
+    loop: true,
+    make(t, _cat, mi) {
+      // 悬空的猫**四条腿是松垂的**，不是绷直踩地。
+      // `dy` 把身体抬离地面，`airborne` 必须跟着抬腿 - 少了它腿会被拉长贴回地面线，
+      // 看起来像身体在原地伸缩（这正是扑跳踩过的坑，见 art-and-motion-decisions）。
+      // 两者之差就是腿垂下来的可见长度。
+      const swing = Math.sin(t * 2.1);
+      const sway = Math.sin(t * 1.5);
+      return {
+        form: 'stand',
+        dy: -HELD_LIFT,
+        airborne: HELD_LIFT - HELD_DANGLE,
+        legOx: [swing * 1.2, swing * 0.8, -swing * 1.1, -swing * 0.7],
+        legScale: 0.78,
+        squashY: 1.05,
+        stretchX: 0.97,
+        headDY: 2.2 + sway * 0.7,
+        // **尾巴必须垂下去。** drawTail 里 `y -= sin(ang)`，所以正角度是往上翘 -
+        // 第一版给了 2.3 rad，尾巴甩到头顶又被身体挡住，画面上直接没有尾巴。
+        // 负角度才是垂。曲率给小一点，垂下来的尾巴是松松一条，不打卷。
+        tailAng: -1.15,
+        tailCurl: 0.45,
+        tailWave: 0.5,
+        tailPhase: t * 1.1,
+        eyeOpen: mi.eyeOpen,
+        earFlickL: mi.earFlickL,
+        earFlickR: mi.earFlickR,
+      };
+    },
+  },
+
+  land: {
+    label: '落地',
+    loop: false,
+    period: 0.45,
+    make(t) {
+      const k = clamp(t / 0.45, 0, 1);
+      const squash = Math.sin(Math.PI * k);
+      return {
+        form: 'stand',
+        squashY: 1 - squash * 0.24,
+        stretchX: 1 + squash * 0.14,
+        legScale: 1 - squash * 0.32,
+        dust: 1 - k,
+        headDY: squash * 2.2,
+        tailAng: 1.25,
+        tailCurl: 1.4,
+        tailWave: 0.2,
+        tailPhase: t,
+        eyeOpen: 1,
+      };
+    },
+  },
 };
 
 /** 展示顺序，与 prototype ② 的按钮顺序一致。 */
@@ -340,4 +428,6 @@ export const ACTION_KEYS: readonly ActionKey[] = [
   'yawn',
   'stretch',
   'pounce',
+  'held',
+  'land',
 ];

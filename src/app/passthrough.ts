@@ -45,6 +45,8 @@ const INITIAL_PASS_THROUGH = true;
 export class PollingPassthrough implements PassthroughController {
   private state: HitState = initialHitState();
   private applied: boolean = INITIAL_PASS_THROUGH;
+  /** 拖拽期间强制关闭穿透。见 hold()。 */
+  private forced = false;
 
   constructor(
     private readonly cursor: CursorSource,
@@ -56,7 +58,33 @@ export class PollingPassthrough implements PassthroughController {
     return this.state.passThrough;
   }
 
+  /**
+   * 强制关闭穿透，绕过掩膜判定。拖拽期间必须这样。
+   *
+   * 理由：拖拽时窗口跟着光标一起动，而掩膜判定看的是「光标此刻在不在猫身上」-
+   * 快速拖动时窗口追不上光标，光标会短暂落到掩膜之外，判定于是打开穿透，
+   * webview 立刻收不到鼠标事件，**拖拽在半路上断掉**。
+   * 这不是可以靠调边距解决的：边距再宽也有拖得更快的时候。
+   */
+  hold(on: boolean): void {
+    this.forced = on;
+    if (!on) return;
+    if (this.applied === false) return;
+    this.applied = false;
+    this.apply(false);
+  }
+
   update(frame: HitFrame, now: number): void {
+    // 被强制关着的时候仍然更新判定状态（松手后才不会跳一下），但不下发。
+    if (this.forced) {
+      this.state = stepHit(
+        this.state,
+        frame,
+        { cursor: this.cursor.latest, velocity: this.cursor.velocity, now },
+        this.cfg,
+      );
+      return;
+    }
     this.state = stepHit(
       this.state,
       frame,

@@ -10,7 +10,7 @@
  * 但改动它们会让 test/world/needs.test.ts 与 death-chain.test.ts 失败，那是期望行为。
  */
 
-import type { ActionKey } from '../render/index.js';
+import type { WorldActionKey } from '../render/index.js';
 
 export const MS_PER_MINUTE = 60_000;
 export const MS_PER_HOUR = 3_600_000;
@@ -197,6 +197,23 @@ export const GLOW_DECAY_PER_TICK = 1.5;
 /** 摸正在睡的猫会被甩尾巴，心情略降。 */
 export const PET_ASLEEP_MOOD_PENALTY = 4;
 
+/**
+ * 被拎起来的心情代价。
+ *
+ * 比「摸睡着的猫」重一点：那只是打扰，这是把它整只端离地面。
+ * 但也不能重到让拖拽变成一件「不该做的事」- 拖拽是产品要的交互（ADR 0004 的
+ * 布置领地），惩罚太重用户就不敢碰猫了。
+ */
+export const PICK_UP_MOOD_PENALTY = 6;
+
+/**
+ * 落地的心情代价。
+ *
+ * 「共通表现是甩尾巴表示不满」（issue #10）在数值上的落点。
+ * 与 PICK_UP 分开记是因为两件事可以单独发生：拎起来一直不放，就只有前一半。
+ */
+export const DROP_MOOD_PENALTY = 3;
+
 // ---------------------------------------------------------------------------
 // 亲密度
 // ---------------------------------------------------------------------------
@@ -266,7 +283,9 @@ export const ACTIVITY_HUNGRY_WALK_CHANCE = 0.5;
  *
  * 这些区间是「读起来像不像猫」的调优旋钮，不影响任何已定档的数值。
  */
-export const ACTIVITY_HOLD_BEATS: Readonly<Record<ActionKey, readonly [number, number]>> = {
+export const ACTIVITY_HOLD_BEATS: Readonly<
+  Record<WorldActionKey, readonly [number, number]>
+> = {
   idle: [4, 9], // 20 - 45 秒
   walk: [2, 6], // 10 - 30 秒，走一小段就停
   // 打哈欠、伸懒腰、扑跳都是一次性动作（ACTIONS 里 loop: false）：只占一拍。

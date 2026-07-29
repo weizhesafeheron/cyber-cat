@@ -11,7 +11,7 @@
  * 离线推演的可回放性当场失效（ADR 0001）。
  */
 import type { PropKind } from '../props/types.js';
-import type { ActionKey, MicroOpts } from '../render/index.js';
+import type { MicroOpts, WorldActionKey } from '../render/index.js';
 import type { BreedKey, Pose } from '../render/types.js';
 
 /**
@@ -67,6 +67,8 @@ export type WorldEventKind =
   | 'fedByOwner'
   | 'petted'
   | 'petRefused'
+  | 'pickedUp'
+  | 'dropped'
   | 'gazedOutWindow'
   | 'groomed'
   | 'scratched'
@@ -155,8 +157,13 @@ export interface World {
   /** 最后一次互动时刻。亲密度的宽限期由它算。 */
   lastInteractionAt: number;
 
-  /** 猫此刻主要在做什么。renderIntent 的动作就是它的投影。 */
-  activity: ActionKey;
+  /**
+   * 猫此刻主要在做什么。renderIntent 的动作就是它的投影。
+   *
+   * 类型是 WorldActionKey 而不是 ActionKey：「被拎起来」「落地」是用户的手造成的，
+   * 不是猫自己想做的事，世界层永远不该选它们（见 render/actions.ts）。
+   */
+  activity: WorldActionKey;
   /** 当前动作还能持续几拍。归零时下一拍重新选。 */
   activityBeatsLeft: number;
 
@@ -189,7 +196,16 @@ export type UserAction =
   /** 抚摸。醒着蹭手心，睡着甩尾巴。 */
   | { readonly type: 'pet' }
   /** 喂药。仅生病时有效。 */
-  | { readonly type: 'medicate' };
+  | { readonly type: 'medicate' }
+  /**
+   * 把猫拎起来。**必然把它弄醒** - 谁被拎起来都会醒。
+   *
+   * 猫离开地面之后落在哪、要不要蹭回来，都是逐帧的事，归运动层；
+   * 这里只结算「被拎起来」在猫身上留下的东西（醒、心情）。
+   */
+  | { readonly type: 'pickUp' }
+  /** 松手放下。落地反应按性格分化，那部分在运动层；这里只结算心情。 */
+  | { readonly type: 'drop' };
 
 /**
  * 自上次 step 以来的输入。
@@ -214,8 +230,11 @@ export interface RenderIntent {
   /**
    * 该画哪个动作，渲染层 ACTIONS 的键。
    * null 表示猫已死亡，不该画猫（告别页是 ticket 12 的事）。
+   *
+   * **这是世界层的意愿，不是最终播的那个动作。** 运动层会在它之上做帧级决定
+   * （走到了就站着歇、被拎起来时播悬空姿态），最终播什么看 MotionState.playing。
    */
-  action: ActionKey | null;
+  action: WorldActionKey | null;
   /** 总体状态。托盘图标与气泡用。 */
   status: CatStatus;
   /** 动作局部时间的倍率。生病放慢是「蔫」的主要读数。 */

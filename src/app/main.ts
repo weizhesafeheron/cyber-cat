@@ -18,7 +18,13 @@ import {
   makeMicro,
   stepMicro,
 } from '../render/index.js';
-import type { ActionKey, Cat, MicroState, RenderResult } from '../render/index.js';
+import type {
+  ActionKey,
+  Cat,
+  MicroState,
+  RenderResult,
+  WorldActionKey,
+} from '../render/index.js';
 import { clamp } from '../render/rng.js';
 import { MS_PER_HOUR, renderIntentOf, step, worldNow } from '../world/index.js';
 import type { RenderIntent, UserAction, World } from '../world/index.js';
@@ -43,6 +49,7 @@ import {
   ALL_MICRO_ON,
   applyMicroSwitches,
   catInStage,
+  groundScreenY,
   createMotion,
   faceDir,
   microOptsFor,
@@ -52,6 +59,8 @@ import {
 } from './motion.js';
 import type { MicroSwitches, MotionState, ScreenRect, StageGeometry } from './motion.js';
 import { PollingPassthrough } from './passthrough.js';
+import { HeartCanvas, burstHearts, heartsInStage, stepHearts } from './hearts.js';
+import type { Heart } from './hearts.js';
 import { PawCanvas } from './paws.js';
 import { loadWorld, onTrayAction, pushTrayStatus, saveWorld } from './persist.js';
 import { PropsHost } from './props.js';
@@ -60,6 +69,15 @@ import { trayStatus } from './status.js';
 
 /** 单帧用于推进动画相位的最大时长。掉帧时不要让动作跳一大段。 */
 const MAX_ANIM_DT = 0.05;
+
+/**
+ * 按下之后移动超过这么多屏幕像素才算拖拽，否则算抚摸。
+ *
+ * 与挂件用的是同一个量级但各自定义：挂件那边是 CSS 客户区像素，这里是屏幕像素。
+ * 判反了的代价不对称 - 把抚摸误判成拖拽只是白拎一下猫（心情小降），
+ * 把拖拽误判成抚摸会让每次拖动都先蹭一把手心，亲密度虚高。所以宁可偏向拖拽。
+ */
+const DRAG_THRESHOLD_PX = 5;
 
 /** 存档与托盘的刷新节流。 */
 const SAVE_INTERVAL_MS = 30_000;
@@ -94,13 +112,20 @@ const MAX_CATCHUP_MS = 400 * 24 * MS_PER_HOUR;
  * 选伸懒腰是因为它形变最大、肉眼一望即知，顺带能验证命中形状确实跟着当前帧的
  * 掩膜变 - 伸懒腰时猫横向拉长，可点范围也该跟着变宽。
  */
-const REACTION: ActionKey = 'stretch';
+const REACTION: WorldActionKey = 'stretch';
 /** 播完整整一个周期。stretch 一个周期的首尾都是常态姿势，切回去不会跳。 */
 const REACTION_MS = (ACTIONS[REACTION].period ?? 1) * 1000;
 
 const canvas = document.getElementById('cat') as HTMLCanvasElement;
 const display = new CatDisplay(canvas, TARGET_SCALE);
 const paws = new PawCanvas(document.getElementById('paws') as HTMLCanvasElement);
+const heartCanvas = new HeartCanvas(document.getElementById('hearts') as HTMLCanvasElement);
+
+/**
+ * 正在飘的爱心。**不进存档也不进世界层** - 与爪印同理，它是一次抚摸的即时回应，
+ * 重启之后没人记得上一次摸猫冒了几颗心。
+ */
+let hearts: readonly Heart[] = [];
 const renderer = new CatRenderer();
 
 /**
@@ -146,6 +171,7 @@ const props = new PropsHost(geometry());
 function applyGeometry(): void {
   display.applyScale();
   paws.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
+  heartCanvas.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
 }
 
 applyGeometry();
@@ -239,6 +265,7 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
   if (motion.playing === null) {
     display.clear();
     paws.clear();
+    heartCanvas.clear();
     lastFrame = null;
     return null;
   }
@@ -257,6 +284,11 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
   // 猫在舞台内的位置与爪印每帧都要跟着走，否则猫会站在原地「走路」。
   display.place(catInStage(motion));
   paws.paint(pawsInStage(motion, nowMs), display.scale, display.pixelRatio);
+  hearts = stepHearts(hearts, nowMs);
+  heartCanvas.paint(
+    heartsInStage(hearts, nowMs, motion.stage, groundScreenY(geometry()), display.spriteScale),
+    display.spriteScale,
+  );
   return res;
 }
 
@@ -292,6 +324,8 @@ function frame(now: number): void {
     dt: animDt * intent.timeScale,
     now,
     action: effective,
+    hold: holdAt,
+    cursorX: cursorScreenX,
     anchorX,
     cat,
     geom: g,
@@ -432,7 +466,7 @@ function startLoop(): void {
  * 启动路径上的两次首帧重画需要它：`playing` 是运动层算出来的，
  * 不先推一帧就还是 null，draw 会以为猫已离开而清空画布。
  */
-function primeMotion(action: ActionKey | null): void {
+function primeMotion(action: WorldActionKey | null): void {
   // 首帧不给锚点：这一帧只为算出 playing，给了锚点会让首帧直接播走路，
   // 而窗口刚显示、猫还没站定，第一眼看到的就是一只在走的猫。
   motion = stepMotion(motion, {
@@ -484,18 +518,70 @@ async function catchUp(): Promise<void> {
  *
  * 不在这里切换穿透状态 - macOS 上赋值有传播延迟，到 pointerdown 才切已经太晚。
  */
+/**
+ * 按下、拖动、松手三件事共用一次按下。
+ *
+ * 判定顺序是「先当成可能的拖拽，松手时才知道到底是点还是拖」：
+ * 反过来（按下就算抚摸）会让每一次拖拽都先摸一把猫，亲密度白涨。
+ */
+let pressAt: { x: number; y: number } | null = null;
+/** 正在拖猫。null = 没在拖。值是光标的屏幕位置，每帧喂给运动层。 */
+let holdAt: { x: number; y: number } | null = null;
+/** 最近一次知道的光标屏幕 x。落地反应要用它决定蹭回来还是走开。 */
+let cursorScreenX: number | null = null;
+
 window.addEventListener('pointerdown', (e) => {
   if (!lastFrame) return;
   const p = toSprite(e.clientX, e.clientY);
   if (!hitTest(lastFrame, p.x, p.y)) return;
-  // 两件事都要做，理由见 REACTION 的注释。
-  enqueue({ type: 'pet' });
-  reactionUntilMs = performance.now() + REACTION_MS;
+  pressAt = { x: e.screenX, y: e.screenY };
 });
 
-// 穿透关闭时 webview 能收到 pointermove，这是比轮询更精确、且免费的采样源。
-// 穿透开启时收不到任何鼠标事件，那段时间只有 Rust 侧的轮询有数据。
-window.addEventListener('pointermove', (e) => tracker.observe(e.clientX, e.clientY));
+window.addEventListener('pointermove', (e) => {
+  // 穿透关闭时 webview 能收到 pointermove，这是比轮询更精确、且免费的采样源。
+  // 穿透开启时收不到任何鼠标事件，那段时间只有 Rust 侧的轮询有数据。
+  tracker.observe(e.clientX, e.clientY);
+  cursorScreenX = e.screenX;
+
+  if (pressAt === null) return;
+  if (holdAt === null) {
+    if (Math.hypot(e.screenX - pressAt.x, e.screenY - pressAt.y) < DRAG_THRESHOLD_PX) return;
+    // 越过阈值：这一次按下是拖拽。**拎起来要作为 UserAction 进世界层** -
+    // 醒来与心情在那边结算（world/tick.ts 的 pickUp），这里只管画面跟手。
+    enqueue({ type: 'pickUp' });
+    // 拖拽期间强制关掉穿透，否则窗口追不上光标时判定会把穿透打开，拖拽当场断掉。
+    passthrough.hold(true);
+  }
+  holdAt = { x: e.screenX, y: e.screenY };
+});
+
+window.addEventListener('pointerup', (e) => {
+  const start = pressAt;
+  const wasHolding = holdAt !== null;
+  pressAt = null;
+  holdAt = null;
+  cursorScreenX = e.screenX;
+  if (wasHolding) {
+    passthrough.hold(false);
+    // 落地反应（蹭回来 / 走开 / 甩尾巴）由运动层按性格执行，世界层只结算心情。
+    enqueue({ type: 'drop' });
+    return;
+  }
+  if (start === null) return;
+  // 没越过阈值：这是一次抚摸。两件事都要做，理由见 REACTION 的注释。
+  enqueue({ type: 'pet' });
+  reactionUntilMs = performance.now() + REACTION_MS;
+  hearts = [...hearts, ...burstHearts(performance.now(), motion.x)];
+});
+
+window.addEventListener('pointercancel', () => {
+  if (holdAt !== null) {
+    passthrough.hold(false);
+    enqueue({ type: 'drop' });
+  }
+  pressAt = null;
+  holdAt = null;
+});
 
 // 跨屏拖动或系统缩放变化时重算设备缩放，保持像素锐利
 window.addEventListener('resize', () => applyGeometry());

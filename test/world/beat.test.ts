@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { ActionKey } from '../../src/render/index.js';
-import { ACTIONS } from '../../src/render/index.js';
+import { ACTIONS, ACTION_KEYS, MOTION_ONLY_ACTIONS } from '../../src/render/index.js';
+import type { WorldActionKey } from '../../src/render/index.js';
+
+/**
+ * 世界层会选的那些动作。运动层专属的（被拎起来、落地）不在其中。
+ *
+ * `world.activity` 的类型已经是 WorldActionKey，所以这个文件里的序列天然不含它们；
+ * 这个辅助函数只在需要「遍历全部世界层动作」时用。
+ */
+const worldKeys = (): WorldActionKey[] =>
+  ACTION_KEYS.filter(
+    (k) => !(MOTION_ONLY_ACTIONS as readonly ActionKey[]).includes(k),
+  ) as WorldActionKey[];
 import {
   ACTIVITY_HOLD_BEATS,
   ACTIVITY_MAX_HOLD_S,
@@ -27,8 +39,8 @@ import { BEAT, DAY, HOUR, TICK, kinds, makeWorld } from './helpers.js';
  */
 
 /** 逐拍推进，收集每一拍猫在做什么。 */
-function activities(world: World, beats: number): ActionKey[] {
-  const seen: ActionKey[] = [];
+function activities(world: World, beats: number): WorldActionKey[] {
+  const seen: WorldActionKey[] = [];
   let w = world;
   for (let i = 0; i < beats; i++) {
     w = step(w, BEAT).world;
@@ -38,8 +50,8 @@ function activities(world: World, beats: number): ActionKey[] {
 }
 
 /** 把动作序列压成「动作 + 连续拍数」的段落。 */
-function runs(seq: ActionKey[]): { action: ActionKey; beats: number }[] {
-  const out: { action: ActionKey; beats: number }[] = [];
+function runs(seq: WorldActionKey[]): { action: WorldActionKey; beats: number }[] {
+  const out: { action: WorldActionKey; beats: number }[] = [];
   for (const a of seq) {
     const last = out[out.length - 1];
     if (last && last.action === a) last.beats += 1;
@@ -179,8 +191,9 @@ describe('两种权重语义不能混算', () => {
   // 混算过一次：一次性动作只占一拍，除以平均时长之后权重最大，
   // 实测半小时里扑跳 41 次，一只躁狂的猫。
 
-  const oneShots = (): ActionKey[] =>
-    (Object.keys(ACTIONS) as ActionKey[]).filter((k) => !ACTIONS[k].loop);
+  // 只看世界层会选的：被拎起来与落地是运动层专属的，不进世界层的时长表。
+  const oneShots = (): WorldActionKey[] =>
+    worldKeys().filter((k) => !ACTIONS[k].loop);
 
   it('一次性动作在世界层只占一拍 - 多给的拍数只会变成猫干站着', () => {
     expect(oneShots().length).toBeGreaterThan(0);

@@ -1,5 +1,5 @@
 import { ACTIONS, W } from '../render/index.js';
-import type { ActionKey, Cat, MicroOpts, Pose } from '../render/index.js';
+import type { ActionKey, WorldActionKey, Cat, MicroOpts, Pose } from '../render/index.js';
 import { clamp } from '../render/rng.js';
 import { GROUND_FROM_BOTTOM } from './stage.js';
 
@@ -85,6 +85,39 @@ export interface MotionState {
   /** 这一帧真正该播的动作。null = 猫已离开，什么都不画。 */
   readonly playing: ActionKey | null;
   /**
+   * 叠在动作产出的姿态之上的覆盖。落地后的甩尾巴就靠它。
+   *
+   * 运动层能决定「播哪个动作」，但情绪化的细节（甩尾）不值得为它单独开一个动作 -
+   * 那会让「落地后蹭回来」和「落地后走开」各要一套动作。
+   */
+  readonly pose: Pose;
+  /**
+   * 猫的脚离地面线多高，CSS 像素。0 = 踩在地上。
+   *
+   * **这是猫唯一的纵向位置，而且只在被拎着与下落时非零。**
+   * 平时猫没有 y：所有东西共用一条地面线，这是这套空间模型的不变量
+   * （挂件的纵向也由它决定，见 props/layout.ts）。松手之后必然落回 0 -
+   * 猫可以离开地面，但**不会停在**那里。
+   */
+  readonly liftY: number;
+  /** 正在被拎着。 */
+  readonly held: boolean;
+  /** 下落速度，CSS 像素每秒。只在 liftY > 0 且没被拎着时有意义。 */
+  readonly fallV: number;
+  /**
+   * 落地反应：粘人的蹭回来、高冷的走开。null = 没在反应。
+   *
+   * `goalX` 在落地那一刻就定下来，不每帧重算：高冷的目标是「离这儿远一点」，
+   * 每帧按当前位置重算的话目标会一直后退，猫永远走不到、也就永远趴不下
+   * （实测走过了目标距离的 1.4 倍，反应窗口到期还在走）。
+   * null 表示「跟着光标」- 粘人的猫要跟着手走，那个目标本来就该是活的。
+   */
+  readonly reaction: {
+    readonly kind: 'cling' | 'aloof';
+    readonly left: number;
+    readonly goalX: number | null;
+  } | null;
+  /**
    * 正在播的一次性动作与它已播的秒数。null = 当前不是一次性动作。
    *
    * 世界层给一个动作分配的时长是十几秒起，而打个哈欠只要三秒、扑一下四秒 -
@@ -113,8 +146,13 @@ export interface MotionInput {
   readonly dt: number;
   /** 当前时刻，毫秒。只用于爪印寿命。 */
   readonly now: number;
-  /** 世界层的意图动作。**只读** - 运动层不回写世界。 */
-  readonly action: ActionKey | null;
+  /**
+   * 世界层的意图动作。**只读** - 运动层不回写世界。
+   *
+   * 类型是 WorldActionKey：「被拎起来」「落地」是这一层自己的决定，不该能从外面
+   * 传进来（见 render/actions.ts 的 MOTION_ONLY_ACTIONS）。
+   */
+  readonly action: WorldActionKey | null;
   /**
    * 猫这一刻该待的屏幕 x（挂件跟前）。null = 没有空间诉求，照旧自己漫游。
    *
@@ -128,6 +166,20 @@ export interface MotionInput {
   readonly geom: StageGeometry;
   /** 随机源。注入而非内置，测试才能拿到确定的行走序列。 */
   readonly rnd: () => number;
+  /**
+   * 正被拎着时光标的屏幕位置。null = 没在拎。
+   *
+   * 拎着期间**猫的位置完全由这个值决定** - 世界层的意图、锚点、走路全部让位。
+   * 这不违反「运动层不回写世界」：拎起来这件事已经作为 UserAction 进过 step 了
+   * （世界层在那里结算醒来与心情），这里只负责让画面跟着手走。
+   */
+  readonly hold?: { readonly x: number; readonly y: number } | null;
+  /**
+   * 最近一次知道的光标屏幕 x。null = 不知道。
+   *
+   * 落地反应要用：粘人的猫朝光标蹭回去，高冷的猫朝反方向走开。
+   */
+  readonly cursorX?: number | null;
 }
 
 /**
@@ -174,6 +226,35 @@ const PAW_HOLD = 0.3;
 const PAW_MAX = 64;
 
 /**
+ * 松手之后的下落加速度，CSS 像素每秒平方。
+ *
+ * 取到「从屏幕顶端掉到地面约半秒」的量级。再慢就成了轻飘飘的羽毛，
+ * 再快就看不出下落过程、等于瞬移。
+ */
+const FALL_ACCEL = 2600;
+
+/** 落地反应持续多久，秒。之后交回世界层的意图。 */
+const REACTION_S = 3.2;
+
+/** 粘人度高于此值算「粘人」：落地后蹭回光标边。低于它是高冷，走开去别处趴下。 */
+const CLINGY_THRESHOLD = 0.5;
+
+/** 粘人的猫蹭回来时，靠到离光标这么近就算到了（CSS 像素）。 */
+const CLING_NEAR_PX = 24;
+
+/**
+ * 高冷的猫走开多远，精灵像素。
+ *
+ * 这个距离要**能在反应窗口内走完并留出趴下的时间**：走路约每秒 56 CSS 像素，
+ * 45 个精灵像素 = 135 CSS 像素 ≈ 2.4 秒，反应窗口 3.2 秒，剩下的时间刚好趴下。
+ * 第一版给了 90，走到一半窗口就到期了，「走开去别处趴下」只走开没趴下。
+ */
+const ALOOF_AWAY_SPRITE = 45;
+
+/** 落地不满的甩尾幅度。比日常的尾巴摆动明显得多，一眼能看出情绪。 */
+const UPSET_TAIL_WAVE = 2.4;
+
+/**
  * 舞台滚动的触发边距，占舞台宽度的比例。
  *
  * 猫走进任意一侧这个范围内就把舞台整体挪一次。0.25 的下限来自可见性钳制：
@@ -205,10 +286,16 @@ export function groundScreenY(geom: StageGeometry): number {
   return geom.work.y + geom.work.h - GROUND_FROM_BOTTOM * geom.spriteScale;
 }
 
-/** 舞台原点被工作区钳住的范围。屏幕比舞台还窄时贴左。 */
+/**
+ * 舞台原点被工作区钳住的范围。屏幕比舞台还窄时贴左。
+ *
+ * 纵向也要钳：猫被拎起来时舞台会往上走（见 nextStage），不钳的话舞台顶端会
+ * 跑到工作区之外，那一段里的猫就被系统裁掉了。
+ */
 function clampStage(p: ScreenPoint, geom: StageGeometry): ScreenPoint {
   const maxX = geom.work.x + Math.max(0, geom.work.w - geom.w);
-  return { x: clamp(p.x, geom.work.x, maxX), y: p.y };
+  const maxY = geom.work.y + Math.max(0, geom.work.h - geom.h);
+  return { x: clamp(p.x, geom.work.x, maxX), y: clamp(p.y, geom.work.y, maxY) };
 }
 
 /**
@@ -251,6 +338,11 @@ export function createMotion(geom: StageGeometry, stageAt: ScreenPoint): MotionS
     targetX: null,
     restS: 0,
     playing: null,
+    pose: {},
+    liftY: 0,
+    held: false,
+    fallV: 0,
+    reaction: null,
     shot: null,
     stage: stageAt,
     paws: [],
@@ -315,8 +407,12 @@ function nextStage(
   geom: StageGeometry,
   x: number,
   dir: 1 | -1,
+  liftY = 0,
 ): ScreenPoint {
-  const y = stageYFor(geom);
+  // 猫离地时舞台跟着往上走。猫在窗口里的纵向位置是固定的（贴着窗口下沿），
+  // 所以「让猫升高」只能靠整个窗口升高 - 窗口只有 200 像素高，靠画布内偏移
+  // 顶多抬起一点点就顶到窗口边了。
+  const y = stageYFor(geom) - liftY;
   const local = x - stage.x;
   const near = geom.w * SCROLL_EDGE;
   // 猫在舞台中部：横向不动。y 仍然跟着工作区走（程序坞显隐会改它）。
@@ -381,12 +477,18 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
 
   if (input.action === null) {
     // 猫已离开。位置不再推进，爪印自然淡完（告别页是 ticket 12 的事）。
+    // 拎着的状态也要一起清：猫不在了，手里那只更不该还悬在半空。
     return {
       ...state,
       playing: null,
+      pose: {},
       targetX: null,
       restS: 0,
       shot: null,
+      liftY: 0,
+      held: false,
+      fallV: 0,
+      reaction: null,
       paws: prune(state.paws, now),
     };
   }
@@ -400,6 +502,160 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
   let trail: PawTrail = { paws: state.paws, strideLeft: state.strideLeft, pawSide: state.pawSide };
   let playing: ActionKey = input.action;
   let shot = state.shot;
+  let liftY = state.liftY;
+  let fallV = state.fallV;
+  let reaction = state.reaction;
+  let pose: Pose = {};
+
+  const groundY = groundScreenY(geom);
+  const reach = reachableX(geom);
+
+  // --- 被拎着：位置完全跟手，世界层的一切让位 ---
+  //
+  // 这不违反「运动层不回写世界」：拎起来已经作为一次 UserAction 进过 step 了
+  // （世界层在那里结算醒来与心情），这里只负责让画面跟着手走。
+  if (input.hold) {
+    const hx = clamp(input.hold.x, reach.min, reach.max);
+    // 脚不能被拎到工作区上沿之外 - 再往上整只猫就出屏了。
+    const hy = clamp(groundY - input.hold.y, 0, groundY - geom.work.y);
+    return {
+      ...state,
+      x: hx,
+      liftY: hy,
+      held: true,
+      fallV: 0,
+      playing: 'held',
+      pose: {},
+      // 拎起来就打断一切在进行的事：走到哪儿、歇多久、一次性动作、上一次的落地反应。
+      targetX: null,
+      restS: 0,
+      shot: null,
+      reaction: null,
+      stage: nextStage(state.stage, geom, hx, state.dir, hy),
+      paws: prune(state.paws, now),
+    };
+  }
+
+  // --- 松手之后自由下落。落地那一刻挑好反应 ---
+  if (liftY > 0) {
+    fallV += FALL_ACCEL * Math.max(0, dt);
+    liftY -= fallV * Math.max(0, dt);
+    if (liftY > 0) {
+      return {
+        ...state,
+        x,
+        liftY,
+        held: false,
+        fallV,
+        playing: 'held',
+        pose: {},
+        targetX: null,
+        restS: 0,
+        shot: null,
+        reaction: null,
+        stage: nextStage(state.stage, geom, x, dir, liftY),
+        paws: prune(state.paws, now),
+      };
+    }
+    // 落地：先播压缩，再按性格决定蹭回来还是走开。
+    liftY = 0;
+    fallV = 0;
+    shot = { action: 'land', t: 0 };
+    const clingy = cat.personality.clingy > CLINGY_THRESHOLD;
+    const cursorAt = input.cursorX ?? null;
+    const away = ALOOF_AWAY_SPRITE * geom.spriteScale;
+    reaction = {
+      kind: clingy ? 'cling' : 'aloof',
+      left: REACTION_S,
+      // 粘人的跟着光标（活目标）；高冷的现在就把「走到哪」定死。
+      goalX: clingy
+        ? null
+        : cursorAt === null
+          ? x + (dir > 0 ? -away : away)
+          : cursorAt > x
+            ? x - away
+            : x + away,
+    };
+    targetX = null;
+    restS = 0;
+  }
+
+  // --- 落地反应：这几秒里由它接管走向，世界层的意图先放一放 ---
+  //
+  // 反应本身是「性格可以被摸到」的落点（issue #10）：粘人的蹭回光标边，
+  // 高冷的走开去别处。**甩尾巴是共通的**，所以放在覆盖姿态里而不是分给两个动作。
+  //
+  // 为什么归运动层：走到哪儿、走多久都需要帧时钟，与「走完一段路歇一会」同类
+  // （ADR 0007）。世界层那边已经结算完落地的心情，它不需要知道猫往哪边走。
+  if (reaction !== null) {
+    reaction = { ...reaction, left: reaction.left - Math.max(0, dt) };
+    if (reaction.left <= 0) {
+      reaction = null;
+    } else {
+      pose = { tailWave: UPSET_TAIL_WAVE, tailPhase: now / 260 };
+      const landing = shot !== null && shot.action === 'land' ? shot : null;
+      if (landing !== null) {
+        // 压缩那 0.45 秒里不走动 - 刚落地就迈步会读成滑步。
+        const t = landing.t + Math.max(0, dt);
+        const done = t >= (ACTIONS.land.period ?? 0);
+        shot = done ? null : { action: 'land', t };
+        return {
+          ...state,
+          x,
+          dir,
+          playing: done ? 'idle' : 'land',
+          pose,
+          liftY: 0,
+          held: false,
+          fallV: 0,
+          reaction,
+          targetX: null,
+          restS: 0,
+          shot,
+          stage: nextStage(state.stage, geom, x, dir),
+          paws: prune(state.paws, now),
+        };
+      }
+
+      // 压缩播完了：往目标走。粘人跟着光标，高冷走向落地时定好的那个点。
+      const want = reaction.goalX ?? input.cursorX ?? x;
+      const goalX = clamp(want, bounds.min, bounds.max);
+      const near = reaction.kind === 'cling' ? CLING_NEAR_PX : ARRIVE_EPS;
+      const stepLenR = walkSpeed(cat, geom) * Math.max(0, dt);
+      let playingR: ActionKey = 'walk';
+      if (Math.abs(goalX - x) <= near) {
+        // 到了。粘人的猫站在光标边等着，高冷的猫趴下 - 那是「走开去别处趴下」的下半句。
+        playingR = reaction.kind === 'cling' ? 'idle' : 'lie';
+      } else {
+        dir = goalX > x ? 1 : -1;
+        if (stepLenR > 0) {
+          const next = clamp(x + dir * Math.min(stepLenR, Math.abs(goalX - x)), bounds.min, bounds.max);
+          const moved = Math.abs(next - x);
+          x = next;
+          trail = dropPaws(trail, x, moved, geom, now);
+          if (moved <= 0) playingR = reaction.kind === 'cling' ? 'idle' : 'lie';
+        }
+      }
+      return {
+        ...state,
+        x,
+        dir,
+        playing: playingR,
+        pose,
+        liftY: 0,
+        held: false,
+        fallV: 0,
+        reaction,
+        targetX: null,
+        restS: 0,
+        shot: null,
+        stage: nextStage(state.stage, geom, x, dir),
+        paws: prune(trail.paws, now),
+        strideLeft: trail.strideLeft,
+        pawSide: trail.pawSide,
+      };
+    }
+  }
 
   /**
    * 锚点先钳进可达范围再判定。
@@ -505,6 +761,11 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
     targetX,
     restS,
     playing,
+    pose,
+    liftY,
+    held: false,
+    fallV,
+    reaction,
     shot,
     stage,
     paws,
