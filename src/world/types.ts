@@ -105,8 +105,16 @@ export interface World {
    * 这是离线推演等价性（ADR 0001）的算术基础。
    */
   clock: number;
-  /** 不满一个模拟步长的时间余额，毫秒。 */
+  /** 不满一个行为节拍的时间余额，毫秒。 */
   carryMs: number;
+  /**
+   * 本模拟步内已走过的行为节拍数，0..BEATS_PER_TICK-1。
+   *
+   * 时间由节拍（15 秒）驱动，模拟步（30 分钟）靠数够节拍数来触发，所以这个
+   * 计数器必须进存档：不然重启会把「已经走了 29 分钟」这件事忘掉，
+   * 需求演化的相位每次启动都被重置，离线推演也不再可回放。
+   */
+  beatsInTick: number;
 
   /**
    * 本地时区偏移，分钟（东八区 = 480）。
@@ -140,11 +148,22 @@ export interface World {
   /** 最后一次互动时刻。亲密度的宽限期由它算。 */
   lastInteractionAt: number;
 
-  /** 这一步猫主要在做什么。renderIntent 的动作就是它的投影。 */
+  /** 猫此刻主要在做什么。renderIntent 的动作就是它的投影。 */
   activity: ActionKey;
+  /** 当前动作还能持续几拍。归零时下一拍重新选。 */
+  activityBeatsLeft: number;
 
   /** 随机源状态。见 world/rng.ts。 */
   rngState: number;
+  /**
+   * 行为节拍专用的随机源状态。
+   *
+   * **和 rngState 分开是刻意的。** 选动作每 15 秒取一次数，需求与日记每 30 分钟
+   * 取一次；共用一条流的话，任何对行为节拍的调整（改节拍长度、改持续时长区间）
+   * 都会改变需求侧的取数序列，把已定档的死亡链与日记密度一起搅动。
+   * 分成两条流之后，行为怎么调都不会碰到那些数值。
+   */
+  activityRngState: number;
 
   /** 日记条数节流用的本地日序号。 */
   diaryDay: number;

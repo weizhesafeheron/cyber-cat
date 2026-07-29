@@ -1,6 +1,6 @@
 import { makeCat } from '../../src/render/index.js';
 import type { BreedKey, Personality } from '../../src/render/types.js';
-import { createWorld, step, TICK_MS } from '../../src/world/index.js';
+import { BEAT_MS, createWorld, step, TICK_MS } from '../../src/world/index.js';
 import type { StepResult, World, WorldEvent, WorldInputs } from '../../src/world/index.js';
 
 /**
@@ -16,6 +16,8 @@ import type { StepResult, World, WorldEvent, WorldInputs } from '../../src/world
 export const HOUR = 3_600_000;
 export const DAY = 86_400_000;
 export const TICK = TICK_MS;
+/** 一个行为节拍 15 秒。时钟的最小前进单位。 */
+export const BEAT = BEAT_MS;
 
 /** 2026-07-29 00:00 UTC。测试里所有时刻都相对它。 */
 export const BASE = Date.UTC(2026, 6, 29, 0, 0, 0);

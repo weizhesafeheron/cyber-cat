@@ -131,6 +131,23 @@ describe('位置随时间推进', () => {
     }
   });
 
+  it('走路中途换成别的动作，位移必须立刻停住', () => {
+    // 回归保护：即时反馈（点猫播伸懒腰）曾经只覆盖渲染、没有喂给运动层，
+    // 结果是「一边伸懒腰一边横向漂移」。位移的唯一开关是喂进来的动作。
+    const start = createMotion(geom(), centeredStage());
+    // 先真的走起来，确认位移在发生
+    const walking = run(start, { frames: 40 });
+    expect(Math.abs(walking.end.x - start.x)).toBeGreaterThan(0);
+
+    // 换成任何非走路动作，之后每一帧的位移都必须是 0
+    for (const action of ACTION_KEYS.filter((a) => a !== 'walk')) {
+      const held = run(walking.end, { frames: 30, action, now: walking.now });
+      const maxMoved = Math.max(...held.frames.map((f) => f.moved));
+      expect(maxMoved, `播 ${action} 时仍在位移`).toBe(0);
+      expect(held.end.playing, `播 ${action} 时 playing 不对`).toBe(action);
+    }
+  });
+
   it('走的距离与时间成正比：两倍时长走两倍远（对照组：同一个随机流）', () => {
     const start = createMotion(geom(), centeredStage());
     // 只统计真的在走的那些帧，休息段不该计入。
@@ -628,11 +645,19 @@ describe('世界层与运动层接起来跑', () => {
     let paws = 0;
     const played = new Set<string>();
     const worldActions = new Set<string>();
+    // 最长的单个动作段落，帧数。用来分辨「换得勤」与「分布合理」。
+    let longestRun = 0;
+    let run = 0;
+    let last: string | null = null;
     for (let i = 0; i < minutes * 60 * 60; i++) {
       now += dt * 1000;
       const r = step(world, dt * 1000, {});
       world = r.world;
-      worldActions.add(r.renderIntent.action ?? 'none');
+      const acted = r.renderIntent.action ?? 'none';
+      worldActions.add(acted);
+      run = acted === last ? run + 1 : 1;
+      last = acted;
+      longestRun = Math.max(longestRun, run);
       const before = motion;
       motion = stepMotion(motion, {
         dt: dt * r.renderIntent.timeScale,
@@ -646,7 +671,7 @@ describe('世界层与运动层接起来跑', () => {
       paws += Math.max(0, motion.paws.length - before.paws.length);
       played.add(motion.playing ?? 'none');
     }
-    return { distance, paws, played, worldActions, motion };
+    return { distance, paws, played, worldActions, longestRun, motion };
   }
 
   const BUSY_SEED = findSeed('cow', (p) => p.active > 0.9);
@@ -658,13 +683,28 @@ describe('世界层与运动层接起来跑', () => {
     expect(busy.paws).toBeGreaterThan(20);
   });
 
-  it('世界层半小时才改一次主意，十分钟里的画面变化主要来自运动层', () => {
-    // 这条不是在夸架构，是在记一个已知的观感风险：世界层挑中静态动作
-    // （睡觉占掉大半天）时，十分钟里猫就只做那一件事，靠的是微动作层。
+  it('连续观察十分钟，世界层自己换过好几种动作', () => {
+    // 这是 #7「行为读起来是自主的」那条手工验收里可以自动化的部分。
+    //
+    // 这条测试原先断言的恰好是反面：「世界层半小时才改一次主意，十分钟里最多
+    // 两种动作」。当时把它当成架构特性写了下来，真机上一看才知道是个缺陷 -
+    // 猫会一动不动地趴满 30 分钟，读起来就是张静止的贴图。
+    // 修法是把「猫在做什么」从 30 分钟的模拟步里拆到 15 秒的行为节拍上
+    // （见 constants.ts 的 BEAT_MS）。
     const busy = observe(10, BUSY_SEED, 'cow', 'walk');
-    expect(busy.worldActions.size).toBeLessThanOrEqual(2);
-    // 运动层至少把走路拆成了「走一段、歇一会」两种画面。
+    expect(busy.worldActions.size).toBeGreaterThanOrEqual(4);
+    // 运动层仍然在世界层之上加自己的层次：走路被拆成「走一段、歇一会」。
     expect(busy.played.size).toBeGreaterThan(1);
+  });
+
+  it('十分钟里没有哪个动作独占全场（不是换得勤，是分布合理）', () => {
+    // 只数「换过几种」会被一个每拍乱跳的实现骗过去。这条从另一头夹：
+    // 最长的单个动作段落不能长到把十分钟吃掉大半。
+    const busy = observe(10, BUSY_SEED, 'cow', 'walk');
+    const frames = 10 * 60 * 60;
+    expect(busy.longestRun).toBeLessThan(frames * 0.5);
+    // 也不能碎成节拍器 - 至少有一段动作持续了半分钟以上。
+    expect(busy.longestRun).toBeGreaterThan(30 * 60);
   });
 
   it('静态动作的那半小时里，运动层不会自己加戏', () => {

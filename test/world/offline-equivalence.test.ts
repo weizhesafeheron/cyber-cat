@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mulberry32 } from '../../src/render/rng.js';
 import { step } from '../../src/world/index.js';
 import type { World, WorldEvent } from '../../src/world/index.js';
-import { DAY, HOUR, TICK, kinds, makeWorld, runTicks } from './helpers.js';
+import { BEAT, DAY, HOUR, kinds, makeWorld, runTicks } from './helpers.js';
 
 /**
  * 离线推演等价性。ADR 0001 的核心保证，也是整个世界层最重要的一个测试。
@@ -82,17 +82,18 @@ describe('离线推演等价性', () => {
     expect(events).toEqual(bulk.events);
   });
 
-  it('不满一步的时间不会丢：48 次 29 分钟只推进 46 步，余额留在 carryMs', () => {
+  it('不满一拍的时间不会丢：48 次 29 分 7 秒，攒下的零头留在 carryMs', () => {
     const start = makeWorld({ hour: 8 });
-    const partial = 29 * 60_000;
+    // 故意取一个不是整拍的时长。整拍的话余额恒为 0，这条就退化成恒真了。
+    const partial = 29 * 60_000 + 7_000;
 
     let world = start;
     for (let i = 0; i < 48; i++) world = step(world, partial).world;
 
     const totalMs = 48 * partial;
-    const advanced = Math.floor(totalMs / TICK);
-    expect(world.clock).toBe(start.clock + advanced * TICK);
-    expect(world.carryMs).toBeCloseTo(totalMs - advanced * TICK, 6);
+    const advanced = Math.floor(totalMs / BEAT);
+    expect(world.clock).toBe(start.clock + advanced * BEAT);
+    expect(world.carryMs).toBeCloseTo(totalMs - advanced * BEAT, 6);
 
     // 同样的总时长一次给完，结果相同。
     expect(step(start, totalMs).world).toEqual(world);

@@ -10,6 +10,8 @@
  * 但改动它们会让 test/world/needs.test.ts 与 death-chain.test.ts 失败，那是期望行为。
  */
 
+import type { ActionKey } from '../render/index.js';
+
 export const MS_PER_MINUTE = 60_000;
 export const MS_PER_HOUR = 3_600_000;
 export const MS_PER_DAY = 86_400_000;
@@ -22,6 +24,19 @@ export const MS_PER_DAY = 86_400_000;
  */
 export const TICK_MS = 30 * MS_PER_MINUTE;
 export const TICK_HOURS = TICK_MS / MS_PER_HOUR;
+
+/**
+ * 行为节拍 15 秒。**「猫在做什么」按这个粒度换，与模拟步长无关。**
+ *
+ * 这两件事的天然节奏差了两个数量级：饱食度掉一格是半小时的事，
+ * 换个姿势是十几秒的事。最初把选动作写在模拟步里，结果猫会一动不动地
+ * 趴满 30 分钟 - 真机上看就是个静止的贴图，完全读不出「它自己在生活」。
+ *
+ * 必须整除 TICK_MS：节拍循环同时驱动模拟步，除不尽的话步长会漂移，
+ * 定档过的「最后一次喂食 → 死亡 88 小时」就不再准。由 test/world/beat.test.ts 守着。
+ */
+export const BEAT_MS = 15_000;
+export const BEATS_PER_TICK = TICK_MS / BEAT_MS;
 
 /** 三条需求与亲密度共用 0..100 量表。 */
 export const NEED_MAX = 100;
@@ -221,6 +236,29 @@ export const ACTIVITY_YAWN_TIRED_SPAN = 1.2;
 /** 饿了在食盆边徘徊：走与坐之间的比例，不会去做别的。 */
 export const ACTIVITY_HUNGRY_WALK_CHANCE = 0.5;
 
+/**
+ * 每个动作能持续多少拍（含首尾，1 拍 = 15 秒），闭区间。
+ *
+ * **有这张表才不会像节拍器。** 只按固定节拍换动作的话，猫会精确地每 15 秒
+ * 变一次姿势，比一动不动更假。真猫的分布是长尾的：趴下能趴好几分钟，
+ * 走两步就停，打个哈欠就一下。所以每次选定动作后再随机抽一个持续时长。
+ *
+ * 这些区间是「读起来像不像猫」的调优旋钮，不影响任何已定档的数值。
+ */
+export const ACTIVITY_HOLD_BEATS: Readonly<Record<ActionKey, readonly [number, number]>> = {
+  idle: [2, 6], // 30 - 90 秒
+  walk: [1, 3], // 15 - 45 秒，走一小段就停
+  pounce: [1, 2], // 扑跳是爆发动作，不会连着扑一分钟
+  groom: [3, 8], // 45 秒 - 2 分钟，理毛是件耐心的事
+  sit: [4, 12], // 1 - 3 分钟
+  lie: [8, 24], // 2 - 6 分钟，趴着是猫最长的姿势
+  yawn: [1, 1], // 一下就完
+  stretch: [1, 2],
+  eat: [2, 4], // 30 秒 - 1 分钟
+  // 睡眠时长由模拟步的睡眠决策决定，不由这张表控制（见 advanceBeat 的持续状态分支）。
+  sleep: [1, 1],
+};
+
 /** 深夜跑酷时段（22:00 - 02:00）扑跳权重的倍率。 */
 export const ZOOMIES_START_HOUR = 22;
 export const ZOOMIES_END_HOUR = 2;
@@ -274,4 +312,4 @@ export const INITIAL_MOOD = 65;
 export const INITIAL_BOND = 10;
 
 /** 存档格式版本。结构变更时递增，旧存档由调用方决定是迁移还是丢弃。 */
-export const WORLD_VERSION = 1;
+export const WORLD_VERSION = 2;

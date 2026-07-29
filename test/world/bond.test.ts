@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BOND_MAX, step } from '../../src/world/index.js';
-import { DAY, HOUR, TICK, makeWorld, runTicks } from './helpers.js';
+import { BEAT, DAY, HOUR, TICK, makeWorld, runTicks } from './helpers.js';
 
 /**
  * 亲密度：所有互动长期累积，长期不互动缓慢流失。
@@ -95,11 +95,15 @@ describe('陪伴记录', () => {
 });
 
 describe('时间推进的算术', () => {
-  it('时钟按整步前进，余额单独留着', () => {
+  it('时钟按整拍前进，不满一拍的零头单独留着', () => {
     const w = makeWorld({ hour: 8 });
-    const after = step(w, 1.5 * HOUR + 10 * 60_000).world;
-    expect(after.clock).toBe(w.clock + 3 * TICK);
-    expect(after.carryMs).toBe(10 * 60_000);
+    const after = step(w, 1.5 * HOUR + 10 * 60_000 + 7_000).world;
+    // 100 分钟正好是 400 个整拍，7 秒不够一拍。
+    expect(after.clock).toBe(w.clock + 100 * 60_000);
+    expect(after.carryMs).toBe(7_000);
+    // 模拟步的相位不靠时钟余额记，而靠已走过的拍数：400 = 3 个整步 + 40 拍。
+    // 这个计数器必须进存档，否则重启会把「已经走了 10 分钟」忘掉。
+    expect(after.beatsInTick).toBe(400 - 3 * (TICK / BEAT));
   });
 
   it('负的或零的时间差不会让世界倒退', () => {

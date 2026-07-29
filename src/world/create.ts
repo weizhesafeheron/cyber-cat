@@ -7,7 +7,7 @@ import {
   WORLD_VERSION,
 } from './constants.js';
 import { localDayIndex } from './clock.js';
-import { seedRngState } from './rng.js';
+import { seedActivityRngState, seedRngState } from './rng.js';
 import type { World, WorldEvent } from './types.js';
 
 export interface AdoptionSpec {
@@ -38,6 +38,7 @@ export function createWorld(spec: AdoptionSpec): World {
     },
     clock: spec.bornAt,
     carryMs: 0,
+    beatsInTick: 0,
     tzOffsetMinutes: spec.tzOffsetMinutes,
     needs: { hunger: INITIAL_HUNGER, energy: INITIAL_ENERGY, mood: INITIAL_MOOD },
     bond: INITIAL_BOND,
@@ -52,7 +53,9 @@ export function createWorld(spec: AdoptionSpec): World {
     playGlow: 0,
     lastInteractionAt: spec.bornAt,
     activity: 'idle',
+    activityBeatsLeft: 0,
     rngState: seedRngState(spec.seed),
+    activityRngState: seedActivityRngState(spec.seed),
     diaryDay: localDayIndex(spec.bornAt, spec.tzOffsetMinutes),
     // 领养是重要事件，不占当天的日常额度。
     diaryCount: 0,

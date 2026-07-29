@@ -31,3 +31,13 @@ export function draw(state: number): Draw {
 export function seedRngState(seed: number): number {
   return (seed ^ 0x5f3759df) | 0;
 }
+
+/**
+ * 行为节拍那条流的初始状态。
+ *
+ * 用另一个异或常量而不是同一个：两条流从同一个状态出发的话，前若干个取值
+ * 完全相同，「选动作」与「记日记」会在开局同步共振。
+ */
+export function seedActivityRngState(seed: number): number {
+  return (seed ^ 0x1b873593) | 0;
+}

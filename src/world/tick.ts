@@ -3,6 +3,7 @@ import { clamp } from '../render/rng.js';
 import { companionDays, localDayIndex, localHourOfDay } from './clock.js';
 import {
   ACTIVITY_GROOM_WEIGHT,
+  ACTIVITY_HOLD_BEATS,
   ACTIVITY_HUNGRY_WALK_CHANCE,
   ACTIVITY_IDLE_WEIGHT,
   ACTIVITY_LIE_BASE,
@@ -97,6 +98,18 @@ import type { UserAction, World, WorldEvent, WorldEventKind } from './types.js';
 function roll(w: World): number {
   const d = draw(w.rngState);
   w.rngState = d.state;
+  return d.value;
+}
+
+/**
+ * 从**行为节拍那条流**取一个随机数。选动作与它的持续时长只用这个。
+ *
+ * 见 World.activityRngState 的注释：两条流分开，行为怎么调都不会动到
+ * 已定档的死亡链与日记密度。混用会让这条保证当场失效。
+ */
+function rollActivity(w: World): number {
+  const d = draw(w.activityRngState);
+  w.activityRngState = d.state;
   return d.value;
 }
 
@@ -289,12 +302,19 @@ function decideSleep(w: World, cat: Cat, hour: number): { justWoke: boolean } {
   return { justWoke: false };
 }
 
+/** advanceTick 交给行为节拍去落地的「这一刻该做什么」。没有则为 null。 */
+export interface TickUrge {
+  urge: ActionKey | null;
+}
+
 /**
  * 推进一个模拟步。
  *
  * 调用方负责把 w.clock 推到这一步的**结束时刻**再调它 - 事件的时间戳取 w.clock。
+ *
+ * 返回值里的 urge 要原样传给同一拍的 advanceBeat，见那里的注释。
  */
-export function advanceTick(w: World, cat: Cat, events: WorldEvent[]): void {
+export function advanceTick(w: World, cat: Cat, events: WorldEvent[]): TickUrge {
   const hour = localHourOfDay(w.clock, w.tzOffsetMinutes);
   const wasSleeping = w.sleeping;
   const wasWeak = w.weakHours > 0;
@@ -385,11 +405,12 @@ export function advanceTick(w: World, cat: Cat, events: WorldEvent[]): void {
       w.diedAt = w.clock;
       w.sleeping = false;
       w.activity = 'lie';
+      w.activityBeatsLeft = 0;
       record(w, events, 'died', {
         important: true,
         data: { days: companionDays(w, w.clock) },
       });
-      return;
+      return { urge: null };
     }
   }
 
@@ -410,29 +431,72 @@ export function advanceTick(w: World, cat: Cat, events: WorldEvent[]): void {
     }
   }
 
-  w.activity = chooseActivity(w, cat, hour, { justWoke, ateThisTick });
+  // 刚吃完、刚醒来这两件事发生在「这一刻」，不进节拍的权重抽签 -
+  // 醒来先伸个懒腰是真猫的固定动作，不该交给概率。
+  // 但也不在这里直接改 activity：那样这一拍的持续时长会被 advanceBeat 当场
+  // 减掉一拍，持续时长只有一拍的动作（打哈欠）根本来不及显示。
+  // 交给 advanceBeat 落地，「持续 N 拍」在任何入口下都是同一个意思。
+  if (ateThisTick) return { urge: 'eat' };
+  if (justWoke) return { urge: 'stretch' };
+  return { urge: null };
 }
 
 /**
- * 这一步猫主要在做什么。renderIntent 的动作就是它。
+ * 推进一个行为节拍（15 秒）：该换动作了就换，没到期就把持续时长减一。
+ *
+ * **和 advanceTick 分开是这一层存在的全部理由。** 需求半小时才有变化，
+ * 姿势十几秒就该变；合在一起的话猫会一动不动地趴满 30 分钟（见 BEAT_MS 注释）。
+ *
+ * 这里只读世界状态、只写 activity 与它的持续计数，不碰任何需求量 -
+ * 所以节拍的频率与持续时长区间都可以随便调，离线推演的等价性不受影响。
+ *
+ * `urge` 是同一拍里刚发生的事要求的动作（刚吃完、刚醒来），优先于抽签，
+ * 但仍然让位于生病与睡眠这两个持续状态。
+ */
+export function advanceBeat(w: World, cat: Cat, urge: ActionKey | null = null): void {
+  // 生病与睡眠是持续状态，压过一切正在进行的动作。
+  // 持续计数清零，是为了让状态一结束（醒过来、病好了）下一拍立刻重选 -
+  // 不清的话猫会醒着却继续播睡觉的姿势。
+  const state: ActionKey | null = w.sick ? 'lie' : w.sleeping ? 'sleep' : null;
+  if (state !== null) {
+    w.activity = state;
+    w.activityBeatsLeft = 0;
+    return;
+  }
+
+  if (urge !== null) {
+    setActivity(w, urge);
+    return;
+  }
+
+  if (w.activityBeatsLeft > 0) {
+    w.activityBeatsLeft -= 1;
+    return;
+  }
+
+  const hour = localHourOfDay(w.clock, w.tzOffsetMinutes);
+  setActivity(w, chooseActivity(w, cat, hour));
+}
+
+/** 换动作，并按 ACTIVITY_HOLD_BEATS 抽一个持续时长。 */
+function setActivity(w: World, action: ActionKey): void {
+  const [min, max] = ACTIVITY_HOLD_BEATS[action];
+  const beats = min + Math.floor(rollActivity(w) * (max - min + 1));
+  w.activity = action;
+  // 减一：本拍就算第一拍，所以剩余拍数比总时长少一。
+  w.activityBeatsLeft = beats - 1;
+}
+
+/**
+ * 猫此刻主要在做什么。renderIntent 的动作就是它。
  *
  * 性格在这里必须真实起作用（issue #6）：活跃度高的猫走动与扑跳明显更多，
  * 懒猫更多趴着。深夜给扑跳额外加权，这就是「深夜偶发跑酷」。
  */
-function chooseActivity(
-  w: World,
-  cat: Cat,
-  hour: number,
-  ctx: { justWoke: boolean; ateThisTick: boolean },
-): ActionKey {
-  if (w.sick) return 'lie';
-  if (w.sleeping) return 'sleep';
-  if (ctx.ateThisTick) return 'eat';
-  // 刚醒必然先伸个懒腰 - 这是真猫的固定动作，不该交给概率。
-  if (ctx.justWoke) return 'stretch';
+function chooseActivity(w: World, cat: Cat, hour: number): ActionKey {
   // 饿了在食盆边徘徊：只在走与坐之间选，不会去跑酷。
   if (w.needs.hunger < HUNGRY_VISIBLE_THRESHOLD) {
-    return roll(w) < ACTIVITY_HUNGRY_WALK_CHANCE ? 'walk' : 'sit';
+    return rollActivity(w) < ACTIVITY_HUNGRY_WALK_CHANCE ? 'walk' : 'sit';
   }
 
   const active = cat.personality.active;
@@ -451,6 +515,6 @@ function chooseActivity(
       { key: 'lie', weight: ACTIVITY_LIE_BASE + lazy * ACTIVITY_LIE_LAZY_SPAN },
       { key: 'yawn', weight: tired * ACTIVITY_YAWN_TIRED_SPAN },
     ],
-    roll(w),
+    rollActivity(w),
   );
 }

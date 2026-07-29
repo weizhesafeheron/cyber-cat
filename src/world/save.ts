@@ -103,6 +103,7 @@ export function parseWorld(text: string): World {
     },
     clock: num(w, 'clock'),
     carryMs: num(w, 'carryMs'),
+    beatsInTick: num(w, 'beatsInTick'),
     tzOffsetMinutes: num(w, 'tzOffsetMinutes'),
     needs: {
       hunger: num(needs, 'hunger'),
@@ -121,7 +122,9 @@ export function parseWorld(text: string): World {
     playGlow: num(w, 'playGlow'),
     lastInteractionAt: num(w, 'lastInteractionAt'),
     activity: activity as World['activity'],
+    activityBeatsLeft: num(w, 'activityBeatsLeft'),
     rngState: num(w, 'rngState'),
+    activityRngState: num(w, 'activityRngState'),
     diaryDay: num(w, 'diaryDay'),
     diaryCount: num(w, 'diaryCount'),
     diary: diary as World['diary'],
