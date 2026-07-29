@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cssSizeFor, deviceScaleFor } from '../../src/app/display.js';
+import type { CssBox } from '../../src/app/display.js';
 import { H, W } from '../../src/render/index.js';
 
 /**
@@ -56,5 +57,37 @@ describe('设备缩放取整', () => {
   it('极小的 dpr 也不会得到 0 倍缩放', () => {
     expect(deviceScaleFor(3, 0.1)).toBeGreaterThanOrEqual(1);
     expect(deviceScaleFor(1, 0.01)).toBe(1);
+  });
+});
+
+describe('画布不得溢出窗口', () => {
+  /** 宠物窗口的客户区尺寸，与 tauri.conf.json 保持一致。 */
+  const WINDOW: CssBox = { w: 240, h: 190 };
+
+  it('各档真实 dpr 下，放大后的画布都放得进窗口', () => {
+    for (const dpr of REAL_DPRS) {
+      const scale = deviceScaleFor(3, dpr, WINDOW);
+      const { w, h } = cssSizeFor(scale, dpr);
+      expect(w, `dpr=${dpr} 画布宽 ${w} 超出窗口 ${WINDOW.w}`).toBeLessThanOrEqual(WINDOW.w);
+      expect(h, `dpr=${dpr} 画布高 ${h} 超出窗口 ${WINDOW.h}`).toBeLessThanOrEqual(WINDOW.h);
+      expect(Number.isInteger(scale)).toBe(true);
+    }
+  });
+
+  it('不加钳制时，Windows 的 125% 缩放会让画布溢出 - 这是钳制存在的原因', () => {
+    // 回归保护：这个组合曾经会让猫被裁掉一截。
+    const unclamped = deviceScaleFor(3, 1.25);
+    expect(cssSizeFor(unclamped, 1.25).w).toBeGreaterThan(216);
+    // 加上钳制后放得进窗口
+    const clamped = deviceScaleFor(3, 1.25, WINDOW);
+    expect(cssSizeFor(clamped, 1.25).w).toBeLessThanOrEqual(WINDOW.w);
+  });
+
+  it('窗口足够大时钳制不生效，仍取目标倍数', () => {
+    expect(deviceScaleFor(3, 2, { w: 9999, h: 9999 })).toBe(deviceScaleFor(3, 2));
+  });
+
+  it('窗口极小也至少保留 1 倍缩放', () => {
+    expect(deviceScaleFor(3, 2, { w: 1, h: 1 })).toBe(1);
   });
 });

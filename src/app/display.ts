@@ -13,9 +13,28 @@ import type { RenderResult } from '../render/index.js';
  * 代价是表观大小会与目标值略有偏差，换来任何 dpr 下都锐利。
  */
 
-/** 设备缩放倍数：目标逻辑倍数 × dpr 后取整，至少 1。 */
-export function deviceScaleFor(targetScale: number, dpr: number): number {
-  return Math.max(1, Math.round(targetScale * dpr));
+/** 可用的 CSS 空间（逻辑像素）。通常就是宠物窗口的客户区尺寸。 */
+export interface CssBox {
+  w: number;
+  h: number;
+}
+
+/**
+ * 设备缩放倍数：目标逻辑倍数 × dpr 后取整，至少 1。
+ *
+ * 给了 `box` 时会再钳制一次，保证放大后的画布**不会溢出可用空间**。
+ * 这一步是必需的：取整是向上向下都可能的，`round(3 × 1.25) = 4` 会让画布的
+ * CSS 宽变成 72 × 4 / 1.25 = 230.4，超出 216 宽的窗口，猫会被裁掉一截。
+ * Windows 的 125% / 150% 缩放正好落在这类分数 dpr 上。
+ */
+export function deviceScaleFor(targetScale: number, dpr: number, box?: CssBox): number {
+  let scale = Math.max(1, Math.round(targetScale * dpr));
+  if (box) {
+    // 能放进 box 的最大整数倍
+    const fit = Math.min(Math.floor((box.w * dpr) / W), Math.floor((box.h * dpr) / H));
+    scale = Math.min(scale, Math.max(1, fit));
+  }
+  return scale;
 }
 
 /** 该设备缩放下的 CSS 尺寸（逻辑像素）。 */
@@ -48,7 +67,11 @@ export class CatDisplay {
   /** dpr 变化时（跨屏拖动、系统缩放调整）重新计算。 */
   applyScale(): void {
     const dpr = window.devicePixelRatio || 1;
-    this.deviceScale = deviceScaleFor(this.targetScale, dpr);
+    // 以窗口客户区为上限，避免画布溢出窗口把猫裁掉
+    this.deviceScale = deviceScaleFor(this.targetScale, dpr, {
+      w: window.innerWidth,
+      h: window.innerHeight,
+    });
     const { w, h } = cssSizeFor(this.deviceScale, dpr);
     this.canvas.width = W * this.deviceScale;
     this.canvas.height = H * this.deviceScale;
