@@ -97,13 +97,14 @@ describe('陪伴记录', () => {
 describe('时间推进的算术', () => {
   it('时钟按整拍前进，不满一拍的零头单独留着', () => {
     const w = makeWorld({ hour: 8 });
-    const after = step(w, 1.5 * HOUR + 10 * 60_000 + 7_000).world;
-    // 100 分钟正好是 400 个整拍，7 秒不够一拍。
+    const after = step(w, 1.5 * HOUR + 10 * 60_000 + 2_000).world;
+    // 100 分钟是整数个拍，2 秒不够一拍。
     expect(after.clock).toBe(w.clock + 100 * 60_000);
-    expect(after.carryMs).toBe(7_000);
-    // 模拟步的相位不靠时钟余额记，而靠已走过的拍数：400 = 3 个整步 + 40 拍。
+    expect(after.carryMs).toBe(2_000);
+    // 模拟步的相位不靠时钟余额记，而靠已走过的拍数。
     // 这个计数器必须进存档，否则重启会把「已经走了 10 分钟」忘掉。
-    expect(after.beatsInTick).toBe(400 - 3 * (TICK / BEAT));
+    const beats = (100 * 60_000) / BEAT;
+    expect(after.beatsInTick).toBe(beats - 3 * (TICK / BEAT));
   });
 
   it('负的或零的时间差不会让世界倒退', () => {

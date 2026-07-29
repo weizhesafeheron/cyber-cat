@@ -8,12 +8,12 @@ import {
   ACTIVITY_IDLE_WEIGHT,
   ACTIVITY_LIE_BASE,
   ACTIVITY_LIE_LAZY_SPAN,
-  ACTIVITY_POUNCE_ACTIVE_SPAN,
+  ACTIVITY_POUNCE_CHANCE_ACTIVE_SPAN,
   ACTIVITY_SIT_BASE,
   ACTIVITY_SIT_LAZY_SPAN,
   ACTIVITY_WALK_ACTIVE_SPAN,
   ACTIVITY_WALK_BASE,
-  ACTIVITY_YAWN_TIRED_SPAN,
+  ACTIVITY_YAWN_CHANCE_TIRED_SPAN,
   BOND_DECAY_PER_TICK,
   BOND_GAIN_FILL_BOWL,
   BOND_GAIN_MEDICATE,
@@ -479,7 +479,11 @@ export function advanceBeat(w: World, cat: Cat, urge: ActionKey | null = null): 
 }
 
 /**
- * 把「时间占比」换算成「这一次抽签的权重」。
+ * 把姿势的「时间占比」换算成「这一次抽签的权重」。
+ *
+ * **只用于姿势，不用于一次性动作。** 一次性动作的权重本来就是发生概率，
+ * 它们的时长由动作自己决定，除以时长没有意义 - 而且它们的时长只有一拍，
+ * 除下来会变成权重最大的一项（实测半小时扑跳 41 次）。
  *
  * **常量表里的权重是时间占比，不是抽签概率。** 定档时每个模拟步只做一个动作，
  * 每个动作占的时长相同，两者恰好等价；加了持续时长之后就不等价了 -
@@ -519,9 +523,11 @@ function chooseActivity(w: World, cat: Cat, hour: number): ActionKey {
   const lazy = 1 - active;
   const tired = 1 - w.needs.energy / NEED_MAX;
   const pounce =
-    active * ACTIVITY_POUNCE_ACTIVE_SPAN * (isZoomiesHour(hour) ? ZOOMIES_POUNCE_MULTIPLIER : 1);
+    active *
+    ACTIVITY_POUNCE_CHANCE_ACTIVE_SPAN *
+    (isZoomiesHour(hour) ? ZOOMIES_POUNCE_MULTIPLIER : 1);
 
-  // 每一项都要过 perSegment - 常量表给的是时间占比，抽签要的是每段的权重。
+  // 姿势过 perSegment（常量给的是时间占比），一次性动作不过（常量就是发生概率）。
   return pickWeighted(
     [
       { key: 'idle', weight: perSegment('idle', ACTIVITY_IDLE_WEIGHT) },
@@ -529,7 +535,7 @@ function chooseActivity(w: World, cat: Cat, hour: number): ActionKey {
         key: 'walk',
         weight: perSegment('walk', ACTIVITY_WALK_BASE + active * ACTIVITY_WALK_ACTIVE_SPAN),
       },
-      { key: 'pounce', weight: perSegment('pounce', pounce) },
+      { key: 'pounce', weight: pounce },
       { key: 'groom', weight: perSegment('groom', ACTIVITY_GROOM_WEIGHT) },
       {
         key: 'sit',
@@ -539,7 +545,7 @@ function chooseActivity(w: World, cat: Cat, hour: number): ActionKey {
         key: 'lie',
         weight: perSegment('lie', ACTIVITY_LIE_BASE + lazy * ACTIVITY_LIE_LAZY_SPAN),
       },
-      { key: 'yawn', weight: perSegment('yawn', tired * ACTIVITY_YAWN_TIRED_SPAN) },
+      { key: 'yawn', weight: tired * ACTIVITY_YAWN_CHANCE_TIRED_SPAN },
     ],
     rollActivity(w),
   );

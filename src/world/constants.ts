@@ -26,16 +26,20 @@ export const TICK_MS = 30 * MS_PER_MINUTE;
 export const TICK_HOURS = TICK_MS / MS_PER_HOUR;
 
 /**
- * 行为节拍 15 秒。**「猫在做什么」按这个粒度换，与模拟步长无关。**
+ * 行为节拍 5 秒。**「猫在做什么」按这个粒度换，与模拟步长无关。**
  *
  * 这两件事的天然节奏差了两个数量级：饱食度掉一格是半小时的事，
- * 换个姿势是十几秒的事。最初把选动作写在模拟步里，结果猫会一动不动地
+ * 换个姿势是几秒钟的事。最初把选动作写在模拟步里，结果猫会一动不动地
  * 趴满 30 分钟 - 真机上看就是个静止的贴图，完全读不出「它自己在生活」。
+ *
+ * 一开始定的是 15 秒，实测偏粗，两个地方都吃亏：
+ * 一次性动作（扑跳 3.4 秒）最少也要占满一拍，剩下的 11 秒运动层只能让猫站着；
+ * 静态姿势的时长只能按 15 秒的倍数给，「坐 45 秒」和「坐 1 分钟」之间没有档位。
  *
  * 必须整除 TICK_MS：节拍循环同时驱动模拟步，除不尽的话步长会漂移，
  * 定档过的「最后一次喂食 → 死亡 88 小时」就不再准。由 test/world/beat.test.ts 守着。
  */
-export const BEAT_MS = 15_000;
+export const BEAT_MS = 5_000;
 export const BEATS_PER_TICK = TICK_MS / BEAT_MS;
 
 /** 三条需求与亲密度共用 0..100 量表。 */
@@ -217,22 +221,39 @@ export const BOND_DECAY_PER_TICK = 0.04;
 // ---------------------------------------------------------------------------
 
 /**
- * 醒着且健康时，这一步主要在做什么的权重。
+ * 姿势的权重 = **醒着的时间里花在它上面的比例**。
  *
  * 权重带 ACTIVE / LAZY 跨度是 issue #6 的硬要求：性格不能只是个标签，
  * 高活跃的猫走动与扑跳明显更多，懒猫更多趴着。
+ *
+ * 这一组是「猫处在什么状态」，可以持续几十秒；抽签时要除以平均持续时长换算成
+ * 每段的权重（见 tick.ts 的 perSegment）。下面那组一次性动作是另一种量，
+ * 两者不能混算。
  */
 export const ACTIVITY_IDLE_WEIGHT = 1;
 export const ACTIVITY_WALK_BASE = 0.2;
 export const ACTIVITY_WALK_ACTIVE_SPAN = 1.6;
-export const ACTIVITY_POUNCE_ACTIVE_SPAN = 1.4;
 export const ACTIVITY_GROOM_WEIGHT = 0.7;
 export const ACTIVITY_SIT_BASE = 0.6;
 export const ACTIVITY_SIT_LAZY_SPAN = 0.8;
 export const ACTIVITY_LIE_BASE = 0.3;
 export const ACTIVITY_LIE_LAZY_SPAN = 1.5;
-/** 打哈欠权重 = 跨度 × (1 - 精力/满)。困了才打。 */
-export const ACTIVITY_YAWN_TIRED_SPAN = 1.2;
+
+/**
+ * 一次性动作的权重 = **每次抽签的发生概率**，不是时间占比。
+ *
+ * 扑跳和打哈欠是**事件**，不是状态：它们的时长由动作自己决定（3.4 秒），
+ * 与「猫花多少时间在这上面」无关，所以**不能过 perSegment**。
+ *
+ * 混算过一次，代价很直观：一次性动作的平均时长只有一拍，除下来权重最大，
+ * 实测半小时里扑跳 41 次 - 一只躁狂的猫。
+ *
+ * 现在的标定：抽签平均三十几秒一次，也就是每小时一百来次，
+ * 于是活跃度中等的猫大约每八分钟扑一次、十几分钟打一个哈欠。
+ */
+export const ACTIVITY_POUNCE_CHANCE_ACTIVE_SPAN = 0.1;
+/** 打哈欠概率 = 跨度 × (1 - 精力/满)。困了才打。 */
+export const ACTIVITY_YAWN_CHANCE_TIRED_SPAN = 0.1;
 /** 饿了在食盆边徘徊：走与坐之间的比例，不会去做别的。 */
 export const ACTIVITY_HUNGRY_WALK_CHANCE = 0.5;
 
@@ -246,20 +267,29 @@ export const ACTIVITY_HUNGRY_WALK_CHANCE = 0.5;
  * 这些区间是「读起来像不像猫」的调优旋钮，不影响任何已定档的数值。
  */
 export const ACTIVITY_HOLD_BEATS: Readonly<Record<ActionKey, readonly [number, number]>> = {
-  idle: [2, 6], // 30 - 90 秒
-  walk: [1, 3], // 15 - 45 秒，走一小段就停
+  idle: [4, 9], // 20 - 45 秒
+  walk: [2, 6], // 10 - 30 秒，走一小段就停
   // 打哈欠、伸懒腰、扑跳都是一次性动作（ACTIONS 里 loop: false）：只占一拍。
-  // 给更多拍没有意义 - 动作三四秒就播完了，剩下的时间运动层会让猫站着。
+  // 动作自己三四秒就播完，多给的拍数只会变成运动层让猫干站着。
   pounce: [1, 1],
-  groom: [3, 8], // 45 秒 - 2 分钟，理毛是件耐心的事
-  sit: [4, 12], // 1 - 3 分钟
-  lie: [8, 24], // 2 - 6 分钟，趴着是猫最长的姿势
-  yawn: [1, 1], // 一下就完
+  groom: [6, 12], // 30 - 60 秒，理毛是件耐心的事
+  sit: [5, 12], // 25 - 60 秒
+  lie: [8, 20], // 40 秒 - 100 秒，趴着是猫最长的姿势
+  yawn: [1, 1],
   stretch: [1, 1],
-  eat: [2, 4], // 30 秒 - 1 分钟
+  eat: [4, 9], // 20 - 45 秒
   // 睡眠时长由模拟步的睡眠决策决定，不由这张表控制（见 advanceBeat 的持续状态分支）。
   sleep: [1, 1],
 };
+
+/**
+ * 单个姿势的时长上限，秒。**产品约束，不是物理约束。**
+ *
+ * 真猫能一动不动坐好几分钟，但桌面宠物的职责是在余光里活着 -
+ * 实测反馈两次都是「一直坐着不动」「不是站着就是趴着」。
+ * 上面的区间全部压在这个上限之内，由 test/world/beat.test.ts 守着。
+ */
+export const ACTIVITY_MAX_HOLD_S = 100;
 
 /** 深夜跑酷时段（22:00 - 02:00）扑跳权重的倍率。 */
 export const ZOOMIES_START_HOUR = 22;

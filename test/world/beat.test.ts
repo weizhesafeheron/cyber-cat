@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ActionKey } from '../../src/render/index.js';
+import { ACTIONS } from '../../src/render/index.js';
 import {
   ACTIVITY_HOLD_BEATS,
+  ACTIVITY_MAX_HOLD_S,
   BEATS_PER_TICK,
   BEAT_MS,
   TICK_MS,
@@ -15,7 +17,7 @@ import { BEAT, DAY, HOUR, TICK, kinds, makeWorld } from './helpers.js';
  *
  * 为什么要有这一层：最初选动作写在 30 分钟的模拟步里，真机上看到的是一只
  * 趴着一动不动整整半小时的猫 - 读起来就是张静止的贴图，完全谈不上「它自己
- * 在生活」。拆开之后姿势按 15 秒换，需求仍然按 30 分钟演化。
+ * 在生活」。拆开之后姿势按 5 秒的节拍换，需求仍然按 30 分钟演化。
  *
  * 这个文件守两件事：
  * - 行为变活了（换得勤，但不像节拍器）；
@@ -53,7 +55,7 @@ describe('节拍与模拟步的关系', () => {
     expect(Number.isInteger(BEATS_PER_TICK)).toBe(true);
   });
 
-  it('半小时里需求只演化一次，不因为多了 120 个节拍而多掉', () => {
+  it('半小时里需求只演化一次，不因为多了几百个节拍而多掉', () => {
     const start = makeWorld({ hour: 8, patch: { bowl: 0 } });
     // 一次给满半小时，与逐拍走完半小时，需求必须一致（等价性的节拍版本）。
     const bulk = step(start, TICK).world;
@@ -115,10 +117,11 @@ describe('两条随机流互不影响', () => {
   });
 });
 
-describe('十分钟里的行为读起来是自主的', () => {
-  // 黄昏时段，醒着的概率高。挑一只活跃的猫。
-  const dusk = () => makeWorld({ hour: 17, breed: 'cow', seed: 20260729, patch: { bowl: 2 } });
+/** 黄昏时段，醒着的概率高。挑一只活跃的猫。 */
+const dusk = (): World =>
+  makeWorld({ hour: 17, breed: 'cow', seed: 20260729, patch: { bowl: 2 } });
 
+describe('十分钟里的行为读起来是自主的', () => {
   it('十分钟里换过好几种动作，而不是一件事做到底', () => {
     const seq = activities(dusk(), (10 * 60_000) / BEAT_MS);
     expect(new Set(seq).size).toBeGreaterThanOrEqual(3);
@@ -128,8 +131,8 @@ describe('十分钟里的行为读起来是自主的', () => {
   it('走动类动作占到可观的时间，不是几乎只有站和趴', () => {
     // 这条守的是一个真机上看出来、纯看代码看不出来的陷阱：
     // 常量表里的权重是**时间占比**，而抽签决定的是「下一段做什么」。
-    // 趴下一段 8 到 24 拍，走路一段只有 1 到 3 拍 - 直接拿时间占比去抽签，
-    // 趴着的时长会被放大八倍。修之前实测 120 拍里只有 4 拍在走路，
+    // 趴下一段是走路一段的好几倍长 - 直接拿时间占比去抽签，趴着的时长会被
+    // 放大好几倍。修之前实测 120 拍里只有 4 拍在走路，
     // 用户的原话是「观察了很久，猫不是站着就是趴着」。
     const seq = activities(dusk(), (2 * HOUR) / BEAT_MS);
     const awake = seq.filter((a) => a !== 'sleep');
@@ -168,6 +171,48 @@ describe('十分钟里的行为读起来是自主的', () => {
       checked += 1;
     });
     expect(checked).toBeGreaterThan(10);
+  });
+});
+
+describe('两种权重语义不能混算', () => {
+  // 姿势的权重是「醒着的时间里花多少比例」，一次性动作的权重是「每次抽签发生的概率」。
+  // 混算过一次：一次性动作只占一拍，除以平均时长之后权重最大，
+  // 实测半小时里扑跳 41 次，一只躁狂的猫。
+
+  const oneShots = (): ActionKey[] =>
+    (Object.keys(ACTIONS) as ActionKey[]).filter((k) => !ACTIONS[k].loop);
+
+  it('一次性动作在世界层只占一拍 - 多给的拍数只会变成猫干站着', () => {
+    expect(oneShots().length).toBeGreaterThan(0);
+    for (const k of oneShots()) {
+      expect(ACTIVITY_HOLD_BEATS[k], `${k} 的持续时长不该多于一拍`).toEqual([1, 1]);
+    }
+  });
+
+  it('扑跳与打哈欠是低频事件，每小时几次而不是几十次', () => {
+    const seq = activities(dusk(), (6 * HOUR) / BEAT_MS);
+    const perHour = (key: ActionKey): number =>
+      seq.filter((a, i) => a === key && seq[i - 1] !== key).length / 6;
+    for (const k of ['pounce', 'yawn'] as const) {
+      expect(perHour(k), `${k} 每小时 ${perHour(k)} 次`).toBeGreaterThan(1);
+      expect(perHour(k), `${k} 每小时 ${perHour(k)} 次`).toBeLessThan(15);
+    }
+  });
+
+  it('没有哪个姿势能一动不动超过产品上限', () => {
+    for (const [key, [, max]] of Object.entries(ACTIVITY_HOLD_BEATS)) {
+      const seconds = (max * BEAT_MS) / 1000;
+      expect(seconds, `${key} 最长 ${seconds} 秒`).toBeLessThanOrEqual(ACTIVITY_MAX_HOLD_S);
+    }
+  });
+
+  it('平均每分钟至少换一次姿势', () => {
+    // 实测反馈两次都是「一直坐着不动」「不是站着就是趴着」，所以这条要有个下限。
+    const span = 2 * HOUR;
+    const seq = activities(dusk(), span / BEAT_MS);
+    const changes = seq.filter((a, i) => i > 0 && a !== seq[i - 1]).length;
+    const secondsPerChange = span / 1000 / changes;
+    expect(secondsPerChange, `平均 ${secondsPerChange.toFixed(0)} 秒才换一次`).toBeLessThan(60);
   });
 });
 
