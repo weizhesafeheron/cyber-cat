@@ -114,6 +114,23 @@ describe('位置随时间推进', () => {
     expect(end.playing).toBe('walk');
   });
 
+  it('走路中途换成别的动作，位移必须立刻停住', () => {
+    // 回归保护：即时反馈（点猫播伸懒腰）曾经只覆盖渲染、没有喂给运动层，
+    // 结果是「一边伸懒腰一边横向漂移」。位移的唯一开关是喂进来的动作。
+    const start = createMotion(geom(), centeredStage());
+    // 先真的走起来，确认位移在发生
+    const walking = run(start, { frames: 40 });
+    expect(Math.abs(walking.end.x - start.x)).toBeGreaterThan(0);
+
+    // 换成任何非走路动作，之后每一帧的位移都必须是 0
+    for (const action of ACTION_KEYS.filter((a) => a !== 'walk')) {
+      const held = run(walking.end, { frames: 30, action, now: walking.now });
+      const maxMoved = Math.max(...held.frames.map((f) => f.moved));
+      expect(maxMoved, `播 ${action} 时仍在位移`).toBe(0);
+      expect(held.end.playing, `播 ${action} 时 playing 不对`).toBe(action);
+    }
+  });
+
   it('走的距离与时间成正比：两倍时长走两倍远（对照组：同一个随机流）', () => {
     const start = createMotion(geom(), centeredStage());
     // 只统计真的在走的那些帧，休息段不该计入。

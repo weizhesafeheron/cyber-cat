@@ -212,12 +212,10 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
     lastFrame = null;
     return null;
   }
-  const reacting = nowMs < reactionUntilMs;
-  const action = reacting ? REACTION : motion.playing;
-  const localT = reacting ? (REACTION_MS - (reactionUntilMs - nowMs)) / 1000 : animT;
-
+  // 播什么动作只看 motion.playing - 即时反馈已经在 frame() 里作为动作喂给
+  // 运动层了，这里不再覆盖。两个来源会让画面与位移脱节（见 frame() 的注释）。
   const mi = stepMicro(micro, animDt, microOptsFor(micros, intent.micro));
-  const base = ACTIONS[action].make(localT, cat, mi);
+  const base = ACTIONS[motion.playing].make(animT, cat, mi);
   // 叠加顺序是有讲究的：
   //   intent.pose 在动作之上 - 生病、睡着这类状态覆盖不该被动作或即时反馈吃掉；
   //   faceDir 在合并之后 - 它要翻转的 dx / legOx 可能来自任何一层；
@@ -246,12 +244,19 @@ function frame(now: number): void {
 
   // 运动层读 intent，**不写回去**。世界是状态的唯一权威（ADR 0007）。
   //
+  // 即时反馈要作为动作**喂给运动层**，不能只在渲染时覆盖：
+  // 运动层只在动作是 walk 时推进位置，把反馈喂进来它自然就停住了。
+  // 曾经在 draw() 里覆盖播放的动作而没告诉运动层，结果点走路中的猫会
+  // 「一边伸懒腰一边横向漂移」 - 因为世界层还在说走路，位置照推。
+  // 这么改之后「当前播什么动作」只有 motion.playing 一个来源。
+  const effective = now < reactionUntilMs ? REACTION : intent.action;
+
   // dt 乘上 timeScale：病后虚弱时动作会放慢，地面速度必须跟着放慢，
   // 否则腿的相位与实际位移脱节，走起来是滑步。
   motion = stepMotion(motion, {
     dt: animDt * intent.timeScale,
     now,
-    action: intent.action,
+    action: effective,
     cat,
     geom: geometry(),
     rnd: Math.random,
