@@ -8,7 +8,7 @@
 
 use std::sync::Mutex;
 
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Emitter, Manager, Runtime, State};
 
@@ -23,6 +23,9 @@ struct TrayItems<R: Runtime> {
     mood: MenuItem<R>,
     bond: MenuItem<R>,
     medicate: MenuItem<R>,
+    /// 两个挂件的显示开关。勾选状态由前端推过来（摆放存档在那边）。
+    prop_bowl: CheckMenuItem<R>,
+    prop_bed: CheckMenuItem<R>,
 }
 
 /// 托盘菜单项的句柄。Mutex 只护一个 Option，锁的持有时间极短。
@@ -43,6 +46,14 @@ pub fn build(app: &App) -> tauri::Result<()> {
     let feed = MenuItem::with_id(app, "feed", "喂食", true, None::<&str>)?;
     // 喂药只在生病时可用（mvp-scope 4）：界面不该常年挂一个用不到的入口。
     let medicate = MenuItem::with_id(app, "medicate", "喂药", false, None::<&str>)?;
+
+    // 挂件是可隐藏的（CONTEXT.md），但藏了要能再拿回来，所以用勾选项而不是
+    // 一个「隐藏」动作。初值先按默认摆放（显示），前端读完摆放存档会立刻纠正 -
+    // 菜单在 setup 里建，那时前端还没起来，拿不到真正的状态。
+    let prop_bowl = CheckMenuItem::with_id(app, "prop-bowl", "食盆", true, true, None::<&str>)?;
+    let prop_bed = CheckMenuItem::with_id(app, "prop-bed", "猫窝", true, true, None::<&str>)?;
+    let props = Submenu::with_items(app, "桌面挂件", true, &[&prop_bowl, &prop_bed])?;
+
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
     let menu = Menu::with_items(
@@ -53,6 +64,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &feed,
             &medicate,
+            &props,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -65,6 +77,8 @@ pub fn build(app: &App) -> tauri::Result<()> {
         mood,
         bond,
         medicate,
+        prop_bowl,
+        prop_bed,
     }))));
 
     TrayIconBuilder::with_id("tray")
@@ -78,7 +92,9 @@ pub fn build(app: &App) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quit" => app.exit(0),
-            id @ ("feed" | "medicate") => {
+            // 挂件的显示开关也交回前端：摆放存档在那边，而且勾选状态必须与它
+            // 记的那份保持一致 - 在这里直接 show/hide 会让两边漂移。
+            id @ ("feed" | "medicate" | "prop-bowl" | "prop-bed") => {
                 // 交回前端，由它作为一次 UserAction 走进 step。
                 if let Err(e) = app.emit(TRAY_ACTION_EVENT, id) {
                     eprintln!("[cyber-cat] 发送托盘动作 {id} 失败：{e}");
@@ -132,5 +148,31 @@ pub fn update_tray(
     if let Some(tray) = app.tray_by_id("tray") {
         let _ = tray.set_tooltip(Some(&summary));
     }
+    Ok(())
+}
+
+/// 把托盘里两个挂件的勾选状态对齐到前端记的那份摆放。
+///
+/// 单独一个命令而不是塞进 `update_tray`：挂件的显示与猫的四条需求是两件事，
+/// 刷新的时机也完全不同（需求每 5 秒推一次，挂件只在用户切换时变）。
+#[tauri::command]
+pub fn update_prop_menu(
+    handles: State<'_, TrayHandles>,
+    bowl: bool,
+    bed: bool,
+) -> Result<(), String> {
+    let guard = handles
+        .0
+        .lock()
+        .map_err(|_| "托盘状态锁已损坏".to_string())?;
+    let items = guard.as_ref().ok_or("托盘尚未初始化")?;
+    items
+        .prop_bowl
+        .set_checked(bowl)
+        .map_err(|e| format!("勾选食盆项失败：{e}"))?;
+    items
+        .prop_bed
+        .set_checked(bed)
+        .map_err(|e| format!("勾选猫窝项失败：{e}"))?;
     Ok(())
 }

@@ -30,6 +30,42 @@
         "focus": false,
         "skipTaskbar": true,
         "visible": false
+      },
+      {
+        "label": "prop-bowl",
+        "title": "CYBER-CAT 食盆",
+        "url": "prop.html?kind=bowl",
+        "width": 78,
+        "height": 36,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "shadow": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "focus": false,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
+        "label": "prop-bed",
+        "title": "CYBER-CAT 猫窝",
+        "url": "prop.html?kind=bed",
+        "width": 132,
+        "height": 30,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "shadow": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "focus": false,
+        "skipTaskbar": true,
+        "visible": false
       }
     ],
     "security": {

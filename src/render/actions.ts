@@ -182,12 +182,12 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
   eat: {
     label: '吃饭',
     loop: true,
-    make(t, cat) {
+    make(t) {
       const bob = Math.sin(t * 7);
+      // 只有低头咀嚼的形体，没有食盆 - 食盆是独立的挂件窗口（ADR 0004、ticket 08），
+      // 猫要走到它跟前才会被世界层判定为在吃（见 src/app/motion.ts 的锚点分支）。
       return {
         form: 'stand',
-        // 食盆的位置。ticket 08 落地后食盆改为独立挂件，这里应停止设置。
-        bowl: 34 + (cat.bodyRW + 8),
         headDX: 2,
         headDY: 7 + Math.round(bob * 1.2),
         muzzleDY: 0.5,

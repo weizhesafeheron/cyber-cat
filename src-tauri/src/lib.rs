@@ -11,7 +11,7 @@ mod platform;
 mod save;
 mod tray;
 
-use tauri::{Manager, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 /// 前端渲染出第一帧后调用，此时才显示窗口。
 ///
@@ -50,10 +50,36 @@ fn stage_metrics(window: WebviewWindow) -> Result<platform::StageMetrics, String
     platform::stage_metrics(&window)
 }
 
-/// 把舞台挪到桌面上的某个位置。**只在猫走到舞台边缘时调**，见 `platform::move_stage`。
+/// 把舞台挪到桌面上的某个位置。**只在猫走到舞台边缘时调**，见 `platform::move_window`。
 #[tauri::command]
 fn move_stage(window: WebviewWindow, x: f64, y: f64) -> Result<(), String> {
-    platform::move_stage(&window, x, y)
+    platform::move_window(&window, x, y)
+}
+
+// --- 桌面挂件（ticket 08）------------------------------------------------
+//
+// 三个命令都由前端驱动：摆放存档在前端（屏幕坐标不能进世界存档），
+// 世界状态也只有宠物窗口持有。这一层只负责动窗口。
+
+/// 挂件窗口的标签。**必须与 tauri.conf.json 里的 label 及前端的 propWindowLabel 一致。**
+fn prop_label(kind: &str) -> String {
+    format!("prop-{kind}")
+}
+
+/// 摆放一个挂件窗口：挪到位并决定显示还是隐藏。见 `platform::place_prop`。
+#[tauri::command]
+fn place_prop(app: AppHandle, kind: String, x: f64, y: f64, visible: bool) -> Result<(), String> {
+    let label = prop_label(&kind);
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("找不到挂件窗口 {label}"))?;
+    platform::place_prop(&window, x, y, visible)
+}
+
+/// 把**调用方自己那个窗口**交给系统的拖拽循环。挂件靠它实现「拖到桌面任意位置」。
+#[tauri::command]
+fn drag_prop(window: WebviewWindow) -> Result<(), String> {
+    platform::start_drag(&window)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -65,9 +91,14 @@ pub fn run() {
             set_pass_through,
             stage_metrics,
             move_stage,
+            place_prop,
+            drag_prop,
             save::save_world,
             save::load_world,
-            tray::update_tray
+            save::save_props,
+            save::load_props,
+            tray::update_tray,
+            tray::update_prop_menu
         ])
         .setup(|app| {
             platform::configure_app(app);
@@ -77,6 +108,17 @@ pub fn run() {
                 // 配置里写死了 label=pet，取不到说明配置被改坏了，
                 // 此时窗口永远不会显示，必须让它可见地失败而不是静默。
                 None => eprintln!("[cyber-cat] 严重：找不到 label=pet 的窗口，猫不会出现"),
+            }
+
+            // 两个挂件窗口同样以 visible: false 启动，由前端读完摆放存档后
+            // 通过 place_prop 摆好位置再显示。取不到不阻止启动 - 没有食盆的话
+            // 托盘菜单里的「喂食」仍然可用，猫照样能活。
+            for kind in ["bowl", "bed"] {
+                let label = prop_label(kind);
+                match app.get_webview_window(&label) {
+                    Some(prop) => platform::configure_prop_window(&prop),
+                    None => eprintln!("[cyber-cat] 找不到挂件窗口 {label}，该挂件不会出现"),
+                }
             }
 
             tray::build(app)?;

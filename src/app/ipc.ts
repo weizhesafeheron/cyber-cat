@@ -67,6 +67,56 @@ export async function probeStage(): Promise<StageMetricsDto | null> {
 }
 
 /**
+ * 读**调用方自己那个窗口**的位置、尺寸与工作区。
+ *
+ * 与 probeStage 是同一个 Rust 命令 - 那边取的本来就是发起调用的窗口
+ * （Tauri 会把它注入命令），所以挂件窗口用它读自己的位置是免费的。
+ * 换个名字导出是为了让调用点读得懂：挂件窗口不该看起来在读舞台。
+ */
+export const probeSelf = probeStage;
+
+/**
+ * 把某个挂件窗口摆到桌面上的某个逻辑坐标，并决定显示还是隐藏。
+ *
+ * 位置与可见性一次下发：分两次调用会在「先显示、后挪位置」的顺序下让用户看见
+ * 挂件在屏幕上跳一下 - 与舞台窗口先摆位置再显示是同一条经验（见 main.ts 的启动顺序）。
+ */
+export async function placeProp(
+  kind: string,
+  x: number,
+  y: number,
+  visible: boolean,
+): Promise<void> {
+  if (!inTauri) return;
+  const invoke = await invoker();
+  await invoke<void>('place_prop', { kind, x, y, visible });
+}
+
+/**
+ * 开始拖动**调用方自己那个窗口**。
+ *
+ * 必须由 Rust 侧的 `start_dragging` 来做：之后窗口交给操作系统的拖拽循环，
+ * 前端既收不到 pointermove 也不会收到「拖完了」的回调。
+ * 因此挂件窗口得靠回读位置（probeSelf）才知道自己被挪到哪儿了。
+ */
+export async function dragSelf(): Promise<void> {
+  if (!inTauri) return;
+  const invoke = await invoker();
+  await invoke<void>('drag_prop');
+}
+
+/** 刷新托盘里两个挂件的显示/隐藏勾选状态。 */
+export async function pushPropMenu(bowl: boolean, bed: boolean): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const invoke = await invoker();
+    await invoke<void>('update_prop_menu', { bowl, bed });
+  } catch (err) {
+    console.error('[cyber-cat] 刷新挂件菜单失败：', err);
+  }
+}
+
+/**
  * 把舞台挪到桌面上的某个逻辑坐标。
  *
  * 与 setPassThrough 不同，这里**必须等返回**：画布偏移只有在窗口真的挪到位
@@ -76,6 +126,43 @@ export async function moveStage(x: number, y: number): Promise<void> {
   if (!inTauri) return;
   const invoke = await invoker();
   await invoke<void>('move_stage', { x, y });
+}
+
+/**
+ * 订阅一个窗口间事件。
+ *
+ * 宠物窗口与两个挂件窗口是三个独立的 webview，各有自己的 JS 世界；
+ * 它们之间唯一的通路就是 Tauri 的事件总线。分工是刻意的：
+ * **世界状态只有宠物窗口持有**，挂件窗口是纯粹的视图 - 点了食盆就报一声，
+ * 添粮这件事仍然作为一次 `UserAction` 走进同一个 `step`（与托盘菜单同理）。
+ * 多一条改状态的路，离线推演的等价性就没法再保证了（ADR 0001）。
+ */
+export async function listenEvent<T>(
+  name: string,
+  handler: (payload: T) => void,
+): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    await listen<T>(name, (event) => handler(event.payload));
+  } catch (err) {
+    console.error(`[cyber-cat] 订阅事件 ${name} 失败：`, err);
+  }
+}
+
+/** 给某个窗口发一个事件。失败只记录 - 收不到的后果由各自的重试兜住。 */
+export async function emitToWindow(
+  label: string,
+  name: string,
+  payload: unknown,
+): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const { emitTo } = await import('@tauri-apps/api/event');
+    await emitTo(label, name, payload);
+  } catch (err) {
+    console.error(`[cyber-cat] 向 ${label} 发送事件 ${name} 失败：`, err);
+  }
 }
 
 let passThroughFailures = 0;

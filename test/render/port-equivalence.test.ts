@@ -119,6 +119,16 @@ describe('端口保真性：与 prototype 参照实现比对', () => {
             expect(mine.dx, `t=${t} 的 dx 应当已经交给运动层`).toBeUndefined();
             continue;
           }
+          if (key === 'eat') {
+            // 吃饭第三处刻意偏离：食盆不再是猫的姿态字段。
+            // 挂件是独立窗口、位置由用户拖动决定（ADR 0004、ticket 08），
+            // 猫的渲染器无从知道盆在哪。低头咀嚼的形体本身一点没改。
+            expect(mine, `t=${t}`).toEqual({ ...theirs, bowl: undefined });
+            expect(Object.keys(mine), `t=${t} 不该再产出 bowl`).not.toContain('bowl');
+            // 对照组：原型确实设了这个字段，否则上面那条是空断言。
+            expect(theirs.bowl, `t=${t} 原型应当设了 bowl`).toBeGreaterThan(0);
+            continue;
+          }
           expect(mine, `t=${t}`).toEqual(theirs);
         }
       });
@@ -130,6 +140,22 @@ describe('端口保真性：与 prototype 参照实现比对', () => {
       expect([...oneShot].sort()).toEqual(['pounce', 'stretch', 'yawn']);
       // 每个一次性动作都必须给出播完所需的时长，否则运动层不知道什么时候算完。
       for (const k of oneShot) expect(ACTIONS[k].period, k).toBeGreaterThan(0);
+    });
+
+    it('除了 eat 与 pounce，没有第三个动作产出精灵缓冲外的东西', () => {
+      // 上面两处 continue 各自跳过了一个字段的比对，这条守住「只有这两处」。
+      // 位移（dx）与场景道具（bowl）是两类曾经混在姿态里的东西，
+      // 现在分别归运动层与挂件层，任何动作都不该再产出它们。
+      const cat = makeCat('orange', 20260728);
+      const mi = { eyeOpen: 1, earFlickL: 0, earFlickR: 0, tilt: 0 };
+      for (const key of ACTION_KEYS) {
+        if (key === 'pounce') continue; // dx 的对照组在上一条测试里
+        for (const t of TIMES) {
+          const keys = Object.keys(ACTIONS[key].make(t, cat, mi));
+          expect(keys, `${key} t=${t}`).not.toContain('bowl');
+          expect(keys, `${key} t=${t}`).not.toContain('dx');
+        }
+      }
     });
 
     it('扑跳的位移改由运动层驱动，动作库不再产出任何 dx', () => {

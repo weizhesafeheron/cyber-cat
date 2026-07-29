@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CYBER-CAT 挂件</title>
+    <style>
+      /* 整页必须完全透明 - 任何背景色都会在桌面上变成一块可见的矩形 */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+      }
+      /*
+       * 贴图贴在窗口下沿并横向居中。
+       *
+       * 贴底是为了和猫踩同一条地面线：挂件窗口的下沿就是猫脚下的地面线
+       * （见 src/props/layout.ts 的 groundedY），贴顶或居中都会让挂件浮空。
+       * 横向居中是为了让「贴图中心 = 窗口中心」这条恒等式成立 -
+       * 猫的落点是按窗口中心算的，分数 dpi 下画布会被整数缩放规则钳小一档，
+       * 居中才能让中心不动。
+       */
+      #prop {
+        position: absolute;
+        left: 50%;
+        bottom: 0;
+        transform: translateX(-50%);
+        display: block;
+        image-rendering: pixelated;
+        /* 拖动由 Rust 侧的 start_dragging 接管，浏览器的默认拖拽行为要关掉 */
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="prop"></canvas>
+    <script type="module" src="/src/app/prop-main.ts"></script>
+  </body>
+</html>

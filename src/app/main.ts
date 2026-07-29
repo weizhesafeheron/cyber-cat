@@ -40,6 +40,7 @@ import type { MicroSwitches, MotionState, ScreenRect, StageGeometry } from './mo
 import { PollingPassthrough } from './passthrough.js';
 import { PawCanvas } from './paws.js';
 import { loadWorld, onTrayAction, pushTrayStatus, saveWorld } from './persist.js';
+import { PropsHost } from './props.js';
 import { TARGET_SCALE } from './stage.js';
 import { trayStatus } from './status.js';
 
@@ -122,6 +123,15 @@ function geometry(): StageGeometry {
 
 /** 运动层状态。**不进存档** - 重启后猫出现在一个合理位置即可（ADR 0007）。 */
 let motion: MotionState = createMotion(geometry(), { x: work.x, y: work.y });
+
+/**
+ * 桌面挂件（食盆与猫窝）。
+ *
+ * 它把世界层给的挂件名换算成一个屏幕 x，运动层据此把猫送过去 -
+ * 「点食盆添粮、猫自己走过去吃」这条链上，这里是中间那一环（ADR 0004 + 0007）。
+ * 摆放另存一份文件，不进世界存档。
+ */
+const props = new PropsHost(geometry());
 
 /** dpr 或窗口尺寸变化时重算画布与爪印层。两块画布的像素格必须一样大。 */
 function applyGeometry(): void {
@@ -251,17 +261,25 @@ function frame(now: number): void {
   // 这么改之后「当前播什么动作」只有 motion.playing 一个来源。
   const effective = now < reactionUntilMs ? REACTION : intent.action;
 
+  // 即时反馈期间不给锚点：用户刚点了猫，猫在原地回应他，不该扭头就往食盆走。
+  // 与上面「反馈要作为动作喂给运动层」是同一条理由 - 位移的开关只有一处。
+  const g = geometry();
+  const anchorX = now < reactionUntilMs ? null : props.anchorX(intent.anchor, motion.x, g);
+
   // dt 乘上 timeScale：病后虚弱时动作会放慢，地面速度必须跟着放慢，
   // 否则腿的相位与实际位移脱节，走起来是滑步。
   motion = stepMotion(motion, {
     dt: animDt * intent.timeScale,
     now,
     action: effective,
+    anchorX,
     cat,
-    geom: geometry(),
+    geom: g,
     rnd: Math.random,
   });
   requestStageMove();
+  // 碗里的份数变了就推给食盆窗口。「视觉上能看到碗里有粮」就是这个数的投影。
+  props.onBowlPortions(world.bowl);
 
   if (motion.playing !== currentAction) {
     currentAction = motion.playing;
@@ -336,6 +354,9 @@ async function refreshStage(): Promise<void> {
     motion = settleStage(motion, { x: m.x, y: m.y });
     placed = { x: m.x, y: m.y };
   }
+  // 屏幕变小了（改分辨率、拔掉外接屏）时把挂件拉回屏幕内，否则用户既看不见
+  // 也拖不回来。没越界时这是空操作，不会覆盖用户自己摆的位置。
+  props.reclamp(geometry());
 }
 
 /**
@@ -390,10 +411,13 @@ function startLoop(): void {
  * 不先推一帧就还是 null，draw 会以为猫已离开而清空画布。
  */
 function primeMotion(action: ActionKey | null): void {
+  // 首帧不给锚点：这一帧只为算出 playing，给了锚点会让首帧直接播走路，
+  // 而窗口刚显示、猫还没站定，第一眼看到的就是一只在走的猫。
   motion = stepMotion(motion, {
     dt: 0,
     now: performance.now(),
     action,
+    anchorX: null,
     cat,
     geom: geometry(),
     rnd: Math.random,
@@ -483,7 +507,14 @@ matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('cha
 void onTrayAction((id) => {
   if (id === 'feed') enqueue({ type: 'fillBowl' });
   else if (id === 'medicate') enqueue({ type: 'medicate' });
+  // 托盘里的两个挂件开关。挂件可隐藏，但要能再打开，所以是勾选项而不是「隐藏」。
+  else if (id === 'prop-bowl') void props.toggle('bowl');
+  else if (id === 'prop-bed') void props.toggle('bed');
 });
+
+// 点食盆与点托盘的「喂食」是同一件事：都只是往碗里添粮这个**邀请**，
+// 吃不吃仍然由猫决定（world/tick.ts 的进食分支）。
+props.listen(() => enqueue({ type: 'fillBowl' }));
 
 // 启动顺序：同步画出第一帧 → 摆好舞台位置 → 通知 Rust 显示窗口 → 读存档补算
 //          → 启动动画循环。
@@ -501,8 +532,11 @@ void onTrayAction((id) => {
 // 读存档必须放在「通知显示」之后：它要读文件，放在前面会把首帧连带窗口一起推迟。
 // 代价是存档里如果是另一只猫，首帧会有一瞬间画的是占位猫 - ticket 07 落地后
 // 占位猫消失，这个瞬间也随之消失。
+//
+// 挂件的摆放紧跟读存档：它也要读文件，而且必须在猫开始漫游之前摆好 -
+// 否则头几秒猫会按默认位置去找食盆，然后食盆突然挪到别处。
 {
-  const intent = renderIntentOf(world);
+  const intent = renderIntentOf(world, cat);
   primeMotion(intent.action);
   currentAction = motion.playing;
   draw(intent, 0, performance.now());
@@ -510,6 +544,7 @@ void onTrayAction((id) => {
 void bootStage()
   .then(petReady)
   .then(bootWorld)
+  .then(() => props.boot(geometry()))
   .then(startLoop)
   .catch((err) => {
     console.error('[cyber-cat] 启动失败：', err);

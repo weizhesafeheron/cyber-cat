@@ -32,6 +32,8 @@
 - [0004](docs/adr/0004-desktop-as-territory.md) 废弃虚拟场景，真实桌面就是猫的领地
 - [0005](docs/adr/0005-window-geometry-without-permission.md) 用 CGWindowList 读窗口几何，不迁移到 ScreenCaptureKit
 - [0006](docs/adr/0006-alpha-mask-hit-testing.md) 用 alpha 掩膜逐帧命中测试实现选择性点击穿透
+- [0007](docs/adr/0007-stage-window-and-motion-layer.md) 舞台窗口跟随猫，逐帧位移独立于世界层
+- [0008](docs/adr/0008-prop-anchors-across-layers.md) 世界层用挂件名表达空间诉求，抵达判定归运动层
 
 ## 原型
 

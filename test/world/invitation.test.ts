@@ -66,6 +66,30 @@ describe('添粮是邀请，不是命令', () => {
     expect(kinds(runTicks(picky, 12).events)).toContain('ate');
   });
 
+  it('添粮后不必然立即进食：饿着的猫也要等到下一个模拟步才动嘴', () => {
+    // 「邀请式语义可被缝一测试断言」这条验收标准的正面形式。
+    // 添粮是即时的（碗里立刻有粮），进食不是 - 它发生在世界层自己的整步上。
+    // 这中间那段时间正是「猫走向食盆」的空间，也是这一票存在的理由。
+    const w = makeWorld({
+      seed: GREEDY_SEED,
+      hour: 18,
+      patch: { needs: { hunger: 30, energy: 90, mood: 60 } },
+    });
+    const fill = { actions: [{ type: 'fillBowl' } as const] };
+
+    // elapsedMs = 0：动作结算完，时间一步没走。
+    const instant = step(w, 0, fill);
+    expect(instant.world.bowl).toBeGreaterThan(0);
+    expect(kinds(instant.events)).toEqual(['fedByOwner']);
+    expect(instant.world.needs.hunger).toBe(30);
+    // 世界层已经在说「去食盆」了 - 邀请被接受了，只是还没吃上。
+    expect(instant.renderIntent.anchor).toBe('bowl');
+
+    // 走完一个整步才吃。对照组，证明上面不是因为「压根不会吃」而通过。
+    const later = step(w, TICK, fill);
+    expect(kinds(later.events).some((k) => k === 'ate' || k === 'ateGreedy')).toBe(true);
+  });
+
   it('睡着的猫可能睡完这觉再说：添粮不会把它叫起来吃', () => {
     // 黄昏（最活跃的时段）+ 精力 40：睡着的不会醒（精力不够），
     // 醒着的也不会睡（此时段睡眠倾向极低）。除了睡醒，两个世界完全一样。

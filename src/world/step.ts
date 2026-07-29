@@ -61,5 +61,5 @@ export function step(world: World, elapsedMs: number, inputs: WorldInputs = {}):
     advanceBeat(draft, cat, urge);
   }
 
-  return { world: draft, events, renderIntent: renderIntentOf(draft) };
+  return { world: draft, events, renderIntent: renderIntentOf(draft, cat) };
 }
