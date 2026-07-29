@@ -20,6 +20,7 @@
 |---|---|
 | [CONTEXT.md](CONTEXT.md) | 领域词汇表。只记术语与边界，不记实现。有歧义时以此为准。 |
 | [docs/mvp-scope.md](docs/mvp-scope.md) | MVP 范围。做什么、做到什么程度、明确不做什么。开发依据。 |
+| [docs/art-and-motion-decisions.md](docs/art-and-motion-decisions.md) | 美术与动画的既定结论，每条都附被否决的前任方案。改渲染代码前必读。 |
 | [docs/adr/](docs/adr/) | 架构决策记录。为什么这么选、放弃了什么、代价是什么。 |
 | [docs/research/](docs/research/) | 技术调研与实测证据。每条结论都带一手来源。 |
 
