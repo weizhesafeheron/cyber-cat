@@ -1,0 +1,20 @@
+{
+  "name": "cyber-cat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "常驻桌面的赛博养猫",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}

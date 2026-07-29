@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CYBER-CAT · 渲染核心验证页</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: #0b0e1a;
+        color: #d8dcf0;
+        font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        padding: 20px 24px 60px;
+      }
+      h1 { font-size: 20px; letter-spacing: 1px; }
+      h1 .en { color: #f652a0; font-family: ui-monospace, monospace; }
+      .note {
+        margin: 10px 0 18px;
+        padding: 10px 14px;
+        background: #12172b;
+        border-left: 3px solid #4deeea;
+        border-radius: 4px;
+        font-size: 13px;
+        line-height: 1.75;
+        color: #aab3d8;
+        max-width: 90ch;
+      }
+      .note b { color: #ffd94a; }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 22px;
+        align-items: center;
+        padding: 12px 14px;
+        background: #10142a;
+        border: 1px solid #2c3a68;
+        border-radius: 8px;
+        margin-bottom: 18px;
+        position: sticky;
+        top: 0;
+        z-index: 5;
+      }
+      .bar label { font-size: 12.5px; color: #aab3d8; display: inline-flex; align-items: center; gap: 6px; }
+      .bar input[type="checkbox"] { accent-color: #4deeea; }
+      .bar input[type="number"] {
+        width: 130px;
+        background: #07091a;
+        color: #ffd94a;
+        border: 1px solid #2c3a68;
+        border-radius: 5px;
+        padding: 5px 8px;
+        font-family: ui-monospace, monospace;
+        font-size: 12.5px;
+      }
+      .bar button {
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 12.5px;
+        background: #1c2445;
+        color: #aab3d8;
+        border: 1px solid #2c3a68;
+        border-radius: 5px;
+        padding: 6px 13px;
+      }
+      .bar button:hover { border-color: #4deeea; color: #4deeea; }
+      .group { display: flex; gap: 12px; align-items: center; padding-right: 14px; border-right: 1px solid #232c52; }
+      .group:last-child { border-right: none; }
+      .group > span:first-child { font-size: 11px; color: #5b6488; letter-spacing: 1px; }
+
+      table { border-collapse: collapse; }
+      th, td { padding: 3px 5px; }
+      thead th {
+        font-size: 11px;
+        color: #7a83a8;
+        font-weight: 500;
+        writing-mode: horizontal-tb;
+        white-space: nowrap;
+      }
+      tbody th {
+        text-align: right;
+        font-size: 12px;
+        color: #4deeea;
+        font-weight: 600;
+        white-space: nowrap;
+        padding-right: 10px;
+      }
+      tbody th small { display: block; color: #5b6488; font-weight: 400; font-size: 10px; }
+      canvas {
+        image-rendering: pixelated;
+        display: block;
+        background: linear-gradient(180deg, #171d36 0%, #1a2140 89%, #202a52 89%, #1c2445 100%);
+        border-radius: 3px;
+      }
+      .maskmode canvas { background: #07091a; }
+      .fps { font-size: 11px; color: #5b6488; font-family: ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <h1><span class="en">CYBER-CAT</span> · 渲染核心验证页</h1>
+    <div class="note">
+      ticket 02 的人工验收面：<b>七个品种 × 十个基础动作</b>并排展示，用于确认端口后的渲染核心与
+      prototype 表现一致。逐像素等价性已由 <b>port-equivalence 测试</b>自动保证，这一页看的是
+      「像不像猫」这类只能人眼判断的部分。<br />
+      勾掉右侧的微动作开关可以逐个感受眨眼、耳抖、歪头、尾巴摆动、呼吸对「活着的感觉」的贡献。<br />
+      <b>掩膜视图</b>把 alpha 掩膜画成白色 - 白色区域就是「点得到猫」的范围。请确认影子、Zzz
+      气泡、落地尘土、食盆都<b>不在</b>白色区域内（ADR 0006）。
+    </div>
+
+    <div class="bar">
+      <div class="group">
+        <span>SEED</span>
+        <input type="number" id="seed" value="20260728" />
+        <button id="reroll">🎲 换一批</button>
+      </div>
+      <div class="group">
+        <span>微动作</span>
+        <label><input type="checkbox" id="m-breath" checked /> 呼吸</label>
+        <label><input type="checkbox" id="m-blink" checked /> 眨眼</label>
+        <label><input type="checkbox" id="m-ear" checked /> 耳抖</label>
+        <label><input type="checkbox" id="m-tilt" checked /> 歪头</label>
+        <label><input type="checkbox" id="m-tail" checked /> 尾巴</label>
+      </div>
+      <div class="group">
+        <span>视图</span>
+        <label><input type="checkbox" id="maskView" /> 掩膜视图</label>
+        <label>缩放
+          <select id="scale">
+            <option value="2">2×</option>
+            <option value="3" selected>3×</option>
+            <option value="4">4×</option>
+          </select>
+        </label>
+      </div>
+      <div class="group">
+        <span class="fps" id="fps">–</span>
+      </div>
+    </div>
+
+    <table id="grid"></table>
+    <script type="module" src="./harness.ts"></script>
+  </body>
+</html>
