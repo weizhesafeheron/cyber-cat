@@ -23,3 +23,10 @@ dist-ssr/
 # 本地环境
 .env
 .env.local
+
+# spike 探针的编译产物
+spike/**/probe
+spike/**/diag
+spike/**/diag2
+spike/**/diag3
+spike/**/*.dSYM/

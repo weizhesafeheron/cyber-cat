@@ -13,8 +13,13 @@ Windows 实机实测（[报告](../research/2026-07-29-windows-transparent-windo
 1. **透明像素不会自动穿透。** 默认状态下，窗口会截获落在完全透明区域上的点击，下层窗口收不到。也就是说一个 400×300 的宠物窗口会在用户桌面上挖出一块 400×300 的死区。
 2. **`setIgnoreCursorEvents` 是整窗一刀切。** 开启后连猫本体都不可点；Electron 的 `{forward: true}` 只额外转发 `mousemove`，不恢复区域点击。实测 Win32 扩展样式确认开启后窗口带上了 `WS_EX_TRANSPARENT`。
 
-macOS 侧机制相同（`NSWindow.ignoresMouseEvents` 同样是整窗属性，透明视图仍占据其 frame 并接收点击），因此这不是 Windows 特有问题，而是两个平台共有的约束。
-**macOS 侧尚未实机验证，但设计上按同样约束处理。**
+macOS 侧已于 2026-07-29 实机验证（[报告](../research/2026-07-29-macos-hit-test/report.md)），结论相同但**根因不同**：
+
+- `NSWindow.ignoresMouseEvents` 确实是整窗属性，与 Windows 一致。
+- 但 macOS 的窗口层**原生支持逐像素 alpha 命中测试** - 一个透明 `NSWindow` 的完全透明像素上的点击会自然穿透。这一点用自绘 `NSView`（左半不透明、右半透明）实测确认。
+- **破坏这个原生行为的是 WKWebView**，不是窗口。WKWebView 无条件截获整个窗口区域，与它渲染的 CSS 像素是否透明无关；试过四种透明配置组合（含 wry 实际采用的 `drawsBackground = false`），无一例外。
+
+由于 Tauri 经 wry 在 macOS 上使用 WKWebView，实际行为与 Windows 一致，因此本决策成立。
 
 ## 决策
 
@@ -24,6 +29,7 @@ macOS 侧机制相同（`NSWindow.ignoresMouseEvents` 同样是整窗属性，�
 - 未命中 → 开启穿透，点击落到下层窗口。
 - 窗口尺寸尽量贴合猫的包围盒，缩小透明死区，降低误判窗口期的影响。
 - Windows 上优先改用原生 `WM_NCHITTEST` 或窗口 region 做命中测试，以消除轮询竞争；轮询版本仅作为初期实现。
+- **macOS 上必须提前于光标抵达切换，不能在点击那一刻反应式切换。** `ignoresMouseEvents` 的赋值不是同步生效的，实测有最长约 5ms 的传播延迟。命中测试应基于带外扩边距的掩膜（hysteresis），边距按光标速度动态调整；不要在 `mouseDown` 里现场切换，那时已经太晚。
 
 ## 理由
 
@@ -45,4 +51,4 @@ macOS 侧机制相同（`NSWindow.ignoresMouseEvents` 同样是整窗属性，�
 - 渲染层必须把 alpha 掩膜作为公开产物暴露给窗口层，而不只是画到 canvas 上。
 - 命中形状必须与动画帧同步，不能用上一帧的掩膜判断当前帧。
 - 「光标即逗猫棒」（[MVP 特效 3.2](../mvp-scope.md)）依赖持续获取光标位置，与本方案共用同一套光标追踪，实现上应合并为一处。
-- macOS 侧的实际穿透行为需在开发早期验证，若与预期不符需要单独设计降级方案。
+- **存在一条真实的优化路径**：既然 macOS 的窗口层原生支持逐像素 alpha 穿透，只是被 WKWebView 挡住了，那么如果将来把猫的渲染从 webview 移到原生图层，macOS 上就能免费拿到逐像素穿透、不再需要动态开关与边距。代价是渲染层要分平台，当前不做，但这条路存在。
