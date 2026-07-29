@@ -123,9 +123,6 @@ function applyToggles(pose: Pose): void {
 /** 实验台里一次性动作播完之后停顿多久再重播。 */
 const REPLAY_PAUSE_S = 1;
 
-/** 实验台里一次性动作播完之后停顿多久再重播。 */
-const REPLAY_PAUSE_S = 1;
-
 let last = performance.now();
 let frames = 0;
 let fpsClock = performance.now();
@@ -140,10 +137,6 @@ function frame(now: number): void {
     slot.t += dt;
     // 一次性动作（打哈欠、伸懒腰、扑跳）播完会停在最后一帧 - 那是桌面上要的行为，
     // 但实验台是拿来反复看的，所以这里歇一秒重播一遍。
-    const def = ACTIONS[slot.action];
-    if (!def.loop && slot.t > (def.period ?? 0) + REPLAY_PAUSE_S) slot.t = 0;
-    // 一次性动作（打哈欠、伸懒腰、扑跳）播完会停在最后一帧 - 那是桌面上要的行为，
-    // 但实验台是用来反复看的，所以这里歇一秒重播一遍。
     const def = ACTIONS[slot.action];
     if (!def.loop && slot.t > (def.period ?? 0) + REPLAY_PAUSE_S) slot.t = 0;
     const mi = stepMicro(slot.micro, dt, {
