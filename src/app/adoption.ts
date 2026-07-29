@@ -36,7 +36,21 @@ export interface AdoptionGate {
 export async function ensureWorld(gate: AdoptionGate): Promise<World> {
   const saved = await gate.loadWorld();
   if (saved) return saved;
+  return adoptNewCat(gate);
+}
 
+/**
+ * 走一遍领养、把新猫存盘并返回。**不读存档。**
+ *
+ * 与 ensureWorld 分开是告别页要用（issue #13 的「可无惩罚地领养新猫」）：
+ * 那时存档里躺着的是刚死掉的那只猫，走 ensureWorld 只会把它又读回来。
+ * 「有存档就接着养」这条规则只对**启动**成立，用户明确要求再养一只时不成立。
+ *
+ * 新猫立刻存一次盘，理由同上：领养是用户花了心思的一步。
+ * 这一步同时把旧猫那份世界存档整份覆盖掉 - 旧猫的一生此时已经在猫的档案里
+ * （见 app/farewell.ts 的入档），所以覆盖不丢东西。
+ */
+export async function adoptNewCat(gate: AdoptionGate): Promise<World> {
   const identity = await gate.adopt();
   const world = createWorld({
     breed: identity.breed,

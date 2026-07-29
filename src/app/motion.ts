@@ -380,7 +380,8 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
   const { dt, now, cat, geom, rnd } = input;
 
   if (input.action === null) {
-    // 猫已离开。位置不再推进，爪印自然淡完（告别页是 ticket 12 的事）。
+    // 猫已离开。位置不再推进，爪印自然淡完；桌面上从此空着，
+    // 该看的东西在告别页窗口里（app/farewell.ts）。
     return {
       ...state,
       playing: null,

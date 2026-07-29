@@ -23,21 +23,41 @@ pub const ADOPT_LABEL: &str = "adopt";
 #[derive(Default)]
 pub struct AdoptionDone(AtomicBool);
 
+/// 用户放弃领养时是否该退出应用。见 `open_adoption` 的 `exit_on_cancel`。
+#[derive(Default)]
+pub struct ExitOnCancel(AtomicBool);
+
 /// 打开领养窗口。
 ///
 /// 尺寸由前端给：窗口该多大取决于里面放什么，那是呈现层的判断
 /// （src/adopt/constants.ts）。这里只负责居中建窗。
+///
+/// `exit_on_cancel` 是「用户关掉这个窗口时应用该不该退出」，由前端给，
+/// 因为只有它知道**现在有没有别的路可走**：
+/// - 首次启动：没有猫，宠物窗口还是隐藏的，留一个只有托盘的空进程会让人以为
+///   应用坏了 → 退出。
+/// - 告别页之后再领养：桌面上有托盘，托盘里还能再打开告别页 → 用户只是改了主意，
+///   什么都不该发生。这条路上退出应用等于因为一次犹豫就把整个应用关掉。
 #[tauri::command]
-pub fn open_adoption(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+pub fn open_adoption(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+    exit_on_cancel: bool,
+) -> Result<(), String> {
     // 重复调用不再建一个：宠物窗口只会调一次，但让它幂等比让它出两个窗口好。
     if let Some(existing) = app.get_webview_window(ADOPT_LABEL) {
         let _ = existing.set_focus();
         return Ok(());
     }
 
-    // 每次开窗都从「还没走完」开始。现在只会开一次，但告别页之后领养新猫
-    // （ticket 12）会第二次走到这里，那时残留的旗子会让「关掉窗口就退出」失效。
+    // 每次开窗都从「还没走完」开始。**告别页之后领养新猫会第二次走到这里**
+    // （farewell.rs），那时残留的旗子会让「关掉窗口就退出」失效 -
+    // 用户关掉第二次的领养窗口，应用会以为领养成功而留下来，但没有新猫。
     app.state::<AdoptionDone>().0.store(false, Ordering::SeqCst);
+    app.state::<ExitOnCancel>()
+        .0
+        .store(exit_on_cancel, Ordering::SeqCst);
 
     // macOS 上应用平时是附属模式（不进程序坞、不进 Cmd-Tab），而领养要打字。
     // 附属应用的窗口拿键盘焦点是不可靠的，所以领养期间临时切回普通应用。
@@ -63,13 +83,17 @@ pub fn open_adoption(app: AppHandle, width: f64, height: f64) -> Result<(), Stri
         if !matches!(event, WindowEvent::Destroyed) {
             return;
         }
-        // 领养没走完就被关掉：此刻没有猫，宠物窗口还是隐藏的，留着一个只有托盘的
-        // 空进程只会让用户以为应用坏了。直接退出，下次启动重新遇见一只猫。
         if handle.state::<AdoptionDone>().0.load(Ordering::SeqCst) {
             return;
         }
-        eprintln!("[cyber-cat] 领养窗口被关掉了，没有猫可养，退出");
+        // 领养没走完就被关掉。切回附属模式一定要做（否则程序坞里留下一个图标），
+        // 退不退出则看 exit_on_cancel。
         platform::set_foreground_app(&handle, false);
+        if !handle.state::<ExitOnCancel>().0.load(Ordering::SeqCst) {
+            eprintln!("[cyber-cat] 领养窗口被关掉了，保持运行 - 托盘里还能再打开告别页");
+            return;
+        }
+        eprintln!("[cyber-cat] 领养窗口被关掉了，没有猫可养，退出");
         handle.exit(0);
     });
 

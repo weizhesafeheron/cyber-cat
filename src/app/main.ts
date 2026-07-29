@@ -25,20 +25,23 @@ import type { RenderIntent, UserAction, World } from '../world/index.js';
 import { ADOPT_H, ADOPT_W } from '../adopt/constants.js';
 import { beginAdoption } from '../adopt/flow.js';
 import type { AdoptedIdentity } from '../adopt/identity.js';
-import { ensureWorld, requestAdoption } from './adoption.js';
+import { adoptNewCat, ensureWorld, requestAdoption } from './adoption.js';
 import type { AdoptionGate } from './adoption.js';
 import { CursorTracker } from './cursor.js';
 import { CatDisplay } from './display.js';
+import { FarewellHost, tauriFarewellPorts } from './farewell.js';
 import {
   contentReady,
   inTauri,
   moveStage,
+  onAdoptAnother,
   openAdoption,
   probeCursor,
   probeStage,
   setPassThrough,
   waitForAdopted,
 } from './ipc.js';
+import { notifyIfSick, tauriNotifyPorts } from './notify.js';
 import {
   ALL_MICRO_ON,
   applyMicroSwitches,
@@ -142,6 +145,15 @@ let motion: MotionState = createMotion(geometry(), { x: work.x, y: work.y });
  */
 const props = new PropsHost(geometry());
 
+/**
+ * 猫死了之后的那一半（issue #13）：旧猫入档、弹告别页、从托盘再打开它。
+ *
+ * 每帧都会问它一次，但它只在「刚发现这只猫死了」时真的做事 - 判定与幂等都在
+ * app/farewell.ts，那里有测试。「刚发现」而不是「刚死亡」：猫也可能死在离线期间，
+ * 甚至上次运行时就死了（用户直接关掉了告别页）。
+ */
+const farewell = new FarewellHost(tauriFarewellPorts);
+
 /** dpr 或窗口尺寸变化时重算画布与爪印层。两块画布的像素格必须一样大。 */
 function applyGeometry(): void {
   display.applyScale();
@@ -233,7 +245,7 @@ const passthrough = new PollingPassthrough(tracker, setPassThrough);
  * 想走路」，走到了之后该站着歇一会 - 那个判断需要帧时钟，属于运动层（ADR 0007）。
  *
  * 猫已离开时返回 null 并清空画布 - 不能留着上一帧，那会变成一只不动的僵尸猫。
- * 告别页是 ticket 12 的事。
+ * 那之后桌面上什么都没有，该看的东西在告别页窗口里（app/farewell.ts）。
  */
 function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult | null {
   if (motion.playing === null) {
@@ -311,6 +323,12 @@ function frame(now: number): void {
   const res = draw(intent, animDt, now);
   // 判定与渲染同一帧：掩膜是刚产出的那一份，不是上一帧的。
   if (res) passthrough.update(res, now);
+
+  // 生病发系统通知（只有这一级发，饿了不发），猫死了则入档并弹告别页。
+  // 两件都不等返回：帧循环不能等一次跨进程调用（与 setPassThrough 同一条理由）。
+  // 判定与幂等分别在 app/notify.ts 与 app/farewell.ts，这里只负责每帧问一声。
+  void notifyIfSick(r.events, world, tauriNotifyPorts);
+  void farewell.observe(world);
 
   // 有事发生就立刻存一次，其余时候按节流存 - 生病、死亡这类事件不能因为
   // 恰好在两次定时保存之间关机而丢掉。
@@ -521,6 +539,13 @@ matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('cha
 void onTrayAction((id) => {
   if (id === 'feed') enqueue({ type: 'fillBowl' });
   else if (id === 'medicate') enqueue({ type: 'medicate' });
+  // 告别页是个能关掉的窗口，而它同时是「领养新猫」的唯一入口 -
+  // 没有这一项，关掉之后用户就困在一个空桌面上了。
+  else if (id === 'memorial') {
+    void farewell.reopen().catch((err: unknown) => {
+      console.error('[cyber-cat] 打开告别页失败：', err);
+    });
+  }
   // 托盘里的两个挂件开关。挂件可隐藏，但要能再打开，所以是勾选项而不是「隐藏」。
   else if (id === 'prop-bowl') void props.toggle('bowl');
   else if (id === 'prop-bed') void props.toggle('bed');
@@ -546,13 +571,69 @@ const gate: AdoptionGate = {
     }
     return requestAdoption({
       waitForAdopted,
-      openAdoption: () => openAdoption(ADOPT_W, ADOPT_H),
+      // 放弃领养要不要退出应用，取决于此刻有没有别的路可走，而 `booted` 正好是
+      // 「猫已经就位过」：首次启动时还是 false（没有猫，退出），
+      // 告别页之后再领养时是 true（托盘里还能再打开告别页，不该退出）。
+      openAdoption: () => openAdoption(ADOPT_W, ADOPT_H, !booted),
     });
   },
   saveWorld,
   now: Date.now,
   tzOffsetMinutes,
 };
+
+/** 领养流程正在进行。用户可能连点两次「再养一只」，或者托盘与告别页各点一次。 */
+let adopting = false;
+
+/**
+ * 告别之后再养一只（issue #13 的「可无惩罚地领养新猫」）。
+ *
+ * 走 adoptNewCat 而不是 ensureWorld：那个函数「有存档就接着养」，
+ * 而此刻存档里躺着的正是刚死掉的那只猫，读回来等于什么都没发生。
+ *
+ * 旧猫留下的运行期状态必须一起清掉。它们都**不在存档里**（运动层、待结算动作、
+ * 即时反馈的截止时刻），所以换猫时没有任何机制会自动重置 - 不清的话新猫会顶着
+ * 上一只的动作出场，甚至立刻结算掉一个用户当时对旧猫做的动作。
+ */
+async function adoptAnother(): Promise<void> {
+  if (adopting) {
+    // 领养已经在进行中。把窗口重新开出来（open_adoption 是幂等的，已经开着就聚焦）-
+    // 用户可能把领养窗口关掉了，然后从托盘再打开告别页又点了一次。
+    //
+    // **但不再挂第二条等待。** `waitForAdopted` 是一条 once 监听，关掉窗口不会让它
+    // 落地，它仍然活着等着同一个事件；再挂一条的话两条会在同一个事件上一起落地，
+    // 结果是连着领养两只猫，第二只当场把第一只覆盖掉。
+    // 反过来说，正因为原来那条等待还活着，重新开出来的窗口选完猫照样能走通。
+    await openAdoption(ADOPT_W, ADOPT_H, false).catch((err: unknown) => {
+      console.error('[cyber-cat] 重新打开领养窗口失败：', err);
+    });
+    return;
+  }
+  adopting = true;
+  try {
+    install(await adoptNewCat(gate));
+    // 让下一次死亡重新走一遍入档与告别页。
+    farewell.reset();
+    pending = [];
+    reactionUntilMs = 0;
+    animT = 0;
+    lastWallMs = Date.now();
+
+    const intent = renderIntentOf(world, cat);
+    primeMotion(intent.action);
+    currentAction = motion.playing;
+    draw(intent, 0, performance.now());
+    await pushTrayStatus(trayStatus(world, intent.status));
+  } catch (err) {
+    // 领养失败**不兜底**给一只猫（与 ensureWorld 同一条理由）：
+    // 那会让用户拿到一只不是他选的猫。旧猫的告别页仍能从托盘再打开，还有路可走。
+    console.error('[cyber-cat] 领养新猫失败：', err);
+  } finally {
+    adopting = false;
+  }
+}
+
+void onAdoptAnother(() => void adoptAnother());
 
 /**
  * 启动顺序：确定是哪只猫 → 画出第一帧 → 摆好舞台位置 → 通知 Rust 显示窗口

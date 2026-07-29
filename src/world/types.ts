@@ -213,7 +213,8 @@ export interface WorldInputs {
 export interface RenderIntent {
   /**
    * 该画哪个动作，渲染层 ACTIONS 的键。
-   * null 表示猫已死亡，不该画猫（告别页是 ticket 12 的事）。
+   * null 表示猫已死亡，不该画猫 - 桌面上从此空着，
+   * 呈现改由告别页窗口承担（src/farewell/）。
    */
   action: ActionKey | null;
   /** 总体状态。托盘图标与气泡用。 */
