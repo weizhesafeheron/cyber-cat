@@ -165,6 +165,16 @@ export class PropsHost {
     // 挂件窗口起来了：把摆放与碗里的份数补发给它。挂件窗口会重试到收到回音为止，
     // 所以这里不需要关心两个 webview 谁先加载完。
     void this.ports.listenEvent<PropKind>(PROP_EVENT_READY, (kind) => {
+      // **读档之前一个都不摆。** 那时 this.state 还是构造函数那份兜底值，
+      // 它把「宠物窗口自己的客户区」当成了桌面（648×240），照它摆出去的挂件会
+      // 落在屏幕上方一个既没有地面也没有猫的位置。
+      //
+      // 正常启动时 boot() 几毫秒后就纠正了，看不出来；**但领养流程会停在那里等
+      // 用户挑猫**，于是那个错位置持续整个领养过程 - 真机上就是这么撞见的。
+      // 更根本的是：领养还没完成时压根不该有挂件，那时还没有猫。
+      //
+      // 不需要在这里补发：boot() 自己会把两件都摆一遍（apply）。
+      if (!this.booted) return;
       void this.applyOne(kind, true);
       void this.sync(kind);
     });

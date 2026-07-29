@@ -127,6 +127,26 @@ describe('去重只跳过真的没变的那一个', () => {
     expect(added.some((x) => x.kind === 'bed')).toBe(true);
   });
 
+  it('读档之前报到一律不摆 - 那时的兜底几何会把挂件摆到屏幕上方', async () => {
+    // 真机上撞到的：领养流程停在那里等用户挑猫，而挂件窗口一加载就报到，
+    // 于是按「宠物窗口自己的客户区当桌面」那份兜底值摆了出来，落在屏幕上方
+    // 一个既没有地面也没有猫的位置，并且持续整个领养过程。
+    const io = ports();
+    const host = new PropsHost(GEOM, io.p);
+    host.listen(() => undefined);
+
+    // 还没 boot：两个挂件都抢先报到
+    io.handlers.get(PROP_EVENT_READY)?.('bowl');
+    io.handlers.get(PROP_EVENT_READY)?.('bed');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(io.placed, '读档之前就把挂件摆出去了').toHaveLength(0);
+
+    // boot 之后自己会把两件都摆一遍，不需要报到那条路补发
+    await host.boot(GEOM);
+    expect(io.placed.map((x) => x.kind).sort()).toEqual([...PROP_KINDS].sort());
+  });
+
   it('切换可见性会真的下发一次', async () => {
     const io = ports();
     const host = new PropsHost(GEOM, io.p);
