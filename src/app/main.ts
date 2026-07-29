@@ -2,10 +2,11 @@
  * 宠物窗口的入口。
  *
  * 职责边界：这个文件是平台层，负责取时钟、读写存档、驱动帧循环、刷新托盘、
- * 以及命中测试与点击穿透的编排。
+ * 编排命中测试与点击穿透、以及把运动层算出来的位置落到窗口和画布上。
  * **猫的状态一步都不在这里演化** - 全部经由世界层的 `step`（ADR 0001）。
+ * **逐帧位置一步都不回写世界层** - 那条通路会破坏离线等价性（ADR 0007）。
  *
- * 领养流程见 ticket 07，自主行为与逗猫见 ticket 06，真正的抚摸见 ticket 10。
+ * 领养流程见 ticket 07，真正的抚摸见 ticket 10，爬前台窗口见 ticket 12。
  */
 import {
   ACTIONS,
@@ -18,13 +19,28 @@ import {
   stepMicro,
 } from '../render/index.js';
 import type { ActionKey, RenderResult } from '../render/index.js';
+import { clamp } from '../render/rng.js';
 import { MS_PER_HOUR, createWorld, renderIntentOf, step, worldNow } from '../world/index.js';
 import type { RenderIntent, UserAction, World } from '../world/index.js';
 import { CursorTracker } from './cursor.js';
 import { CatDisplay } from './display.js';
-import { inTauri, petReady, probeCursor, setPassThrough } from './ipc.js';
+import { inTauri, moveStage, petReady, probeCursor, probeStage, setPassThrough } from './ipc.js';
+import {
+  ALL_MICRO_ON,
+  applyMicroSwitches,
+  catInStage,
+  createMotion,
+  faceDir,
+  microOptsFor,
+  pawsInStage,
+  settleStage,
+  stepMotion,
+} from './motion.js';
+import type { MicroSwitches, MotionState, ScreenRect, StageGeometry } from './motion.js';
 import { PollingPassthrough } from './passthrough.js';
+import { PawCanvas } from './paws.js';
 import { loadWorld, onTrayAction, pushTrayStatus, saveWorld } from './persist.js';
+import { TARGET_SCALE } from './stage.js';
 import { trayStatus } from './status.js';
 
 /** 尚无领养流程（ticket 07），先写死品种与 Seed。 */
@@ -32,15 +48,20 @@ const PLACEHOLDER_BREED = 'orange' as const;
 const PLACEHOLDER_SEED = 20260728;
 const PLACEHOLDER_NAME = '小猫';
 
-/** 目标逻辑放大倍数。实际设备缩放会取整并按窗口钳制，见 display.ts。 */
-const TARGET_SCALE = 3;
-
 /** 单帧用于推进动画相位的最大时长。掉帧时不要让动作跳一大段。 */
 const MAX_ANIM_DT = 0.05;
 
 /** 存档与托盘的刷新节流。 */
 const SAVE_INTERVAL_MS = 30_000;
 const TRAY_INTERVAL_MS = 5_000;
+
+/**
+ * 重读舞台几何的间隔。
+ *
+ * 工作区会变（程序坞显隐、改分辨率、插拔显示器），缓存下来猫迟早会走到屏幕外
+ * 或者踩在任务栏底下。两秒一次的开销可以忽略 - 光标探测每 16ms 就是一次同类调用。
+ */
+const STAGE_METRICS_INTERVAL_MS = 2_000;
 
 /**
  * 离线补算的时间上限。
@@ -69,7 +90,46 @@ const REACTION_MS = (ACTIONS[REACTION].period ?? 1) * 1000;
 
 const canvas = document.getElementById('cat') as HTMLCanvasElement;
 const display = new CatDisplay(canvas, TARGET_SCALE);
+const paws = new PawCanvas(document.getElementById('paws') as HTMLCanvasElement);
 const renderer = new CatRenderer();
+
+/**
+ * 桌面可用区，屏幕逻辑坐标。
+ *
+ * 初值假装舞台原点就是桌面原点：直接用浏览器打开页面调试时没有 Rust 侧可问，
+ * 这个假设让舞台内的一切仍然自洽（猫在页面里走，只是走不出页面）。
+ * 真机上 bootStage 会用实测值覆盖它。
+ */
+let work: ScreenRect = { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
+
+/**
+ * 五个微动作的总开关。
+ *
+ * 默认全开。逐个关掉对比是 prototype ② 验证过的做法，真机验收时用
+ * `__cyberCat.micro({ tail: false })` 关掉再看 - 微动作层是「活着的感觉」
+ * 的主要来源，这个对比是判断它有没有真的接上的唯一办法。
+ */
+let micros: MicroSwitches = ALL_MICRO_ON;
+
+function geometry(): StageGeometry {
+  return {
+    w: window.innerWidth,
+    h: window.innerHeight,
+    spriteScale: display.spriteScale,
+    work,
+  };
+}
+
+/** 运动层状态。**不进存档** - 重启后猫出现在一个合理位置即可（ADR 0007）。 */
+let motion: MotionState = createMotion(geometry(), { x: work.x, y: work.y });
+
+/** dpr 或窗口尺寸变化时重算画布与爪印层。两块画布的像素格必须一样大。 */
+function applyGeometry(): void {
+  display.applyScale();
+  paws.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
+}
+
+applyGeometry();
 
 /** 本地时区偏移，分钟（东八区 = 480）。JS 的 getTimezoneOffset 符号相反。 */
 const tzOffsetMinutes = (): number => -new Date().getTimezoneOffset();
@@ -108,6 +168,7 @@ let lastFrameMs = performance.now();
 let lastWallMs = Date.now();
 let lastSaveMs = 0;
 let lastTrayMs = 0;
+let lastMetricsMs = 0;
 
 /** 最近画出去的那一帧。命中测试必须用当前帧的掩膜（ADR 0006）。 */
 let lastFrame: RenderResult | null = null;
@@ -117,11 +178,15 @@ let reactionUntilMs = 0;
 /**
  * 客户区 CSS 坐标 → 精灵像素坐标。
  *
- * 直接量 canvas 的布局矩形，不自己算缩放：猫是 flex 贴底居中的，canvas 的位置
- * 与尺寸由 CSS 和 display.ts 的取整规则共同决定，在这里重算一遍等于把布局规则
- * 抄第二份，两份一旦不同步命中区就会整体偏移。
- * 每次采样都读一次矩形是有意的 - 页面没有布局变动，读取走缓存；换来跨屏拖动、
- * 系统缩放变化后自动正确。
+ * 舞台化之后光标位置与猫的位置**不再等同**（ADR 0007）：猫只占舞台的三分之一，
+ * 在里面来回走。这里之所以不用改，是因为它量的是 canvas 自己的布局矩形 -
+ * `display.place()` 写的 transform 会体现在这个矩形上，横向偏移自动被吸收。
+ *
+ * 反过来说：**猫在舞台内的位置只能有一个来源。** 在这里按运动层的 x 重算一遍
+ * 等于把定位规则抄第二份，两份一旦不同步（比如 place 里的整像素对齐）命中区就会
+ * 整体偏移，而且只在真机上看得出来。
+ *
+ * 每次采样都读一次矩形是有意的 - 换来跨屏拖动、系统缩放变化后自动正确。
  */
 function toSprite(clientX: number, clientY: number): { x: number; y: number } {
   const r = canvas.getBoundingClientRect();
@@ -132,27 +197,38 @@ const tracker = new CursorTracker(probeCursor, toSprite);
 const passthrough = new PollingPassthrough(tracker, setPassThrough);
 
 /**
- * 按世界层的意图画一帧，返回画出去的那一帧供命中测试用。
+ * 画一帧，返回画出去的那一帧供命中测试用。
+ *
+ * **播哪个动作由运动层决定，不是直接用 intent.action。** 世界层说的是「这半小时
+ * 想走路」，走到了之后该站着歇一会 - 那个判断需要帧时钟，属于运动层（ADR 0007）。
  *
  * 猫已离开时返回 null 并清空画布 - 不能留着上一帧，那会变成一只不动的僵尸猫。
  * 告别页是 ticket 12 的事。
  */
 function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult | null {
-  if (intent.action === null) {
+  if (motion.playing === null) {
     display.clear();
+    paws.clear();
     lastFrame = null;
     return null;
   }
   const reacting = nowMs < reactionUntilMs;
-  const action = reacting ? REACTION : intent.action;
+  const action = reacting ? REACTION : motion.playing;
   const localT = reacting ? (REACTION_MS - (reactionUntilMs - nowMs)) / 1000 : animT;
 
-  const mi = stepMicro(micro, animDt, intent.micro);
+  const mi = stepMicro(micro, animDt, microOptsFor(micros, intent.micro));
   const base = ACTIONS[action].make(localT, cat, mi);
-  // intent.pose 始终叠在最上面：生病、睡着这类状态覆盖不该被即时反馈吃掉。
-  const res = renderer.render(cat, { ...base, ...intent.pose });
+  // 叠加顺序是有讲究的：
+  //   intent.pose 在动作之上 - 生病、睡着这类状态覆盖不该被动作或即时反馈吃掉；
+  //   faceDir 在合并之后 - 它要翻转的 dx / legOx 可能来自任何一层；
+  //   微动作开关最后 - 关掉尾巴就是最终结果里尾巴不摆，不管谁设过它。
+  const posed = applyMicroSwitches(faceDir({ ...base, ...intent.pose }, motion.dir), micros);
+  const res = renderer.render(cat, posed);
   lastFrame = res;
   display.paint(res);
+  // 猫在舞台内的位置与爪印每帧都要跟着走，否则猫会站在原地「走路」。
+  display.place(catInStage(motion));
+  paws.paint(pawsInStage(motion, nowMs), display.scale, display.pixelRatio);
   return res;
 }
 
@@ -168,8 +244,22 @@ function frame(now: number): void {
   world = r.world;
   const intent = r.renderIntent;
 
-  if (intent.action !== currentAction) {
-    currentAction = intent.action;
+  // 运动层读 intent，**不写回去**。世界是状态的唯一权威（ADR 0007）。
+  //
+  // dt 乘上 timeScale：病后虚弱时动作会放慢，地面速度必须跟着放慢，
+  // 否则腿的相位与实际位移脱节，走起来是滑步。
+  motion = stepMotion(motion, {
+    dt: animDt * intent.timeScale,
+    now,
+    action: intent.action,
+    cat,
+    geom: geometry(),
+    rnd: Math.random,
+  });
+  requestStageMove();
+
+  if (motion.playing !== currentAction) {
+    currentAction = motion.playing;
     animT = 0;
   } else {
     animT += animDt * intent.timeScale;
@@ -189,8 +279,82 @@ function frame(now: number): void {
     lastTrayMs = wall;
     void pushTrayStatus(trayStatus(world, intent.status));
   }
+  if (wall - lastMetricsMs > STAGE_METRICS_INTERVAL_MS) {
+    lastMetricsMs = wall;
+    void refreshStage();
+  }
 
   requestAnimationFrame(frame);
+}
+
+/** 上一次下发给窗口的舞台位置。运动层只在滚动的那一帧改这个值。 */
+let placed: { x: number; y: number } | null = null;
+/** 上一次下发的时刻（Date.now），用来避免与几何校正打架。 */
+let placedAtMs = 0;
+let moveFailures = 0;
+
+/**
+ * 把运动层算出的舞台位置落到窗口上。
+ *
+ * 运动层在决定滚动的那一帧就把 `stage` 改掉了 - 猫的屏幕位置是「舞台原点 +
+ * 舞台内位置」，两项必须同时改。所以这里是「跟上」而不是「批准」：
+ * 分两步改（先挪窗口、生效后再改画布偏移）看起来更稳，实际是**必然**会看到
+ * 一次跳动，因为窗口挪好之后画布还停在旧偏移上，至少差一帧。
+ */
+function requestStageMove(): void {
+  const at = motion.stage;
+  if (placed && placed.x === at.x && placed.y === at.y) return;
+  placed = { x: at.x, y: at.y };
+  placedAtMs = Date.now();
+  void moveStage(at.x, at.y).catch((err) => {
+    // 挪不动的后果由下一次 refreshStage 兜住：它会把运动层的舞台原点纠回真实值，
+    // 猫于是被 roamBounds 限制在当前窗口内活动 - 仍然可见、可点。
+    moveFailures++;
+    if (moveFailures <= 3) {
+      console.error('[cyber-cat] 移动舞台窗口失败，猫的活动范围将被限制在当前窗口内：', err);
+    }
+  });
+}
+
+/**
+ * 重读舞台几何。
+ *
+ * 工作区随时会变（程序坞显隐、改分辨率），所以不能只在启动时读一次。
+ * 顺便校正舞台原点：移动窗口万一失败，运动层会一直以为舞台在新位置。
+ * 刚下发过的那一小段时间不校正 - 那时读到的可能还是旧位置。
+ */
+async function refreshStage(): Promise<void> {
+  const m = await probeStage().catch(() => null);
+  if (!m) return;
+  work = { x: m.work_x, y: m.work_y, w: m.work_w, h: m.work_h };
+  if (Date.now() - placedAtMs > 500) {
+    motion = settleStage(motion, { x: m.x, y: m.y });
+    placed = { x: m.x, y: m.y };
+  }
+}
+
+/**
+ * 启动时把舞台摆到桌面下沿。
+ *
+ * 放在窗口显示**之前**：窗口以 visible: false 启动，此时挪它没人看得见；
+ * 显示之后再挪，用户会看到猫从屏幕中间跳到底下。
+ * 这一步失败不能阻塞窗口显示 - 猫留在默认位置也比不出现好，所以自己吞掉错误。
+ */
+async function bootStage(): Promise<void> {
+  try {
+    const m = await probeStage();
+    if (!m) return; // 浏览器里调试：舞台就是页面本身
+    work = { x: m.work_x, y: m.work_y, w: m.work_w, h: m.work_h };
+    const g = geometry();
+    const x = clamp(m.x, work.x, work.x + Math.max(0, work.w - g.w));
+    const y = work.y + work.h - g.h;
+    await moveStage(x, y);
+    motion = createMotion(g, { x, y });
+    placed = { x, y };
+    placedAtMs = Date.now();
+  } catch (err) {
+    console.error('[cyber-cat] 初始化舞台位置失败，猫会留在窗口默认位置：', err);
+  }
 }
 
 let looping = false;
@@ -212,6 +376,23 @@ function startLoop(): void {
   // 真跑起轮询只会每 16ms 拿到一个 null 把 DOM 采样冲掉。
   if (inTauri) tracker.start();
   requestAnimationFrame(frame);
+}
+
+/**
+ * 用当前意图把运动状态推一帧（dt = 0）。
+ *
+ * 启动路径上的两次首帧重画需要它：`playing` 是运动层算出来的，
+ * 不先推一帧就还是 null，draw 会以为猫已离开而清空画布。
+ */
+function primeMotion(action: ActionKey | null): void {
+  motion = stepMotion(motion, {
+    dt: 0,
+    now: performance.now(),
+    action,
+    cat,
+    geom: geometry(),
+    rnd: Math.random,
+  });
 }
 
 /**
@@ -244,7 +425,8 @@ async function bootWorld(): Promise<void> {
   await saveWorld(world);
   await pushTrayStatus(trayStatus(world, r.renderIntent.status));
   // 补算之后世界可能已经换了姿态，先把首帧重画一次再启动循环。
-  currentAction = r.renderIntent.action;
+  primeMotion(r.renderIntent.action);
+  currentAction = motion.playing;
   animT = 0;
   draw(r.renderIntent, 0, performance.now());
 }
@@ -273,33 +455,55 @@ window.addEventListener('pointerdown', (e) => {
 window.addEventListener('pointermove', (e) => tracker.observe(e.clientX, e.clientY));
 
 // 跨屏拖动或系统缩放变化时重算设备缩放，保持像素锐利
-window.addEventListener('resize', () => display.applyScale());
+window.addEventListener('resize', () => applyGeometry());
 matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('change', () =>
-  display.applyScale(),
+  applyGeometry(),
 );
+
+/**
+ * 真机验收用的调试钩子。
+ *
+ * 微动作层的贡献只能靠「关掉再看」判断（prototype ② 的做法），而这五个开关
+ * 没有界面入口 - 有界面入口反而是产品噪音。挂在这里让验收时能在 devtools 里
+ * `__cyberCat.micro({ tail: false })`。
+ */
+(window as unknown as { __cyberCat: unknown }).__cyberCat = {
+  micro: (patch: Partial<MicroSwitches>): MicroSwitches => {
+    micros = { ...micros, ...patch };
+    return micros;
+  },
+  motion: (): MotionState => motion,
+};
 
 void onTrayAction((id) => {
   if (id === 'feed') enqueue({ type: 'fillBowl' });
   else if (id === 'medicate') enqueue({ type: 'medicate' });
 });
 
-// 启动顺序：同步画出第一帧 → 通知 Rust 显示窗口 → 读存档补算 → 启动动画循环。
+// 启动顺序：同步画出第一帧 → 摆好舞台位置 → 通知 Rust 显示窗口 → 读存档补算
+//          → 启动动画循环。
 //
-// **前两步与最后一步的顺序不能变。** 窗口以 visible: false 启动，而
+// **首帧、显示窗口与启动循环这三步的先后不能变。** 窗口以 visible: false 启动，而
 // requestAnimationFrame 对隐藏窗口不触发。这个约束踩过两次坑：
 //   1. 把「通知显示」放进 rAF 回调 → 死锁，窗口永远不出现（应用与托盘都正常）。
 //   2. 在窗口显示前就启动循环 → 窗口出现了但完全透明，因为画布上只有一帧
 //      在隐藏期间画的内容，循环的回调一直排队没执行。
 //
-// 读存档必须放在「通知显示」之后：它是异步的，放在前面会把首帧连带窗口一起推迟。
+// 摆舞台插在显示之前：窗口还看不见时挪它是免费的，显示之后再挪用户会看到猫从
+// 屏幕中间跳到底下。它是一次纯内存的 IPC（不读文件），推迟量可以忽略，
+// 而且失败会被自己吞掉，不会连带挡住窗口显示。
+//
+// 读存档必须放在「通知显示」之后：它要读文件，放在前面会把首帧连带窗口一起推迟。
 // 代价是存档里如果是另一只猫，首帧会有一瞬间画的是占位猫 - ticket 07 落地后
 // 占位猫消失，这个瞬间也随之消失。
 {
   const intent = renderIntentOf(world);
-  currentAction = intent.action;
+  primeMotion(intent.action);
+  currentAction = motion.playing;
   draw(intent, 0, performance.now());
 }
-void petReady()
+void bootStage()
+  .then(petReady)
   .then(bootWorld)
   .then(startLoop)
   .catch((err) => {

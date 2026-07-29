@@ -14,15 +14,31 @@
         width: 100%;
         height: 100%;
       }
-      /* 猫贴在底边居中：猫的脚在精灵的下沿，贴底才能站在"地面"上 */
+      /*
+       * 窗口是一个舞台（ADR 0007）：比猫宽得多，容纳猫加身后一小段爪印。
+       * 猫在舞台里横向移动，舞台只在猫接近边缘时整体挪一次。
+       */
       #stage {
         position: fixed;
         inset: 0;
-        display: flex;
-        align-items: flex-end;
-        justify-content: center;
       }
+      /* 爪印垫在猫下面，且不参与任何指针交互 */
+      #paws {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        image-rendering: pixelated;
+        pointer-events: none;
+      }
+      /*
+       * 猫贴在舞台下沿：猫的脚在精灵的下沿，贴底才能站在"地面"上。
+       * 横向位置由 display.place() 写 transform，不用 flex 居中 -
+       * 命中测试量的是这个 canvas 的布局矩形，位置必须只有一个来源。
+       */
       #cat {
+        position: absolute;
+        left: 0;
+        bottom: 0;
         display: block;
         image-rendering: pixelated;
         /* 禁止选中与拖拽默认行为，ticket 09 会接管拖拽 */
@@ -32,7 +48,10 @@
     </style>
   </head>
   <body>
-    <div id="stage"><canvas id="cat"></canvas></div>
+    <div id="stage">
+      <canvas id="paws"></canvas>
+      <canvas id="cat"></canvas>
+    </div>
     <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>

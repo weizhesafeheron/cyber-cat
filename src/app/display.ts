@@ -48,6 +48,7 @@ export class CatDisplay {
   private readonly img: ImageData;
   private readonly ctx: CanvasRenderingContext2D;
   private deviceScale = 1;
+  private dpr = 1;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -67,7 +68,10 @@ export class CatDisplay {
   /** dpr 变化时（跨屏拖动、系统缩放调整）重新计算。 */
   applyScale(): void {
     const dpr = window.devicePixelRatio || 1;
-    // 以窗口客户区为上限，避免画布溢出窗口把猫裁掉
+    this.dpr = dpr;
+    // 以窗口客户区为上限，避免画布溢出窗口把猫裁掉。
+    // 舞台化之后宽度方向不会再触发钳制（舞台是三倍精灵宽），高度仍然会 -
+    // 舞台高度的余量就是按这条算的，见 stage.ts。
     this.deviceScale = deviceScaleFor(this.targetScale, dpr, {
       w: window.innerWidth,
       h: window.innerHeight,
@@ -83,6 +87,30 @@ export class CatDisplay {
 
   get scale(): number {
     return this.deviceScale;
+  }
+
+  /** 一个精灵像素占多少 CSS 像素。运动层的速度与步距按它把精灵尺度换算成屏幕尺度。 */
+  get spriteScale(): number {
+    return this.deviceScale / this.dpr;
+  }
+
+  get pixelRatio(): number {
+    return this.dpr;
+  }
+
+  /**
+   * 把猫放到舞台内的某个横向位置。`centerCss` 是精灵横向中心在舞台内的 CSS x。
+   *
+   * 移动画布而不是重画整个舞台：猫只占舞台的三分之一，每帧清一整个舞台的画布
+   * 是白烧填充率。
+   *
+   * **偏移必须落在整数物理像素上。** 非整数偏移会让浏览器对整张画布重采样，
+   * 像素风立刻破功 - 这与 deviceScaleFor 取整是同一条约束的两面。
+   */
+  place(centerCss: number): void {
+    const left = centerCss - (W * this.deviceScale) / this.dpr / 2;
+    const snapped = Math.round(left * this.dpr) / this.dpr;
+    this.canvas.style.transform = `translateX(${snapped}px)`;
   }
 
   paint(res: RenderResult): void {
