@@ -132,19 +132,42 @@ describe('端口保真性：与 prototype 参照实现比对', () => {
             continue;
           }
           if (key === 'eat') {
-            // 吃饭第三处刻意偏离：食盆不再是猫的姿态字段。
-            // 挂件是独立窗口、位置由用户拖动决定（ADR 0004、ticket 08），
-            // 猫的渲染器无从知道盆在哪。低头咀嚼的形体本身一点没改。
-            expect(mine, `t=${t}`).toEqual({ ...theirs, bowl: undefined });
-            expect(Object.keys(mine), `t=${t} 不该再产出 bowl`).not.toContain('bowl');
-            // 对照组：原型确实设了这个字段，否则上面那条是空断言。
-            expect(theirs.bowl, `t=${t} 原型应当设了 bowl`).toBeGreaterThan(0);
+            // 吃饭是一处**整体**偏离，不再逐帧比对。两个理由：
+            //   1. 食盆不再是猫的姿态字段 - 挂件是独立窗口、位置由用户拖动决定
+            //      （ADR 0004、ticket 08），猫的渲染器无从知道盆在哪；
+            //   2. 真机反馈「吃饭的动作感觉不明显」，原型那版是头一直低着 + 一两个
+            //      像素的抖动，改成了三秒半一次的抬头低头。
+            // 偏离的**理由**由下面单独一条测试断言 - 那比「逐帧相等」有意义得多。
             continue;
           }
           expect(mine, `t=${t}`).toEqual(theirs);
         }
       });
     }
+
+    it('吃饭的抬头幅度必须明显大于原型 - 原型那版真机上读不出来', () => {
+      // 这条替代了原来「除 bowl 字段外逐帧相等」的比对。守的是偏离的理由本身：
+      // 「在这个像素尺度上，只靠一两个像素变化的动作等于没有动作」
+      // （art-and-motion-decisions 里舔毛那条结论，吃饭踩的是同一个坑）。
+      const cat = makeCat('orange', 20260728);
+      const mi = { eyeOpen: 1, earFlickL: 0, earFlickR: 0, tilt: 0 };
+      const swing = (make: (t: number) => { headDY?: number }): number => {
+        const ys: number[] = [];
+        for (let t = 0; t < 4; t += 0.02) ys.push(make(t).headDY ?? 0);
+        return Math.max(...ys) - Math.min(...ys);
+      };
+      const mineSwing = swing((t) => ACTIONS.eat.make(t, cat, mi));
+      const protoSwing = swing((t) => proto.ACTIONS.eat!.make(t, cat, mi));
+      // 对照组：原型确实只有两三个像素，否则下面那条是空断言。
+      expect(protoSwing, `原型的抬头幅度是 ${protoSwing}`).toBeLessThan(4);
+      expect(mineSwing, `现在的抬头幅度是 ${mineSwing}`).toBeGreaterThan(8);
+
+      // 另一半偏离：食盆不再是姿态字段。**这一条现在由类型系统保证** -
+      // Pose 上压根没有 bowl 字段了（ticket 08 删掉的），写出来就编译不过。
+      // 所以这里只留对照组，证明原型确实靠它画盆。
+      expect(proto.ACTIONS.eat!.make(0, cat, mi).bowl).toBeGreaterThan(0);
+      expect('bowl' in ACTIONS.eat.make(0, cat, mi)).toBe(false);
+    });
 
     it('原型里没有的动作只有这两个 - 清单是封闭的', () => {
       // 有这条才能保证上面那个 return 不会被顺手扩大成「有差异就跳过」。

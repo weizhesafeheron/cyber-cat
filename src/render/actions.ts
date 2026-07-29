@@ -8,6 +8,14 @@ import type { Cat, Pose } from './types.js';
  * 抬起量取到「整只猫连尾巴都离地」为止：抬得不够会读成「猫在原地站着被拽」。
  * 垂下的长度是抬起量减去 airborne，两者之差就是腿的可见长度。
  */
+/**
+ * 吃饭一个完整周期的时长，秒。
+ *
+ * 埋头约 1.9 秒、抬头嚼约 1 秒，加上两段过渡。
+ * 再快就成了啄食，再慢用户会以为动作卡住了。
+ */
+const EAT_CYCLE_S = 3.6;
+
 const HELD_LIFT = 16;
 const HELD_DANGLE = 5;
 
@@ -214,20 +222,39 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
   eat: {
     label: '吃饭',
     loop: true,
+    period: EAT_CYCLE_S,
     make(t) {
-      const bob = Math.sin(t * 7);
       // 只有低头咀嚼的形体，没有食盆 - 食盆是独立的挂件窗口（ADR 0004、ticket 08），
       // 猫要走到它跟前才会被世界层判定为在吃（见 src/app/motion.ts 的锚点分支）。
+      //
+      // **动作的可读性来自整体姿态的位移。** 上一版是「头一直低着 + 一两个像素的
+      // 抖动」，真机反馈是「吃饭的动作感觉不明显」- 与舔毛踩过的是同一个坑
+      // （见 art-and-motion-decisions 的「只靠一两个像素变化的动作等于没有动作」）。
+      // 现在是一个三秒半的周期：埋头吃一阵 → 抬起头来嚼 → 再埋下去。
+      const k = (t % EAT_CYCLE_S) / EAT_CYCLE_S;
+      // 头的高度：0 = 抬起来（接近常态），1 = 埋进盆里。
+      let down: number;
+      if (k < 0.12) down = ease(k / 0.12);
+      else if (k < 0.55) down = 1;
+      else if (k < 0.7) down = 1 - ease((k - 0.55) / 0.15);
+      else down = 0;
+
+      // 埋头时是小幅快嚼，抬头时是大口慢嚼 - 两段的节奏不同才看得出在换动作。
+      const chew = down > 0.5 ? Math.sin(t * 15) : Math.sin(t * 7);
+      const jaw = chew > 0.2 ? 0.35 - down * 0.12 : 0;
       return {
         form: 'stand',
-        headDX: 2,
-        headDY: 7 + Math.round(bob * 1.2),
-        muzzleDY: 0.5,
-        mouth: bob > 0.4 ? 0.3 : 0,
-        eyeOpen: 0.5,
+        headDX: 1 + down * 1.5,
+        // 抬头时略高于常态：那一下「仰起来嚼」是这个动作最容易读到的部分。
+        headDY: Math.round(-1.2 + down * 9 + chew * (down > 0.5 ? 0.8 : 1.6)),
+        muzzleDY: down * 0.8,
+        mouth: jaw,
+        // 埋头时眼睛眯着，抬头时睁开环顾。
+        eyeOpen: down > 0.5 ? 0.4 : 1,
         tailAng: 0.5,
         tailCurl: 1,
-        tailWave: 0.25,
+        // 抬头那段尾巴摆得欢一点，进一步区分两个阶段。
+        tailWave: 0.25 + (1 - down) * 0.5,
         tailPhase: t,
         breath: 0,
       };
