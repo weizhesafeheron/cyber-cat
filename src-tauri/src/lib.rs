@@ -8,6 +8,8 @@
 //! 离线推演的等价性就没法再保证了（ADR 0001）。
 
 mod adopt;
+mod farewell;
+mod notify;
 mod platform;
 mod save;
 mod tray;
@@ -88,6 +90,9 @@ fn place_prop(app: AppHandle, kind: String, x: f64, y: f64, visible: bool) -> Re
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 唯一的插件。**只有生病这一级会发通知**（issue #13），理由见 notify.rs
+        // 与 Cargo.toml 里那段被否决的自己实现。
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             content_ready,
             cursor_probe,
@@ -96,11 +101,16 @@ pub fn run() {
             move_stage,
             adopt::open_adoption,
             adopt::close_adoption,
+            farewell::open_farewell,
+            farewell::close_farewell,
+            notify::notify,
             place_prop,
             save::save_world,
             save::load_world,
             save::save_props,
             save::load_props,
+            save::save_memorial,
+            save::load_memorial,
             tray::update_tray,
             tray::update_prop_menu
         ])
@@ -108,6 +118,8 @@ pub fn run() {
             platform::configure_app(app);
             // 领养是否走完的标记。窗口被销毁时靠它区分「选完了」与「被关掉了」。
             app.manage(adopt::AdoptionDone::default());
+            // 放弃领养时该不该退出应用。首次启动该退，告别页之后再领养不该退。
+            app.manage(adopt::ExitOnCancel::default());
 
             match app.get_webview_window("pet") {
                 Some(pet) => platform::configure_pet_window(&pet),

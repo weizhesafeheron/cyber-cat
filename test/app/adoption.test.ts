@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ensureWorld, requestAdoption } from '../../src/app/adoption.js';
+import { adoptNewCat, ensureWorld, requestAdoption } from '../../src/app/adoption.js';
 import type { AdoptionGate } from '../../src/app/adoption.js';
 import type { AdoptedIdentity } from '../../src/adopt/identity.js';
 import { makeCat, makeMicro } from '../../src/render/index.js';
@@ -141,6 +141,39 @@ describe('身份四元组的持久化', () => {
     expect(world.identity.breed).not.toBe('orange');
     expect(world.identity.seed).not.toBe(20260728);
     expect(makeCat(world.identity.breed, world.identity.seed).breed).toBe('devon');
+  });
+});
+
+describe('告别之后再养一只', () => {
+  it('压根不读存档 - 那里躺着的是刚死掉的那只猫', async () => {
+    const dead = { ...existing(), dead: true, diedAt: 2000 };
+    const r = recorder(dead);
+    const world = await adoptNewCat(r.gate);
+    expect(r.calls).toEqual(['adopt', 'save']);
+    expect(world.identity.name).toBe('阿比');
+    expect(world.dead).toBe(false);
+    expect(world.diedAt).toBeNull();
+  });
+
+  it('新猫的一切都从零开始 - 无惩罚地重来', async () => {
+    const veteran = {
+      ...existing(),
+      bond: 90,
+      stats: { feedCount: 300, petCount: 900 },
+      dead: true,
+      diedAt: 2000,
+    };
+    const world = await adoptNewCat(recorder(veteran).gate);
+    expect(world.stats).toEqual({ feedCount: 0, petCount: 0 });
+    expect(world.bond).toBeLessThan(veteran.bond);
+    expect(world.identity.bornAt).toBe(NOW);
+  });
+
+  it('新猫立刻落盘，覆盖掉旧猫那份世界存档', async () => {
+    const r = recorder({ ...existing(), dead: true, diedAt: 2000 });
+    const world = await adoptNewCat(r.gate);
+    expect(r.saved).toHaveLength(1);
+    expect(parseWorld(serializeWorld(r.saved[0]!)).identity).toEqual(world.identity);
   });
 });
 

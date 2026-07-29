@@ -1,6 +1,8 @@
+import { parseMemorial, serializeMemorial } from '../memorial/index.js';
 import { PropsSaveError, parseProps, serializeProps } from '../props/index.js';
 import { SaveFormatError, parseWorld, serializeWorld } from '../world/index.js';
 import { inTauri } from './ipc.js';
+import type { Memorial } from '../memorial/index.js';
 import type { PropsState } from '../props/index.js';
 import type { World } from '../world/index.js';
 
@@ -109,16 +111,53 @@ export async function saveProps(state: PropsState): Promise<void> {
   }
 }
 
+/**
+ * 读猫的档案。返回 null 表示还没有档案（第一只猫）。
+ *
+ * **与另外两份存档的失败处理不同：读坏了要抛，不能退回 null。**
+ * world.json 与 props.json 坏了都可以丢 - 世界会重新领养一只猫，挂件回到默认位置。
+ * 档案丢了是把用户养过的所有猫一起抹掉，而且不可再生（那些猫都死了）。
+ * 返回 null 会让调用方以为「还没有档案」，紧接着写一份新的上去 - 正好是最坏的结果。
+ * 谁来兜住这个异常见 app/farewell.ts 的 archive()：它选择**不写盘**，保留坏文件。
+ */
+export async function loadMemorial(): Promise<Memorial | null> {
+  if (!inTauri) return null;
+  const invoke = await getInvoke();
+  const text = await invoke<string | null>('load_memorial');
+  if (text == null) return null;
+  return parseMemorial(text);
+}
+
+/** 写猫的档案。 */
+export async function saveMemorial(archive: Memorial): Promise<void> {
+  if (!inTauri) return;
+  const invoke = await getInvoke();
+  await invoke('save_memorial', { contents: serializeMemorial(archive) });
+}
+
 // 显示窗口的 pet_ready 封装在 ipc.ts - IPC 层只保留一份，避免两处各自维护
 // 「是否在 Tauri 里」的判断与错误处理策略。
 
+/**
+ * 托盘菜单要显示的一切。
+ *
+ * 两个布尔量是**菜单项的可用性**，不是猫的状态 - 字段名刻意跟着菜单项走
+ * （medicate / memorial），条件由 app/status.ts 算好。这样「喂药只在生病时出现」
+ * 是一条有测试守着的规则，而不是 Rust 里一句 set_enabled。
+ *
+ * 字段名都是单个小写词：它们会原样作为参数名交给 Rust 侧的 update_tray，
+ * 中间没有任何大小写转换，两边必须字面一致。
+ */
 export interface TrayStatusPayload {
   summary: string;
   hunger: string;
   energy: string;
   mood: string;
   bond: string;
-  sick: boolean;
+  /** 喂药项是否可用。 */
+  medicate: boolean;
+  /** 告别与档案项是否可用。 */
+  memorial: boolean;
 }
 
 /** 刷新托盘菜单上的状态文案。 */

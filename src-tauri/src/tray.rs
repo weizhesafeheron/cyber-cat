@@ -23,6 +23,8 @@ struct TrayItems<R: Runtime> {
     mood: MenuItem<R>,
     bond: MenuItem<R>,
     medicate: MenuItem<R>,
+    /// 告别与档案。只有猫离开之后才可用。
+    memorial: MenuItem<R>,
     /// 两个挂件的显示开关。勾选状态由前端推过来（摆放存档在那边）。
     prop_bowl: CheckMenuItem<R>,
     prop_bed: CheckMenuItem<R>,
@@ -45,7 +47,14 @@ pub fn build(app: &App) -> tauri::Result<()> {
     let summary = MenuItem::with_id(app, "summary", "读取存档中……", false, None::<&str>)?;
     let feed = MenuItem::with_id(app, "feed", "喂食", true, None::<&str>)?;
     // 喂药只在生病时可用（mvp-scope 4）：界面不该常年挂一个用不到的入口。
+    // 这里的 false 只是初值（托盘在 setup 里建，那时前端还没起来）；
+    // 什么时候亮由前端算，见 src/app/status.ts 的 trayStatus。
     let medicate = MenuItem::with_id(app, "medicate", "喂药", false, None::<&str>)?;
+    // 告别与档案。同样是初值为灰：绝大多数启动的猫都活着。
+    //
+    // **这个入口不是可选的。** 告别页是个能关掉的窗口，而它同时是「无惩罚地领养
+    // 新猫」的唯一入口 - 没有这一项，用户关掉告别页之后就困在一个空桌面上了。
+    let memorial = MenuItem::with_id(app, "memorial", "告别与档案", false, None::<&str>)?;
 
     // 挂件是可隐藏的（CONTEXT.md），但藏了要能再拿回来，所以用勾选项而不是
     // 一个「隐藏」动作。初值先按默认摆放（显示），前端读完摆放存档会立刻纠正 -
@@ -64,6 +73,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &feed,
             &medicate,
+            &memorial,
             &props,
             &PredefinedMenuItem::separator(app)?,
             &quit,
@@ -77,6 +87,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
         mood,
         bond,
         medicate,
+        memorial,
         prop_bowl,
         prop_bed,
     }))));
@@ -94,7 +105,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
             "quit" => app.exit(0),
             // 挂件的显示开关也交回前端：摆放存档在那边，而且勾选状态必须与它
             // 记的那份保持一致 - 在这里直接 show/hide 会让两边漂移。
-            id @ ("feed" | "medicate" | "prop-bowl" | "prop-bed") => {
+            id @ ("feed" | "medicate" | "memorial" | "prop-bowl" | "prop-bed") => {
                 // 交回前端，由它作为一次 UserAction 走进 step。
                 if let Err(e) = app.emit(TRAY_ACTION_EVENT, id) {
                     eprintln!("[cyber-cat] 发送托盘动作 {id} 失败：{e}");
@@ -111,6 +122,10 @@ pub fn build(app: &App) -> tauri::Result<()> {
 ///
 /// 文案整条由前端给，Rust 侧不拼字符串 - 「饱食度 82%」这种表达属于呈现，
 /// 和世界层的语义放在一起才不会两边漂移。
+///
+/// 两个布尔量同理，是**菜单项的可用性**而不是猫的状态：条件（「生病且没死」）
+/// 由前端算好（src/app/status.ts），这里只 set_enabled。写在这里的话没有任何
+/// 测试碰得到它，而「喂药入口仅在生病时出现」是一条验收项。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn update_tray(
@@ -121,7 +136,8 @@ pub fn update_tray(
     energy: String,
     mood: String,
     bond: String,
-    sick: bool,
+    medicate: bool,
+    memorial: bool,
 ) -> Result<(), String> {
     let guard = handles
         .0
@@ -140,8 +156,12 @@ pub fn update_tray(
     set(&items.bond, &bond)?;
     items
         .medicate
-        .set_enabled(sick)
+        .set_enabled(medicate)
         .map_err(|e| format!("切换喂药项失败：{e}"))?;
+    items
+        .memorial
+        .set_enabled(memorial)
+        .map_err(|e| format!("切换告别与档案项失败：{e}"))?;
 
     // 图标本身还没有分状态的美术（ticket 09），先让 tooltip 承担
     // 「不打开任何界面就知道猫怎么样了」。

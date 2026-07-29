@@ -10,6 +10,7 @@
 
 import { ADOPTED_EVENT, parseAdopted } from '../adopt/identity.js';
 import type { AdoptedIdentity } from '../adopt/identity.js';
+import { ADOPT_ANOTHER_EVENT } from '../farewell/handoff.js';
 
 /** 是否跑在 Tauri 里。直接用浏览器打开这个页面调试时为 false。 */
 export const inTauri = '__TAURI_INTERNALS__' in globalThis;
@@ -133,11 +134,20 @@ export async function moveStage(x: number, y: number): Promise<void> {
  * 打开领养窗口。尺寸由前端给 - 窗口该多大取决于里面要放什么，
  * 那是呈现层的判断（见 adopt/constants.ts），Rust 侧只负责居中建窗。
  *
+ * `exitOnCancel` 是「用户关掉这个窗口时应用该不该退出」：首次启动时该退
+ * （没有猫，留一个只有托盘的空进程等于假死），告别页之后再领养时不该退
+ * （猫已经进档案了，托盘里还能再打开告别页 - 一次犹豫不该关掉整个应用）。
+ * 只有前端知道现在是哪一种，见 adopt.rs 的注释。
+ *
  * 失败会抛：领养是首次启动的必经一步，开不出窗口就等于没有猫，不能静默。
  */
-export async function openAdoption(width: number, height: number): Promise<void> {
+export async function openAdoption(
+  width: number,
+  height: number,
+  exitOnCancel: boolean,
+): Promise<void> {
   const invoke = await invoker();
-  await invoke<void>('open_adoption', { width, height });
+  await invoke<void>('open_adoption', { width, height, exitOnCancel });
 }
 
 /**
@@ -150,6 +160,66 @@ export async function openAdoption(width: number, height: number): Promise<void>
 export async function closeAdoption(): Promise<void> {
   const invoke = await invoker();
   await invoke<void>('close_adoption');
+}
+
+/**
+ * 打开告别页。尺寸由前端给，理由同 openAdoption。
+ *
+ * 失败会抛：调用方（app/farewell.ts）自己接住并报错 - 那里同时要保证
+ * 「开不出窗也已经入档」，所以错误必须传到它手上。
+ */
+export async function openFarewell(width: number, height: number): Promise<void> {
+  const invoke = await invoker();
+  await invoke<void>('open_farewell', { width, height });
+}
+
+/**
+ * 关掉告别页（由告别页自己调）。
+ *
+ * 与 closeAdoption 同一条理由走 Rust：关窗要额外的窗口权限，而 Rust 侧本来就要
+ * 在窗口销毁时把 macOS 的激活策略切回附属模式（见 farewell.rs）。
+ */
+export async function closeFarewell(): Promise<void> {
+  const invoke = await invoker();
+  await invoke<void>('close_farewell');
+}
+
+/**
+ * 发一条系统通知。
+ *
+ * 失败只记录：通知发不出去最常见的原因是用户在系统设置里关掉了本应用的通知，
+ * 那是他的选择，不该在控制台里刷屏，更不该打断帧循环。
+ */
+export async function sendNotification(title: string, body: string): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const invoke = await invoker();
+    await invoke<void>('notify', { title, body });
+  } catch (err) {
+    console.error('[cyber-cat] 发送系统通知失败：', err);
+  }
+}
+
+/** 告别页报出「再养一只」。 */
+export async function announceAdoptAnother(): Promise<void> {
+  const { emit } = await import('@tauri-apps/api/event');
+  await emit(ADOPT_ANOTHER_EVENT);
+}
+
+/**
+ * 宠物窗口订阅「再养一只」。
+ *
+ * 用 listen 而不是 once：告别页可以被反复打开（托盘里那个入口），
+ * 用户完全可能点了一次、领养窗口开出来又被他关掉，然后再点一次。
+ */
+export async function onAdoptAnother(handler: () => void): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    await listen(ADOPT_ANOTHER_EVENT, () => handler());
+  } catch (err) {
+    console.error('[cyber-cat] 订阅「再养一只」失败，告别页里的领养按钮将无效：', err);
+  }
 }
 
 /**

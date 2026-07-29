@@ -3,7 +3,9 @@ name = "cyber-cat"
 version = "0.0.0"
 description = "常驻桌面的赛博养猫"
 edition = "2021"
-rust-version = "1.77"
+# 1.77.2 而不是 1.77：tauri-plugin-notification 2.3 要求它。
+# 差的是一个补丁号，而下调到 1.77 只能拿到该插件的 rc 版本。
+rust-version = "1.77.2"
 
 [lib]
 name = "cyber_cat_lib"
@@ -23,6 +25,17 @@ tauri = { version = "2", features = [
   "tray-icon",
   "image-png",
 ] }
+
+# 系统通知。**只有生病这一级会发**（issue #13），饿了不发 - 那会把产品气质
+# 从陪伴变成催促。
+#
+# 这是本项目唯一的 Tauri 插件，与 save.rs 里「读写 JSON 不引插件」的取舍不冲突：
+# 那边标准库够用，这边不够。两条被否决的自己实现：
+#   1. macOS 走 `osascript -e 'display notification'` - 通知的来源会显示成
+#      「脚本编辑器」，而且要给用户文案做 shell 转义；Windows 侧还得另写一套 toast。
+#   2. webview 里的 Web Notification API - WKWebView 默认不支持它，
+#      在 macOS 上什么都不会发生，而这正是 MVP 唯一要验收的平台。
+tauri-plugin-notification = "2"
 
 
 [profile.release]

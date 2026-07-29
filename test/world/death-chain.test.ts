@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mulberry32 } from '../../src/render/rng.js';
 import { NEED_MAX, step } from '../../src/world/index.js';
 import type { UserAction, World, WorldEvent } from '../../src/world/index.js';
-import { DAY, HOUR, TICK, kinds, makeWorld, runTicks } from './helpers.js';
+import { BEAT, DAY, HOUR, TICK, kinds, makeWorld, runTicks } from './helpers.js';
 
 /**
  * 挨饿 → 生病 → 死亡这条链。
@@ -72,6 +72,62 @@ describe('死亡链的时间线', () => {
 
   it('告别页要的陪伴天数随事件带出', () => {
     expect(eventAt(run.events, 'died').data?.['days']).toBeGreaterThanOrEqual(3);
+  });
+});
+
+/**
+ * 挨饿的可视表现：**在食盆边徘徊**（issue #13 的验收项，玩家要有机会发现并挽回）。
+ *
+ * 「徘徊」拆成两件互相独立的事，两件都要成立才看得出来：
+ * - 姿势收敛到走与坐之间（不去跑酷、不理毛），这是「徘徊」；
+ * - 锚点是食盆，这是「在食盆边」 - 位置由挂件层与运动层落地，
+ *   世界层只给名字（ADR 0009）。
+ *
+ * 叫声不在这里：MVP 没有音频，「叫」只落在日记里的 starving 那一条上。
+ */
+describe('挨饿的可视表现', () => {
+  /** 饿到有可视表现、碗是空的、醒着。 */
+  function hungryWorld(seed: number): World {
+    return makeWorld({
+      seed,
+      hour: 18, // 黄昏，节律压力最低，几乎不会去睡
+      patch: { bowl: 0, needs: { hunger: 8, energy: 85, mood: 40 } },
+    });
+  }
+
+  it('饿的时候只在走与坐之间换姿势，不会去跑酷或理毛', () => {
+    const seen = new Set<string>();
+    // 换十几只不同性格的猫，避免只测到某一只的抽签运气。
+    for (let seed = 1; seed <= 12; seed++) {
+      let w = hungryWorld(seed);
+      for (let i = 0; i < 200; i++) {
+        w = step(w, BEAT).world;
+        // 一路不喂，饱食度会掉到 0；这里只关心「饿着且还活着」的那一段。
+        if (w.sick || w.sleeping) break;
+        seen.add(w.activity);
+      }
+    }
+    expect(seen.size).toBeGreaterThan(1); // 对照组：确实在换姿势，不是卡住了
+    expect([...seen].sort()).toEqual(['sit', 'walk']);
+  });
+
+  it('饿的时候锚点是食盆，即使碗里是空的', () => {
+    for (let seed = 1; seed <= 12; seed++) {
+      expect(step(hungryWorld(seed), 0).renderIntent.anchor).toBe('bowl');
+    }
+  });
+
+  it('对照组：不饿的时候姿势不止走与坐两种', () => {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 12; seed++) {
+      let w = makeWorld({ seed, hour: 18, patch: { bowl: 3, needs: { hunger: 90, energy: 85, mood: 60 } } });
+      for (let i = 0; i < 200; i++) {
+        w = step(w, BEAT).world;
+        if (w.sleeping) break;
+        seen.add(w.activity);
+      }
+    }
+    expect(seen.size).toBeGreaterThan(2);
   });
 });
 

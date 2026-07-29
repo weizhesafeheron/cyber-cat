@@ -229,7 +229,8 @@ export interface WorldInputs {
 export interface RenderIntent {
   /**
    * 该画哪个动作，渲染层 ACTIONS 的键。
-   * null 表示猫已死亡，不该画猫（告别页是 ticket 12 的事）。
+   * null 表示猫已死亡，不该画猫 - 桌面上从此空着，
+   * 呈现改由告别页窗口承担（src/farewell/）。
    *
    * **这是世界层的意愿，不是最终播的那个动作。** 运动层会在它之上做帧级决定
    * （走到了就站着歇、被拎起来时播悬空姿态），最终播什么看 MotionState.playing。

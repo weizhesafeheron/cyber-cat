@@ -19,6 +19,15 @@ const SAVE_FILE: &str = "world.json";
 /// 重新摆一遍食盆。
 const PROPS_FILE: &str = "props.json";
 
+/// 猫的档案：养过的所有猫。
+///
+/// **第三份文件，也是刻意的**（[ADR 0010](../../docs/adr/0010-memorial-archive-separate-save.md)）。
+/// world.json 是「当前这只猫」，领养新猫时会被整份覆盖；档案的生命周期比任何一只猫
+/// 都长，塞进 world.json 等于每换一只猫就把历任猫抹掉一次。
+///
+/// 这份文件比另外两份要紧：里面的猫都死了，坏掉就再也演化不回来。
+const MEMORIAL_FILE: &str = "memorial.json";
+
 fn data_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -68,4 +77,15 @@ pub fn save_props(app: AppHandle, contents: String) -> Result<(), String> {
 #[tauri::command]
 pub fn load_props(app: AppHandle) -> Result<Option<String>, String> {
     read_optional(&data_path(&app, PROPS_FILE)?)
+}
+
+#[tauri::command]
+pub fn save_memorial(app: AppHandle, contents: String) -> Result<(), String> {
+    write_atomic(&data_path(&app, MEMORIAL_FILE)?, contents)
+}
+
+/// 读猫的档案。**告别页窗口也会调它**（它是档案的唯一读者）。
+#[tauri::command]
+pub fn load_memorial(app: AppHandle) -> Result<Option<String>, String> {
+    read_optional(&data_path(&app, MEMORIAL_FILE)?)
 }

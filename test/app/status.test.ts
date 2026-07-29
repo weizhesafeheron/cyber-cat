@@ -58,17 +58,51 @@ describe('托盘状态', () => {
   it('生病时报剩余时间，喂药项才有理由亮起来', () => {
     const w = world({ sick: true, sickHours: 12, needs: { hunger: 40, energy: 50, mood: 30 } });
     const s = trayStatus(w, statusOf(w));
-    expect(s.sick).toBe(true);
+    expect(s.medicate).toBe(true);
     expect(s.summary).toMatch(/36\s*小时/);
-  });
-
-  it('没生病时喂药项应当是灰的', () => {
-    const w = world();
-    expect(trayStatus(w, statusOf(w)).sick).toBe(false);
   });
 
   it('碗里有粮会写出来 - 喂过之后用户要能确认', () => {
     const w = world({ bowl: 2, needs: { hunger: 80, energy: 70, mood: 60 } });
     expect(trayStatus(w, statusOf(w)).summary).toContain('碗里有粮');
+  });
+});
+
+/**
+ * 喂药入口只在生病时出现（issue #13 的验收项）。
+ *
+ * 这条规则的落点有两处：Rust 侧建菜单时 `enabled = false`（托盘一起来就是灰的），
+ * 以及这里算出来的 `medicate`。前者是一次性的初值，后者每 5 秒推一次 - 真正
+ * 决定「什么时候亮」的是后者，所以断言放在这里。
+ */
+describe('喂药入口只在生病时可用', () => {
+  const cases: Array<[string, Partial<World>, boolean]> = [
+    ['状态不错', { needs: { hunger: 80, energy: 70, mood: 60 } }, false],
+    ['只是饿了', { needs: { hunger: 10, energy: 70, mood: 60 } }, false],
+    ['已经在挨饿', { needs: { hunger: 0, energy: 70, mood: 60 }, starveHours: 20 }, false],
+    ['睡着了', { sleeping: true, needs: { hunger: 60, energy: 30, mood: 60 } }, false],
+    ['生病了', { sick: true, sickHours: 6, needs: { hunger: 0, energy: 40, mood: 25 } }, true],
+    ['病后虚弱', { weakHours: 4, needs: { hunger: 70, energy: 50, mood: 45 } }, false],
+    // 死亡分支不清 sick（那是它的病历，档案还要用），所以这条是真的能出错。
+    ['已经离开', { sick: true, dead: true, diedAt: Date.UTC(2026, 6, 31) }, false],
+  ];
+
+  for (const [what, patch, expected] of cases) {
+    it(`${what} → ${expected ? '可用' : '灰的'}`, () => {
+      const w = world(patch);
+      expect(trayStatus(w, statusOf(w)).medicate).toBe(expected);
+    });
+  }
+});
+
+describe('告别与档案的入口只在猫离开后可用', () => {
+  it('猫还活着时是灰的', () => {
+    const w = world({ sick: true, sickHours: 6, needs: { hunger: 0, energy: 40, mood: 25 } });
+    expect(trayStatus(w, statusOf(w)).memorial).toBe(false);
+  });
+
+  it('猫离开后可用 - 关掉告别页之后这是再打开它的唯一入口', () => {
+    const w = world({ dead: true, diedAt: Date.UTC(2026, 6, 31, 8, 0, 0) });
+    expect(trayStatus(w, statusOf(w)).memorial).toBe(true);
   });
 });

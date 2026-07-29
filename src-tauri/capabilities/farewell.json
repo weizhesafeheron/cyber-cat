@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "farewell",
+  "description": "告别页窗口所需的最小权限集。只要事件总线：用户点「再养一只」时它要 emit 一条给宠物窗口，由那边走领养流程（世界状态只有宠物窗口持有）。读档案与关窗都走应用自己的命令，在 Rust 侧执行，因此不需要 core:window 或文件系统的权限。单独一份而不是加进 default.json，是为了让「这个窗口能做什么」一眼可见 - 与 props.json 同一条做法。",
+  "windows": ["farewell"],
+  "permissions": ["core:event:default"]
+}

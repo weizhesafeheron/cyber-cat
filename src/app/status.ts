@@ -50,6 +50,16 @@ export function trayStatus(world: World, status: CatStatus): TrayStatusPayload {
     energy: `精力 ${pct(world.needs.energy)}`,
     mood: `心情 ${pct(world.needs.mood)}`,
     bond: `亲密度 ${pct(world.bond)}`,
-    sick: world.sick,
+    // 两个入口的可用性在这一层算，不在 Rust 侧算：
+    // Rust 那边只会 set_enabled，条件写在那里就没有测试能碰到它。
+    //
+    // **喂药只在生病时可用**（mvp-scope 4 / issue #13 的验收项）。
+    // `&& !dead` 不是多余的：死亡分支不会把 sick 清掉（那是它的病历，
+    // 告别页与档案都还要用），只看 sick 的话猫死后喂药项会一直亮着 -
+    // 点了没有任何反应（applyAction 首行就挡住了死亡后的输入），
+    // 而一个亮着却没反应的菜单项比灰着更糟。
+    medicate: world.sick && !world.dead,
+    // 告别页那个入口反过来：只有猫离开之后才有东西可看。
+    memorial: world.dead,
   };
 }
