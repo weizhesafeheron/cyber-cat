@@ -1,12 +1,16 @@
 //! CYBER-CAT 桌面宠物。
 //!
-//! 这一层只负责窗口、托盘与平台适配。猫的状态与外观分别由世界层与渲染层
-//! （TypeScript 侧）负责，两者都是平台无关的纯逻辑。
+//! 这一层只负责窗口、托盘、存档读写与平台适配。猫的状态与外观分别由世界层与
+//! 渲染层（TypeScript 侧）负责，两者都是平台无关的纯逻辑。
+//!
+//! 特别是：**世界的演化一步都不在 Rust 里发生。** 托盘上的「喂食」也只是往前端
+//! 发一个事件，由它作为一次用户动作走进同一个 `step`。多一条改状态的路，
+//! 离线推演的等价性就没法再保证了（ADR 0001）。
 
 mod platform;
+mod save;
+mod tray;
 
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WebviewWindow};
 
 /// 前端渲染出第一帧后调用，此时才显示窗口。
@@ -46,7 +50,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pet_ready,
             cursor_probe,
-            set_pass_through
+            set_pass_through,
+            save::save_world,
+            save::load_world,
+            tray::update_tray
         ])
         .setup(|app| {
             platform::configure_app(app);
@@ -58,24 +65,7 @@ pub fn run() {
                 None => eprintln!("[cyber-cat] 严重：找不到 label=pet 的窗口，猫不会出现"),
             }
 
-            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&quit])?;
-
-            TrayIconBuilder::with_id("tray")
-                .icon(
-                    app.default_window_icon()
-                        .expect("bundle 里应当有图标")
-                        .clone(),
-                )
-                .tooltip("CYBER-CAT")
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| {
-                    if event.id.as_ref() == "quit" {
-                        app.exit(0);
-                    }
-                })
-                .build(app)?;
+            tray::build(app)?;
 
             Ok(())
         })

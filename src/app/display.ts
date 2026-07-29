@@ -91,4 +91,9 @@ export class CatDisplay {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.ctx.drawImage(this.src, 0, 0, this.canvas.width, this.canvas.height);
   }
+
+  /** 什么都不画。猫死后没有姿态可画，画布必须真的空，不能留着上一帧。 */
+  clear(): void {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  }
 }

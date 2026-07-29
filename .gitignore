@@ -37,3 +37,4 @@ src-tauri/gen/
 
 spike/**/dump
 spike/**/verify
+.claude/
