@@ -37,6 +37,9 @@ import {
   GLOW_DECAY_PER_TICK,
   GLOW_MAX,
   HUNGER_DROP_PER_TICK,
+  HUNGER_SLEEP_DAMP,
+  HUNGER_WAKES_THRESHOLD,
+  HUNGER_WAKE_CHANCE,
   HUNGRY_VISIBLE_THRESHOLD,
   IDLE_EVENT_CHANCE,
   LATE_EVENING_START_HOUR,
@@ -301,16 +304,30 @@ function decideSleep(w: World, cat: Cat, hour: number): { justWoke: boolean } {
     1,
   );
 
+  // 饿到一定程度，饿压过节律：睡不安稳，睡着了也会被饿醒。
+  // 见 HUNGER_WAKES_THRESHOLD 的注释 - 少了这条，饿着的猫会睡满整夜、
+  // 碗里的粮一口不动，一路饿到生病。
+  const starving = w.needs.hunger < HUNGER_WAKES_THRESHOLD;
+
   if (!w.sleeping) {
-    // 累垮了就地睡，不看时段也不看概率。
+    // 累垮了就地睡，不看时段也不看概率。**饿也拦不住这条** -
+    // 饿与累同时到极限时，猫是会倒下的。
     if (w.needs.energy < ENERGY_EXHAUSTED) {
       w.sleeping = true;
       return { justWoke: false };
     }
     const tired = 1 - w.needs.energy / NEED_MAX;
-    const desire = pressure * (SLEEP_DESIRE_BASE + tired * SLEEP_DESIRE_TIRED_SPAN);
+    let desire = pressure * (SLEEP_DESIRE_BASE + tired * SLEEP_DESIRE_TIRED_SPAN);
+    if (starving) desire *= HUNGER_SLEEP_DAMP;
     if (roll(w) < desire) w.sleeping = true;
     return { justWoke: false };
+  }
+
+  // 饿醒。不看时段 - 深夜的节律拦不住饿。
+  // 但要求精力高于累垮线，否则会在「饿醒 → 累倒 → 又被饿醒」之间来回抖。
+  if (starving && w.needs.energy > ENERGY_EXHAUSTED && roll(w) < HUNGER_WAKE_CHANCE) {
+    w.sleeping = false;
+    return { justWoke: true };
   }
 
   // 没睡够不会自己醒；睡够了也要看时段 - 深夜的节律会把它按住继续睡。
