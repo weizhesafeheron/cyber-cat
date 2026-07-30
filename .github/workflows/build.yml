@@ -124,6 +124,26 @@ jobs:
             - macOS：第一次打开要右键点 → 打开 → 再点一次「打开」，或者去「系统设置 → 隐私与安全性」点「仍要打开」。
             - Windows：SmartScreen 会拦一下，点「更多信息」→「仍要运行」。需要 WebView2 运行时，Windows 10 上安装包会自己下载。
 
+      # 把安装包拢进一个平铺的目录再上传。
+      #
+      # 直接上传原路径的话，zip 里会套着 release/bundle/nsis/ 这几层 -
+      # upload-artifact 只会去掉所有匹配项的**公共前缀**，而 macOS 的 dmg 在
+      # target/universal-apple-darwin/ 下、Windows 的 msi 在 target/ 下，
+      # 公共前缀只到 src-tauri/target，剩下的目录全留在压缩包里，
+      # 下载的人要点四五下才看到安装包。
+      #
+      # shell: bash 在 Windows runner 上也有（Git Bash），所以一份脚本两个平台通用。
+      - name: 收拢安装包
+        shell: bash
+        run: |
+          mkdir -p dist
+          find src-tauri/target -type f \
+            \( -path '*/bundle/dmg/*.dmg' \
+            -o -path '*/bundle/msi/*.msi' \
+            -o -path '*/bundle/nsis/*.exe' \) \
+            -exec cp {} dist/ \;
+          ls -l dist
+
       # 手动触发时把产物存成 artifact：那种情况下没有 Release 可挂。
       # if-no-files-found: error - 静默地上传一个空压缩包比失败更难查。
       - uses: actions/upload-artifact@v4
@@ -132,7 +152,4 @@ jobs:
           name: cybercat-${{ matrix.platform }}
           if-no-files-found: error
           retention-days: 30
-          path: |
-            src-tauri/target/*/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
+          path: dist/*
