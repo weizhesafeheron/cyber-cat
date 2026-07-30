@@ -1,4 +1,4 @@
-# 赛博猫咪
+# CyberCat
 
 赛博城市里，有一只真实的猫在等你回家。
 
@@ -105,7 +105,7 @@ macOS 与 Windows。没有账号，不联网，所有东西都存在你自己的
 
 ### macOS
 
-下载 `赛博猫咪_x.y.z_aarch64.dmg`，拖进「应用程序」。
+下载 `CyberCat_x.y.z_aarch64.dmg`，拖进「应用程序」。
 
 包**没有签名和公证**，所以第一次打开要绕一下 Gatekeeper：在「应用程序」里右键点它 → 打开 → 再点一次「打开」。
 或者去「系统设置 → 隐私与安全性」点「仍要打开」。
@@ -160,8 +160,8 @@ xcode-select --install
 
 产物：
 
-- `src-tauri/target/release/bundle/dmg/赛博猫咪_x.y.z_aarch64.dmg`
-- `src-tauri/target/release/bundle/macos/赛博猫咪.app`
+- `src-tauri/target/release/bundle/dmg/CyberCat_x.y.z_aarch64.dmg`
+- `src-tauri/target/release/bundle/macos/CyberCat.app`
 
 要产出**签名并公证**的 DMG，构建前设好这几个环境变量（需要 Apple Developer 账号）：
 
@@ -190,8 +190,8 @@ npm run app:build
 
 产物：
 
-- `src-tauri\target\release\bundle\msi\赛博猫咪_x.y.z_x64_en-US.msi`
-- `src-tauri\target\release\bundle\nsis\赛博猫咪_x.y.z_x64-setup.exe`
+- `src-tauri\target\release\bundle\msi\CyberCat_x.y.z_x64_en-US.msi`
+- `src-tauri\target\release\bundle\nsis\CyberCat_x.y.z_x64-setup.exe`
 
 **不能交叉编译。** Windows 的包必须在 Windows 上构建（MSVC 工具链与资源编译器都不在别的系统上跑）。
 在 macOS 上能做的只有类型检查：

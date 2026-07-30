@@ -112,7 +112,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
                 .expect("bundle 里应当有图标")
                 .clone(),
         )
-        .tooltip("赛博猫咪")
+        .tooltip("CyberCat")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
