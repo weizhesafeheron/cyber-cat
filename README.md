@@ -23,8 +23,14 @@
 | 06 | 自主行为与完整动作库（含爪印） |
 | 07 | 领养与身份：七品种 + Seed + 起名 |
 | 08 | 食盆与猫窝挂件 + 喂食 |
+| 09 | 抚摸与拖拽 |
+| 10 | 光标即逗猫棒（含六道闸门） |
+| 11 | 猫爬到前台窗口上 |
+| 12 | 生病与死亡链 + 告别页 + 猫的档案 |
+| 13 | 猫咪日记 + 回归气泡 |
+| 14 | 托盘完整化 + 安静模式 + 让开规则 |
 
-接下来是抚摸与拖拽、光标即逗猫棒、猫爬到前台窗口上、猫咪日记、托盘完整化，以及 Windows 打包与真机验收。
+只剩最后一票：**Windows 打包与真机验收**。macOS 侧的功能都在真机上验过了，Windows 那一半（透明窗口、`WS_THICKFRAME`、`SHQueryUserNotificationState`、DPI 换算）只从源码与文档推出来，还没在真机上跑过。
 
 ```bash
 npm install
@@ -54,7 +60,8 @@ npm run harness     # 渲染核心的人工验证页，每个品种 × 每个动
 - [0007](docs/adr/0007-stage-window-and-motion-layer.md) 舞台窗口跟随猫，逐帧位移独立于世界层
 - [0008](docs/adr/0008-behaviour-beat-separate-from-need-tick.md) 行为节拍与需求步长分离，各用一条随机流
 - [0009](docs/adr/0009-prop-anchors-across-layers.md) 世界层用挂件名表达空间诉求，抵达判定归运动层
-- [0010](docs/adr/0011-return-bubble-in-stage.md) 回归气泡是舞台里的覆盖层，命中区是一个矩形
+- [0010](docs/adr/0010-memorial-archive-separate-save.md) 猫的档案是第三份存档，与当前这只猫分开
+- [0011](docs/adr/0011-return-bubble-in-stage.md) 回归气泡是舞台里的覆盖层，命中区是一个矩形
 - [0012](docs/adr/0012-surfaces-and-perching.md) 表面模型：猫可以停在前台窗口上沿，但纵向永远不是自由变量
 - [0013](docs/adr/0013-custom-title-bar.md) 三扇弹出窗口自绘标题栏，不用系统的
 - [0014](docs/adr/0014-yield-by-drawing-nothing.md) 让开规则用「什么都不画」实现，不隐藏宠物窗口
