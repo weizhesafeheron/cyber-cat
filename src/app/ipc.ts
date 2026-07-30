@@ -4,8 +4,9 @@
  * 唯一一处 `@tauri-apps/api` 的导入点：其余模块只依赖普通函数，因此可以在
  * node 里测试，也可以直接用浏览器打开页面调试渲染。
  *
- * 注意：CSP 必须含 `connect-src ... ipc: http://ipc.localhost`，否则这里所有
- * 调用都会失败（tauri.conf.json 里已配好，改动它会让猫连窗口都显示不出来）。
+ * Windows 的 WebView2 150 会让 `http://ipc.localhost` 的 CORS 预检一直挂起。
+ * CSP 有意不放行该地址，让 Tauri 自动回退到它的原生 postMessage 通道；
+ * macOS 使用的 `ipc:` 仍然放行。开发服务器必须使用同一条 CSP（见 vite.config.ts）。
  */
 
 import { ADOPTED_EVENT, parseAdopted } from '../adopt/identity.js';

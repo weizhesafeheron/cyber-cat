@@ -38,7 +38,10 @@ pub struct ExitOnCancel(AtomicBool);
 ///   应用坏了 → 退出。
 /// - 告别页之后再领养：桌面上有托盘，托盘里还能再打开告别页 → 用户只是改了主意，
 ///   什么都不该发生。这条路上退出应用等于因为一次犹豫就把整个应用关掉。
-#[tauri::command]
+// Windows 必须让命令先退出 WebView2 的 postMessage 回调再建第二个 WebView，
+// 否则新窗口会卡在 about:blank。macOS 保持原来的同步命令路径。
+#[cfg_attr(target_os = "windows", tauri::command(async))]
+#[cfg_attr(not(target_os = "windows"), tauri::command)]
 pub fn open_adoption(
     app: AppHandle,
     width: f64,

@@ -744,11 +744,48 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 
-/** 上一次下发给窗口的舞台位置。运动层只在滚动的那一帧改这个值。 */
+/** 上一次已经真正落到窗口上的舞台位置。 */
 let placed: { x: number; y: number } | null = null;
+/** 正在等待 IPC 返回的位置。同一时刻最多只能有一个。 */
+let movingTo: { x: number; y: number } | null = null;
+/** 等待下发的最新位置；新帧直接覆盖旧帧，不让过时坐标在 IPC 队列里排队。 */
+let pendingMove: { x: number; y: number } | null = null;
 /** 上一次下发的时刻（Date.now），用来避免与几何校正打架。 */
 let placedAtMs = 0;
 let moveFailures = 0;
+
+function samePoint(
+  a: { readonly x: number; readonly y: number } | null,
+  b: { readonly x: number; readonly y: number },
+): boolean {
+  return a !== null && a.x === b.x && a.y === b.y;
+}
+
+/** 串行落位，只保留等待期间收到的最后一个坐标。 */
+async function drainStageMoves(): Promise<void> {
+  if (movingTo !== null) return;
+  while (pendingMove !== null) {
+    const target = pendingMove;
+    pendingMove = null;
+    movingTo = target;
+    try {
+      await moveStage(target.x, target.y);
+      placed = target;
+    } catch (err) {
+      // 挪不动的后果由下一次 refreshStage 兜住：它会把运动层的舞台原点纠回真实值，
+      // 猫于是被 roamBounds 限制在当前窗口内活动 - 仍然可见、可点。
+      moveFailures++;
+      if (moveFailures <= 3) {
+        console.error(
+          '[cyber-cat] 移动舞台窗口失败，猫的活动范围将被限制在当前窗口内：',
+          err,
+        );
+      }
+    } finally {
+      movingTo = null;
+    }
+  }
+}
 
 /**
  * 把运动层算出的舞台位置落到窗口上。
@@ -759,18 +796,20 @@ let moveFailures = 0;
  * 一次跳动，因为窗口挪好之后画布还停在旧偏移上，至少差一帧。
  */
 function requestStageMove(): void {
-  const at = motion.stage;
-  if (placed && placed.x === at.x && placed.y === at.y) return;
-  placed = { x: at.x, y: at.y };
+  const at = { x: motion.stage.x, y: motion.stage.y };
+  if (samePoint(pendingMove, at)) return;
+  if (samePoint(movingTo, at)) {
+    // 移动途中曾排了别的位置，但最新一帧又回到了正在前往的位置。
+    pendingMove = null;
+    return;
+  }
+  if (movingTo === null && samePoint(placed, at)) {
+    pendingMove = null;
+    return;
+  }
+  pendingMove = at;
   placedAtMs = Date.now();
-  void moveStage(at.x, at.y).catch((err) => {
-    // 挪不动的后果由下一次 refreshStage 兜住：它会把运动层的舞台原点纠回真实值，
-    // 猫于是被 roamBounds 限制在当前窗口内活动 - 仍然可见、可点。
-    moveFailures++;
-    if (moveFailures <= 3) {
-      console.error('[cyber-cat] 移动舞台窗口失败，猫的活动范围将被限制在当前窗口内：', err);
-    }
-  });
+  void drainStageMoves();
 }
 
 /**
@@ -919,8 +958,34 @@ async function catchUp(): Promise<void> {
 let pressAt: { x: number; y: number } | null = null;
 /** 正在拖猫。null = 没在拖。值是光标的屏幕位置，每帧喂给运动层。 */
 let holdAt: { x: number; y: number } | null = null;
+/** 当前由猫画布捕获的指针。截图工具等系统覆盖层可能在按住期间夺走它。 */
+let dragPointerId: number | null = null;
 /** 最近一次知道的光标屏幕 x。落地反应要用它决定蹭回来还是走开。 */
 let cursorScreenX: number | null = null;
+
+/**
+ * 清掉一次尚未正常结束的按下。
+ *
+ * 系统截图、锁屏和应用切换都可能让 WebView 收不到原来的 pointerup；只依赖
+ * pointercancel 也不够，因为系统覆盖层不保证把取消事件转发给 WebView。无论从
+ * blur、lostpointercapture 还是下一次无按键的 pointermove 进来，都走这里收尾，
+ * 保证穿透强制状态与世界层的「被拎着」一起复位。
+ */
+function cancelPointerInteraction(): void {
+  const wasHolding = holdAt !== null;
+  pressAt = null;
+  holdAt = null;
+
+  const pointerId = dragPointerId;
+  dragPointerId = null;
+  if (pointerId !== null && canvas.hasPointerCapture(pointerId)) {
+    canvas.releasePointerCapture(pointerId);
+  }
+
+  if (!wasHolding) return;
+  passthrough.hold(false);
+  enqueue({ type: 'drop' });
+}
 
 // --- 逗猫棒（issue #11）-----------------------------------------------------
 //
@@ -1037,6 +1102,11 @@ function teaseThisFrame(intent: RenderIntent, now: number, g: StageGeometry): nu
 }
 
 window.addEventListener('pointerdown', (e) => {
+  if (!e.isPrimary || e.button !== 0) return;
+  // 上一次按下若被系统覆盖层截断，下一次真实按下就是最后一道自愈机会。
+  if (pressAt !== null || holdAt !== null || dragPointerId !== null) {
+    cancelPointerInteraction();
+  }
   const p = toSprite(e.clientX, e.clientY);
   // 气泡先判。它在猫头顶、与猫的掩膜不重叠（diary/constants.ts 的
   // BUBBLE_BASE_SPRITE_Y 就是照这个量出来的），所以先后其实不冲突 -
@@ -1047,6 +1117,10 @@ window.addEventListener('pointerdown', (e) => {
   }
   if (!lastFrame) return;
   if (!hitTest(lastFrame, p.x, p.y)) return;
+  // 指针捕获让正常拖动即使暂时滑出窗口也能继续；系统截图若夺走捕获，
+  // lostpointercapture 会走下面的统一取消路径。
+  dragPointerId = e.pointerId;
+  canvas.setPointerCapture(e.pointerId);
   pressAt = { x: e.screenX, y: e.screenY };
 });
 
@@ -1057,7 +1131,13 @@ window.addEventListener('pointermove', (e) => {
   cursorScreenX = e.screenX;
   observeTrail(e.screenX, e.screenY, performance.now());
 
-  if (pressAt === null) return;
+  if (pressAt === null || dragPointerId !== e.pointerId) return;
+  // 截图覆盖层可能吞掉 pointerup，恢复后浏览器只给一次 buttons=0 的移动。
+  // 这时不能继续让猫黏着光标，应该把丢失的松手补回来。
+  if ((e.buttons & 1) === 0) {
+    cancelPointerInteraction();
+    return;
+  }
   if (holdAt === null) {
     if (Math.hypot(e.screenX - pressAt.x, e.screenY - pressAt.y) < DRAG_THRESHOLD_PX) return;
     // 越过阈值：这一次按下是拖拽。**拎起来要作为 UserAction 进世界层** -
@@ -1070,10 +1150,13 @@ window.addEventListener('pointermove', (e) => {
 });
 
 window.addEventListener('pointerup', (e) => {
+  if (dragPointerId !== e.pointerId) return;
   const start = pressAt;
   const wasHolding = holdAt !== null;
   pressAt = null;
   holdAt = null;
+  dragPointerId = null;
+  if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
   cursorScreenX = e.screenX;
   if (wasHolding) {
     passthrough.hold(false);
@@ -1088,13 +1171,19 @@ window.addEventListener('pointerup', (e) => {
   hearts = [...hearts, ...burstHearts(performance.now(), motion.x)];
 });
 
-window.addEventListener('pointercancel', () => {
-  if (holdAt !== null) {
-    passthrough.hold(false);
-    enqueue({ type: 'drop' });
-  }
-  pressAt = null;
-  holdAt = null;
+window.addEventListener('pointercancel', (e) => {
+  if (dragPointerId === e.pointerId) cancelPointerInteraction();
+});
+
+canvas.addEventListener('lostpointercapture', (e) => {
+  if (dragPointerId === e.pointerId) cancelPointerInteraction();
+});
+
+// Windows 截图、macOS 截图/切换 Space、锁屏都会先让 WebView 失去活动状态。
+// 即使平台没有补发 pointercancel，也不能让猫永久停在 held。
+window.addEventListener('blur', cancelPointerInteraction);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) cancelPointerInteraction();
 });
 
 // 跨屏拖动或系统缩放变化时重算设备缩放，保持像素锐利

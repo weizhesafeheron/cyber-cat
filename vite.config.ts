@@ -1,5 +1,8 @@
 import { defineConfig } from 'vite';
 
+const csp =
+  "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: ws://localhost:5273";
+
 /**
  * 前端构建配置。
  *
@@ -25,6 +28,17 @@ export default defineConfig({
   server: {
     port: 5273,
     strictPort: true,
+    // 生产构建由 Tauri 注入同一条 CSP。开发页也必须阻止 Windows WebView2
+    // 请求 http://ipc.localhost，Tauri 才会立即回退到原生 postMessage IPC。
+    headers: {
+      'Content-Security-Policy': csp,
+    },
+    // Windows 在 Rust 链接 build_script_build.exe 时会独占该文件；Vite 若递归
+    // 监听 src-tauri/target，会因 EBUSY 直接退出并连带终止 `tauri dev`。
+    // target 是编译产物，本来也不该触发前端热更新。
+    watch: {
+      ignored: ['**/src-tauri/target/**'],
+    },
   },
   // Tauri 在自己的窗口里加载页面，不需要浏览器自动打开
   clearScreen: false,
