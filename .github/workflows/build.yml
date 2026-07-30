@@ -5,28 +5,17 @@
 # 而不是一台机器出两份产物。
 #
 # 什么时候跑：
-# - 手动点（workflow_dispatch）：**默认两个平台都出**，产物存成 artifact，
+# - 手动点（workflow_dispatch）：两个平台都出，产物存成 artifact，
 #   在那次运行的页面里下载（zip），保留 30 天。
-#   platform 那个下拉能只挑一个平台跑 - 只在「明确只要其中一个」时用它省 runner 时间
-#   （private 仓库里 macOS 按 10 倍计费），但默认必须是两个都有，
-#   因为这条路的意义就是「不装任何开发环境也能拿到两个平台的包」。
+#   这条路的意义就是「不装任何开发环境也能拿到两个平台的包」，所以不做平台过滤。
 # - 推 v 开头的 tag：额外建一个**草稿** Release 并把安装包挂上去。草稿是刻意的 -
 #   发布前你还要自己在 macOS 与 Windows 上各装一次（见 issue #16）。
-# - **不在每次 push 到 main 时跑。** macOS runner 按 10 倍计费，而这个仓库的提交
-#   绝大多数只改前端与文档，没必要每次都烧两台机器。测试那个 job 才是每次都跑的。
+# - **不在每次 push 到 main 时跑。** 这个仓库的提交绝大多数只改前端与文档，
+#   而一次两平台构建要十几分钟；要包的时候手动点一下就有。测试那个 job 才是每次都跑的。
 name: build
 
 on:
   workflow_dispatch:
-    inputs:
-      platform:
-        description: 构建哪个平台
-        type: choice
-        default: both
-        options:
-          - windows
-          - macos
-          - both
   push:
     tags:
       - 'v*'
@@ -66,11 +55,10 @@ jobs:
       # 一个平台挂了另一个照样出包 - 只有一半能装也比两手空空有用
       fail-fast: false
       matrix:
-        # 手动触发时按 platform 输入过滤；tag 触发一律两个都出（要发版就得两个包齐）。
-        # exclude 里的条件为真时那一行被剔掉。
-        exclude:
-          - platform: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.platform == 'windows') && 'macos-latest' || '' }}
-          - platform: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.platform == 'macos') && 'windows-latest' || '' }}
+        # **不要在这里放表达式。** 试过用 exclude + ${{ }} 做「只跑某一个平台」的开关，
+        # 结果整个 build job 根本没被生成出来（矩阵展开在 workflow 级别就失败了，
+        # 运行页面上只剩 test，没有任何一条能对上的报错）。
+        # 仓库是 public、runner 免费，那个开关本来的理由（省 macOS 的 10 倍计费）也不存在了。
         include:
           - platform: macos-latest
             # universal：一个 DMG 同时支持 Apple Silicon 与 Intel。
