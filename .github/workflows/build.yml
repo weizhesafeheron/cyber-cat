@@ -97,16 +97,19 @@ jobs:
         id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 签名与公证：仓库里现在没有这些 secret，所以产出的是 ad-hoc 签名的包。
-          # 配上之后这一步会自动签名并公证，不用改 workflow。
-          # macOS：APPLE_CERTIFICATE（base64 的 .p12）、APPLE_CERTIFICATE_PASSWORD、
-          #        APPLE_SIGNING_IDENTITY、APPLE_ID、APPLE_PASSWORD、APPLE_TEAM_ID
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          #
+          # **这里刻意不写 APPLE_CERTIFICATE 那一组签名变量。** 踩过：
+          # GitHub 对**不存在的 secret 会注入空字符串**，于是 tauri-action 看到变量
+          # 「存在」，就真的拿一段空 base64 去 `security import`，打包最后一步炸掉：
+          #   security: SecKeychainItemImport: One or more parameters passed to a function were not valid.
+          #   failed to bundle project: failed codesign application
+          # 而代码其实全编过了（universal 二进制都产出了）。**空的 secret 不等于没有 secret。**
+          #
+          # 等真的有 Developer ID 了再加回来，而且必须是「secret 配齐之后」才加：
+          #   APPLE_CERTIFICATE（base64 的 .p12）、APPLE_CERTIFICATE_PASSWORD、
+          #   APPLE_SIGNING_IDENTITY、APPLE_ID、APPLE_PASSWORD、APPLE_TEAM_ID
+          # 没配齐就留着不写 - 未签名的包只是让下载的人多点两下（见 releaseBody），
+          # 而写了空值会让整条流水线出不了包。
         with:
           args: ${{ matrix.args }}
           # tagName 为空时 tauri-action 只构建、不碰 Release。
