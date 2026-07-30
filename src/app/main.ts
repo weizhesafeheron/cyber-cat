@@ -14,10 +14,13 @@ import {
   H,
   W,
   hitTest,
-  makeCat,
   headColumn,
+  materializeCat,
   makeMicro,
+  motionTuningFor,
   stepMicro,
+  tuneMotionPose,
+  tuneMotionTime,
 } from '../render/index.js';
 import type {
   ActionKey,
@@ -294,11 +297,11 @@ let world!: World;
 let cat!: Cat;
 let micro!: MicroState;
 
-/** 把猫装进来。外观与性格一律由「品种 + Seed」重建，不从存档里读派生值。 */
+/** 把猫装进来。新身份使用领养封存的档案，旧身份回退到品种 + Seed。 */
 function install(w: World): void {
   // 时区跟随当前机器：用户换了时区（或过了夏令时），猫的作息该跟着用户的白天走。
   world = { ...w, tzOffsetMinutes: tzOffsetMinutes() };
-  cat = makeCat(world.identity.breed, world.identity.seed);
+  cat = materializeCat(world.identity);
   micro = makeMicro(world.identity.seed);
 }
 
@@ -445,7 +448,20 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
   // 播什么动作只看 motion.playing - 即时反馈已经在 frame() 里作为动作喂给
   // 运动层了，这里不再覆盖。两个来源会让画面与位移脱节（见 frame() 的注释）。
   const mi = stepMicro(micro, animDt, microOptsFor(micros, intent.micro));
-  const base = ACTIONS[motion.playing].make(animT, cat, mi);
+  const motionTuning = motionTuningFor(
+    world.identity.motion ? { motion: world.identity.motion } : undefined,
+    motion.playing,
+  );
+  const base = tuneMotionPose(
+    motion.playing,
+    ACTIONS[motion.playing].make(
+      tuneMotionTime(animT, motionTuning, motion.playing, cat),
+      cat,
+      mi,
+    ),
+    motionTuning,
+    cat,
+  );
   // 叠加顺序是有讲究的：
   //   intent.pose 在动作之上 - 生病、睡着这类状态覆盖不该被动作或即时反馈吃掉；
   //   faceDir 在合并之后 - 它要翻转的 dx / legOx 可能来自任何一层；

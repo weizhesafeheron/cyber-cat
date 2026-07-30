@@ -1,5 +1,4 @@
-import { BREEDS } from '../render/index.js';
-import type { BreedKey } from '../render/types.js';
+import { parseAdopted } from '../adopt/identity.js';
 import { WORLD_VERSION } from './constants.js';
 import type { World } from './types.js';
 
@@ -73,12 +72,12 @@ export function parseWorld(text: string): World {
   }
 
   const identity = obj(w, 'identity');
-  const breed = identity['breed'];
-  if (typeof breed !== 'string' || !(breed in BREEDS)) {
-    throw new SaveFormatError(`未知品种 ${JSON.stringify(breed)}`);
+  let adopted;
+  try {
+    adopted = parseAdopted(identity);
+  } catch (error) {
+    throw new SaveFormatError(`identity 无效（${error instanceof Error ? error.message : String(error)}）`);
   }
-  const name = identity['name'];
-  if (typeof name !== 'string') throw new SaveFormatError('identity.name 应为字符串');
 
   const needs = obj(w, 'needs');
   const stats = obj(w, 'stats');
@@ -96,10 +95,14 @@ export function parseWorld(text: string): World {
   return {
     version,
     identity: {
-      breed: breed as BreedKey,
-      seed: num(identity, 'seed'),
+      breed: adopted.breed,
+      seed: adopted.seed,
       bornAt: num(identity, 'bornAt'),
-      name,
+      name: adopted.name,
+      ...(adopted.personality ? { personality: adopted.personality } : {}),
+      ...(adopted.marking ? { marking: adopted.marking } : {}),
+      ...(adopted.art ? { art: adopted.art } : {}),
+      ...(adopted.motion ? { motion: adopted.motion } : {}),
     },
     clock: num(w, 'clock'),
     carryMs: num(w, 'carryMs'),

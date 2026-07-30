@@ -1,10 +1,14 @@
-import type { BreedKey } from './types.js';
+import { PALETTES } from './palette.js';
+import type { BreedKey, MarkingAdapter, Palette } from './types.js';
 
 /** 参数范围 [最小值, 最大值]，由 Seed 在其间线性采样。 */
 type Range = readonly [number, number];
 
 export interface BreedDef {
   key: BreedKey;
+  palette: Palette;
+  /** 花纹生成与着色算法。新增同类品种只需复用一个已注册适配器。 */
+  markingAdapter: MarkingAdapter;
   label: string;
   desc: string;
   bodyRW: Range;
@@ -17,7 +21,7 @@ export interface BreedDef {
   legLen: Range;
   fluff: number;
   eyeBig: 0 | 1;
-  /** 活跃度基线。Seed 在其附近采样，因此同品种也有活跃与懒的个体。 */
+  /** 仅供旧存档的 Seed 性格重建；新领养的性格独立随机。 */
   active: number;
   sitW?: number;
   earSet?: number;
@@ -25,6 +29,10 @@ export interface BreedDef {
   earRound?: boolean;
   earDrop?: number;
   eyeLiner?: boolean;
+  /** 蓬松锥形尾巴。是形态能力，不再由渲染器识别品种名。 */
+  plumeTail?: boolean;
+  /** 是否绘制腮毛像素。 */
+  whiskerPixels?: boolean;
 }
 
 /**
@@ -38,6 +46,8 @@ export interface BreedDef {
 export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   orange: {
     key: 'orange',
+    palette: PALETTES.orange,
+    markingAdapter: 'tabby',
     label: '橘猫',
     desc: '圆 · 懒 · 尾巴粗',
     bodyRW: [12.5, 14],
@@ -54,6 +64,8 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   black: {
     key: 'black',
+    palette: PALETTES.black,
+    markingAdapter: 'solid',
     label: '黑猫',
     desc: '轮廓细长 · 眼睛明显',
     bodyRW: [11.5, 13],
@@ -68,9 +80,12 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
     eyeBig: 1,
     active: 0.55,
     sitW: 0.6,
+    whiskerPixels: false,
   },
   cow: {
     key: 'cow',
+    palette: PALETTES.cow,
+    markingAdapter: 'patches',
     label: '奶牛猫',
     desc: '花纹不规则 · 动作活跃',
     bodyRW: [11.5, 13.5],
@@ -87,6 +102,8 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   ragdoll: {
     key: 'ragdoll',
+    palette: PALETTES.ragdoll,
+    markingAdapter: 'color-point',
     label: '布偶猫',
     desc: '毛领大 · 尾巴蓬松',
     bodyRW: [11.5, 14.5],
@@ -100,9 +117,12 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
     fluff: 0.55,
     eyeBig: 0,
     active: 0.4,
+    plumeTail: true,
   },
   devon: {
     key: 'devon',
+    palette: PALETTES.devon,
+    markingAdapter: 'wavy',
     label: '德文卷毛',
     desc: '耳朵巨大 · 精灵脸',
     bodyRW: [10, 11.5],
@@ -126,6 +146,8 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   amshort: {
     key: 'amshort',
+    palette: PALETTES.amshort,
+    markingAdapter: 'classic-tabby',
     label: '美短',
     desc: '银虎斑 · 结实',
     bodyRW: [12.5, 14],
@@ -143,6 +165,8 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   aby: {
     key: 'aby',
+    palette: PALETTES.aby,
+    markingAdapter: 'ticked',
     label: '阿比西尼亚',
     desc: '野性优雅 · 渐层毛色',
     bodyRW: [10.5, 12],
@@ -166,3 +190,13 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
 };
 
 export const BREED_KEYS = Object.keys(BREEDS) as BreedKey[];
+
+export function hasBreed(id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(BREEDS, id);
+}
+
+export function getBreed(id: BreedKey): BreedDef {
+  const breed = BREEDS[id];
+  if (!breed) throw new Error(`未知品种 ${JSON.stringify(id)}`);
+  return breed;
+}

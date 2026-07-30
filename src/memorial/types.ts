@@ -12,9 +12,8 @@ import type { CatIdentity, WorldEvent, WorldStats } from '../world/index.js';
 /**
  * 一只已经离开的猫在档案里的那一条。
  *
- * **只存无法重建的东西。** 外观与性格由「品种 + Seed」完整重建（ADR 0002），
- * 陪伴天数由 bornAt 与 diedAt 算出来 - 存进去就有两份真相，而这份文件会在
- * 磁盘上躺很久，两份真相有足够的时间漂移。
+ * 身份整份保留：新身份包含无法由 Seed 重建的性格与调参快照（ADR 0015）。
+ * 陪伴天数仍由 bornAt 与 diedAt 算出来，不另存派生值。
  *
  * 日记必须存：world.json 被新猫覆盖之后，那只猫的一生就只剩这里一份了
  * （CONTEXT.md 的「猫咪日记」：死后可在猫的档案中回看）。

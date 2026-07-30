@@ -62,8 +62,7 @@ function anchorOf(world: World, cat: Cat): PropKind | null {
 }
 
 /**
- * `cat` 是必填的：开吃阈值按贪吃度算，而性格由「品种 + Seed」重建，
- * 不存在世界状态里（见 CatIdentity 的注释）。调用方本来就要有这只猫。
+ * `cat` 是必填的：开吃阈值按贪吃度算，而运行时猫由封存档案物化。
  */
 export function renderIntentOf(world: World, cat: Cat): RenderIntent {
   const status = statusOf(world);

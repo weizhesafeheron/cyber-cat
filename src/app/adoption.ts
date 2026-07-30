@@ -56,6 +56,10 @@ export async function adoptNewCat(gate: AdoptionGate): Promise<World> {
     breed: identity.breed,
     seed: identity.seed,
     name: identity.name,
+    personality: identity.personality,
+    marking: identity.marking,
+    art: identity.art,
+    motion: identity.motion,
     bornAt: gate.now(),
     tzOffsetMinutes: gate.tzOffsetMinutes(),
   });

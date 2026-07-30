@@ -89,6 +89,15 @@ const SCALE_EPS = 0.01;
 const PERCH_SETTLE_S = 1.2;
 
 /**
+ * 窗口站稳之后，最迟再等这么久就发出邀请。
+ *
+ * 性格抽签仍然保留：活跃的猫更可能提前想到要上去；但没有上限时，一只正在趴着的
+ * 猫加上一段运气不好的随机流，真机上会让功能看起来像坏了。这个上限只约束等待，
+ * 不绕过动作闸门与冷却。
+ */
+const PERCH_MAX_WAIT_AFTER_SETTLE_S = 15;
+
+/**
  * 下来之后至少隔这么多秒才会再上去。
  *
  * 没有它猫会「跳下来 → 立刻又跳上去」，因为触发条件（有个窗口在前台）
@@ -184,13 +193,16 @@ export function perchAllowed(status: CatStatus, anchor: PropKind | null): boolea
 /**
  * 这一刻可以起跳吗。
  *
- * 只在猫本来就在走动或站着的时候起跳：打哈欠、伸懒腰、舔毛、坐着的时候
- * 硬插一次起跳，读起来是动作被打断，而不是猫改了主意。
+ * 走动、站着、坐下与趴下都可以自然转去爬窗口：后两者是没有明确收尾帧的循环
+ * 姿势，若一定等世界层改主意，单次会挡住 25–100 秒，功能就像失灵。运动层收到
+ * 邀请后会先改播走路、走到起跳点，不会从趴姿直接弹起来。
+ *
+ * 有明确内容的动作仍不打断：打哈欠、伸懒腰、舔毛、吃饭、睡觉与扑跳都要播完。
  * **这只是起跳闸门，不是留在上面的条件** - 上去之后世界层想趴就趴，
  * 那正是「趴在标题栏上」。
  */
 export function perchStartOk(action: WorldActionKey | null): boolean {
-  return action === 'walk' || action === 'idle';
+  return action === 'walk' || action === 'idle' || action === 'sit' || action === 'lie';
 }
 
 /**
@@ -212,7 +224,15 @@ export interface PerchDesire {
 }
 
 export function initialPerchDesire(): PerchDesire {
-  return { offer: null, id: null, readyS: 0, onS: 0, stayS: 0, restS: 0 };
+  // 冷却只约束「刚从窗口下来又马上上去」。应用刚启动还没有上一次，直接视为已冷却。
+  return {
+    offer: null,
+    id: null,
+    readyS: 0,
+    onS: 0,
+    stayS: 0,
+    restS: PERCH_COOLDOWN_S,
+  };
 }
 
 export interface PerchDesireInput {
@@ -276,9 +296,12 @@ export function nextPerchDesire(prev: PerchDesire, i: PerchDesireInput): PerchDe
   if (readyS < PERCH_SETTLE_S) return waiting;
   if (waiting.restS < PERCH_COOLDOWN_S) return waiting;
 
-  // 抽签。频率按活跃度，折算成这一帧的概率。
+  // 抽签。频率按活跃度，折算成这一帧的概率；若一直没抽中，到上限就直接邀请。
+  // 这样性格决定「会不会更早想到」，但不会让用户为一次可见反馈等上几分钟。
+  const waitedOut =
+    readyS >= PERCH_SETTLE_S + PERCH_MAX_WAIT_AFTER_SETTLE_S;
   const perMin = PERCH_TRIES_PER_MIN_BASE + i.active * PERCH_TRIES_PER_MIN_SPAN;
-  if (i.rnd() >= (perMin / 60) * dt) return waiting;
+  if (!waitedOut && i.rnd() >= (perMin / 60) * dt) return waiting;
 
   return {
     offer: i.surface,

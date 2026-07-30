@@ -1,6 +1,23 @@
 /** 渲染层的公开类型。平台无关，不依赖 DOM。 */
 
-export type BreedKey = 'orange' | 'black' | 'cow' | 'ragdoll' | 'devon' | 'amshort' | 'aby';
+/** 品种是目录里的稳定 ID；新增品种不再需要修改类型联合。 */
+export type BreedKey = string;
+
+/** 花纹算法是可复用能力；品种只在目录里选择一种，不进入渲染分支。 */
+export type MarkingAdapter =
+  | 'tabby'
+  | 'solid'
+  | 'patches'
+  | 'color-point'
+  | 'wavy'
+  | 'classic-tabby'
+  | 'ticked';
+
+/** 领养时封存的花纹选择。variant 是适配器内稳定 ID，seed 只控制模板内细节。 */
+export interface MarkingChoice {
+  variant: string;
+  seed: number;
+}
 
 /** 花纹分层。决定某个像素取调色板的哪一条色阶。 */
 export type Layer = 'base' | 'mark' | 'white';
@@ -49,10 +66,13 @@ export interface Marks {
   stripeFreq?: number;
   stripeW?: number;
   stripePhase?: number;
+  stripeStyle?: 'lines' | 'spots';
   headStripes?: boolean;
   tailRings?: boolean;
   // 德文卷毛
   speck?: number;
+  waveScale?: number;
+  wavePhase?: number;
   // 阿比西尼亚
   tick?: number;
   // 黑猫
@@ -71,11 +91,19 @@ export interface Marks {
 }
 
 /**
- * 一只猫的完整外观与性格参数。
- * 由 makeCat(breed, seed) 确定性地生成 - 相同入参永远得到相同的猫。
+ * 一只猫的完整运行时外观与性格参数。
+ * 由基础 Seed 猫叠加封存档案得到；相同档案永远得到相同的猫。
  */
 export interface Cat {
   breed: BreedKey;
+  /** 决定花纹算法的可扩展适配器，不让渲染器按品种 ID 分支。 */
+  markingAdapter: MarkingAdapter;
+  /** 缺省表示旧版 Seed 花纹；新领养会封存适配器内的稳定模板 ID。 */
+  markingVariant?: string;
+  /** 与体型 Seed 分离，换花纹不会把已经挑好的身形一起换掉。 */
+  markingSeed?: number;
+  plumeTail: boolean;
+  whiskerPixels: boolean;
   seed: number;
   bodyRW: number;
   bodyRH: number;
@@ -89,6 +117,12 @@ export interface Cat {
   fluff: number;
   /** 1 = 大眼带竖瞳 */
   eyeBig: 0 | 1;
+  eyeScale?: number;
+  outlineStrength?: number;
+  cheekWidth?: number;
+  muzzleScale?: number;
+  markingTemplate?: number;
+  jointBlend?: number;
   /** 坐姿宽窄系数。腿长的猫坐得更瘦。 */
   sitW: number;
   /** 耳距系数（相对头半径） */
@@ -97,6 +131,14 @@ export interface Cat {
   earSpread: number;
   /** 圆耳尖（德文） */
   earRound: boolean;
+  /** 领养调参覆盖的整体圆润度。1 = 半椭圆，0 = 三角形；缺省保留品种原轮廓。 */
+  earRoundness?: number;
+  /** 新档案启用：耳根沿脸部椭圆落位；缺省保留旧存档的逐像素位置。 */
+  attachEarsToFace?: boolean;
+  /** 耳朵中轴与地面的夹角（度）。45 = 最大外张，90 = 竖直，>90 = 向内聚拢。 */
+  earAngle?: number;
+  /** 旋转前保持的耳朵中轴长度，避免外张被误读成单纯横向拉伸。 */
+  earAxisLength?: number;
   /** 低位耳的下移像素数（德文） */
   earDrop: number;
   /** 眼周深色描线（阿比） */

@@ -98,10 +98,19 @@ function drawSit(r: Raster, cat: Cat, p: Pose): Anchors {
 
   r.blob(rearCX, rearCY, rearRX, rearRY, furShade(cat, 'body'), cat.fluff, cat.seed);
 
-  const chestCX = bx + dir * 4.5;
+  const jointBlend = Math.max(0, cat.jointBlend ?? 0);
+  const chestCX = bx + dir * (4.5 - jointBlend * 1.15);
   const chestRY = rearRY * 0.84;
   const chestCY = GROUND - chestRY + 0.5;
-  r.blob(chestCX, chestCY, 5.8, chestRY, furShade(cat, 'body'), cat.fluff, cat.seed + 3);
+  r.blob(
+    chestCX,
+    chestCY,
+    5.8 + jointBlend * 0.7,
+    chestRY,
+    furShade(cat, 'body'),
+    cat.fluff,
+    cat.seed + 3,
+  );
 
   // pawLift > 0 时近侧前爪抬到嘴边（舔毛用）。
   drawLeg(r, cat, Math.round(chestCX + dir * 2) - 1, Math.round(GROUND - 7), {

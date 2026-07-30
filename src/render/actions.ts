@@ -237,7 +237,7 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
   },
 
   lie: {
-    label: '趴下（面包）',
+    label: '趴下',
     loop: true,
     make(t, _cat, mi, opts) {
       const sweep = opts?.tailSweep ?? false;
@@ -294,7 +294,7 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
     label: '吃饭',
     loop: true,
     period: EAT_CYCLE_S,
-    make(t) {
+    make(t, cat) {
       // 只有低头咀嚼的形体，没有食盆 - 食盆是独立的挂件窗口（ADR 0004、ticket 08），
       // 猫要走到它跟前才会被世界层判定为在吃（见 src/app/motion.ts 的锚点分支）。
       //
@@ -314,11 +314,18 @@ export const ACTIONS: Record<ActionKey, ActionDef> = {
       // 埋头时是小幅快嚼，抬头时是大口慢嚼 - 两段的节奏不同才看得出在换动作。
       const chew = down > 0.5 ? Math.sin(t * 15) : Math.sin(t * 7);
       const jaw = chew > 0.2 ? 0.35 - down * 0.12 : 0;
+      // 小头猫的颈部重叠更少，同样向上抬三像素会直接离开身体。头越小，
+      // 允许向上的余量越克制；低头的正向位移不受影响。
+      const liftRoom = clamp((cat.headR - 6) * 0.72, 0.45, 2.35);
+      const headDY = Math.max(
+        -liftRoom,
+        -1.2 + down * 9 + chew * (down > 0.5 ? 0.8 : 1.6),
+      );
       return {
         form: 'stand',
         headDX: 1 + down * 1.5,
         // 抬头时略高于常态：那一下「仰起来嚼」是这个动作最容易读到的部分。
-        headDY: Math.round(-1.2 + down * 9 + chew * (down > 0.5 ? 0.8 : 1.6)),
+        headDY,
         muzzleDY: down * 0.8,
         mouth: jaw,
         // 埋头时眼睛眯着，抬头时睁开环顾。

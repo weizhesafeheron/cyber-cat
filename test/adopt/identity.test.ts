@@ -58,7 +58,21 @@ describe('身份载荷解析', () => {
   });
 
   it('多余字段被丢掉，不会带进存档', () => {
-    const id = parseAdopted({ ...GOOD, personality: { active: 1 } });
+    const id = parseAdopted({ ...GOOD, debugNote: { active: 1 } });
     expect(Object.keys(id).sort()).toEqual(['breed', 'name', 'seed']);
+  });
+
+  it('完整档案会校验并保留花纹模板', () => {
+    const profile = {
+      ...GOOD,
+      personality: { active: 0.2, clingy: 0.4, greedy: 0.6 },
+      marking: { variant: 'bold', seed: 42 },
+      art: {},
+      motion: {},
+    };
+    expect(parseAdopted(profile).marking).toEqual(profile.marking);
+    expect(() =>
+      parseAdopted({ ...profile, marking: { variant: '不存在', seed: 42 } }),
+    ).toThrow(AdoptionPayloadError);
   });
 });

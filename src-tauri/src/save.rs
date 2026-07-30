@@ -38,10 +38,15 @@ const MEMORIAL_FILE: &str = "memorial.json";
 const SETTINGS_FILE: &str = "settings.json";
 
 fn data_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("取应用数据目录失败：{e}"))?;
+    // 本地验收可以指向一次性的隔离目录，重走首次领养而不删除用户的正式存档。
+    // 正式构建没有这个环境变量，仍只使用系统应用数据目录。
+    let dir = match std::env::var_os("CYBER_CAT_DATA_DIR") {
+        Some(path) => PathBuf::from(path),
+        None => app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("取应用数据目录失败：{e}"))?,
+    };
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录 {dir:?} 失败：{e}"))?;
     Ok(dir.join(name))
 }

@@ -3,7 +3,14 @@ import { FORMS } from './poses.js';
 import { Raster } from './raster.js';
 import type { Cat, Pose, RenderResult } from './types.js';
 
-export { BREEDS, BREED_KEYS, type BreedDef } from './breeds.js';
+export { BREEDS, BREED_KEYS, getBreed, hasBreed, type BreedDef } from './breeds.js';
+export {
+  MARKING_VARIANTS,
+  hasMarkingVariant,
+  markingChoiceFor,
+  markingVariantsFor,
+  type MarkingVariantDef,
+} from './marking-variants.js';
 export { makeCat } from './cat.js';
 export { PALETTES, RAGDOLL_POINTS } from './palette.js';
 export {
@@ -19,7 +26,36 @@ export {
 export { makeMicro, stepMicro, type MicroState, type MicroOpts, type MicroOut } from './micro.js';
 export { GROUND, H, W } from './raster.js';
 export { headColumn } from './poses.js';
+export { earAttachment, type EarAttachment } from './parts.js';
 export { mulberry32 } from './rng.js';
+export {
+  ART_TUNING_CONTROLS,
+  DEFAULT_ART_TUNING,
+  normalizeArtTuning,
+  tuneCatArt,
+  type ArtTuningControl,
+  type CatArtTuning,
+  type CatArtTuningKey,
+} from './art-tuning.js';
+export {
+  DEFAULT_MOTION_TUNING,
+  MOTION_TUNING_CONTROLS,
+  motionTuningControlsFor,
+  normalizeMotionTuning,
+  tuneMotionPose,
+  tuneMotionTime,
+  type CatMotionTuning,
+  type CatMotionTuningKey,
+  type MotionTuningControl,
+} from './motion-tuning.js';
+export {
+  materializeCat,
+  motionTuningFor,
+  normalizeProfile,
+  randomPersonality,
+  type CatProfile,
+  type MotionProfile,
+} from './profile.js';
 export * from './types.js';
 
 /**
@@ -45,7 +81,7 @@ export class CatRenderer {
     const anchors = form(r, cat, pose);
 
     // 描边必须在所有部件之后、装饰之前。
-    r.outlinePass();
+    r.outlinePass(cat.outlineStrength ?? 0);
     // 掩膜的语义由 Raster 的 kind 缓冲承载：影子与装饰标为 DECOR，
     // 因此下面这些绘制不会污染命中区域。
     r.shadowPass(anchors.bx, cat.bodyRW + 3);
