@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "CYBER-CAT",
+  "productName": "赛博猫咪",
   "version": "0.0.0",
   "identifier": "app.cybercat.pet",
   "build": {
@@ -15,7 +15,7 @@
     "windows": [
       {
         "label": "pet",
-        "title": "CYBER-CAT",
+        "title": "赛博猫咪",
         "url": "index.html",
         "width": 648,
         "height": 240,
@@ -33,7 +33,7 @@
       },
       {
         "label": "prop-bowl",
-        "title": "CYBER-CAT 食盆",
+        "title": "赛博猫咪 食盆",
         "url": "prop.html?kind=bowl",
         "width": 78,
         "height": 36,
@@ -51,7 +51,7 @@
       },
       {
         "label": "prop-bed",
-        "title": "CYBER-CAT 猫窝",
+        "title": "赛博猫咪 猫窝",
         "url": "prop.html?kind=bed",
         "width": 132,
         "height": 30,

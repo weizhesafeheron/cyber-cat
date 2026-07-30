@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  这份会被 tauri-bundler 合并进 CYBER-CAT.app/Contents/Info.plist。
+  只放一件事：让它从启动那一刻就是附属应用。
+
+  运行时的 platform::configure_app 也会设 Accessory 激活策略，但那是**进程起来之后**
+  才执行的 - 在此之前 macOS 已经按 Info.plist 把它当普通应用处理，于是程序坞里
+  会闪一下图标再消失。打包版实测确认过：不写这一项，Info.plist 里就没有 LSUIElement。
+
+  运行时那次设置仍然不能删：dev 模式跑的是没有 .app 外壳的裸二进制，那时没有
+  任何 Info.plist 可读。两处一起才覆盖两种运行方式。
+
+  领养与告别期间应用会**临时切回普通模式**（set_foreground_app(true)），
+  因为附属应用的窗口拿键盘焦点不可靠，而领养要打字。LSUIElement 不妨碍那次切换 -
+  它定的是初始状态，不是上限。
+-->
+<plist version="1.0">
+  <dict>
+    <key>LSUIElement</key>
+    <true/>
+  </dict>
+</plist>
