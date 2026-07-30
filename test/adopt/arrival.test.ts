@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { walkFrame } from '../../src/adopt/arrival.js';
 import {
   ADOPT_H,
+  ADOPT_PREVIEW_W,
   ADOPT_SCALE,
   ADOPT_W,
   ENTER_X,
@@ -93,20 +94,18 @@ describe('走进来', () => {
 });
 
 describe('画面尺寸与站位', () => {
-  it('领养窗口是小尺寸窗口', () => {
-    // 一次性流程的窗口不该像主界面那么大（mvp-scope 第 7 节）。
-    // 上限取 720x560：比它再大就该重新想想这一步到底要展示什么。
-    expect(ADOPT_W).toBeLessThanOrEqual(720);
-    expect(ADOPT_H).toBeLessThanOrEqual(560);
+  it('领养窗口能容纳相遇画面与直观调参区', () => {
+    expect(ADOPT_W).toBeGreaterThanOrEqual(860);
+    expect(ADOPT_H).toBeGreaterThanOrEqual(680);
   });
 
   it('猫停下时整只都在画面里', () => {
     expect(REST_X - HALF_SPRITE).toBeGreaterThanOrEqual(0);
-    expect(REST_X + HALF_SPRITE).toBeLessThanOrEqual(ADOPT_W);
+    expect(REST_X + HALF_SPRITE).toBeLessThanOrEqual(ADOPT_PREVIEW_W);
   });
 
   it('入场起点与离场终点都在画面外，看不到猫凭空出现或消失', () => {
-    expect(ENTER_X - HALF_SPRITE).toBeGreaterThanOrEqual(ADOPT_W);
+    expect(ENTER_X - HALF_SPRITE).toBeGreaterThanOrEqual(ADOPT_PREVIEW_W);
     expect(EXIT_X + HALF_SPRITE).toBeLessThanOrEqual(0);
   });
 

@@ -140,12 +140,21 @@ export class Raster {
    * **必须在所有部件绘制完之后跑**，否则会在部件之间产生内部黑线。
    * 先收集再统一写入，避免本次新写入的描边像素成为下一个像素的邻居而级联扩散。
    */
-  outlinePass(): void {
+  outlinePass(rawStrength = 0): void {
+    const strength = clamp(rawStrength, -1, 1);
     const marks: number[] = [];
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         if (this.buf[y * W + x]) continue;
-        if (this.at(x + 1, y) || this.at(x - 1, y) || this.at(x, y + 1) || this.at(x, y - 1)) {
+        const cardinal =
+          this.at(x + 1, y) || this.at(x - 1, y) || this.at(x, y + 1) || this.at(x, y - 1);
+        const diagonal =
+          strength > 0.48 &&
+          (this.at(x + 1, y + 1) ||
+            this.at(x - 1, y + 1) ||
+            this.at(x + 1, y - 1) ||
+            this.at(x - 1, y - 1));
+        if (cardinal || diagonal) {
           marks.push(y * W + x);
         }
       }
@@ -159,7 +168,20 @@ export class Raster {
         this.kindAt(x - 1, y) === KIND_CAT ||
         this.kindAt(x, y + 1) === KIND_CAT ||
         this.kindAt(x, y - 1) === KIND_CAT;
-      this.buf[i] = OUTLINE;
+      if (Math.abs(strength) < 0.001) {
+        this.buf[i] = OUTLINE;
+      } else {
+        const [r, g, b] = rgb(OUTLINE);
+        const target = strength > 0 ? [10, 8, 16] : [102, 95, 116];
+        const amount = Math.abs(strength) * 0.72;
+        this.buf[i] = `#${[r, g, b]
+          .map((channel, index) =>
+            Math.round(channel + (target[index]! - channel) * amount)
+              .toString(16)
+              .padStart(2, '0'),
+          )
+          .join('')}`;
+      }
       this.kind[i] = touchesCat ? KIND_CAT : KIND_PROP;
     }
   }

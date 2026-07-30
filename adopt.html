@@ -4,249 +4,201 @@
     <meta charset="UTF-8" />
     <title>有猫停在你面前</title>
     <style>
-      /*
-       * 领养窗口。小尺寸、居中、用完即关（mvp-scope 第 7 节）。
-       *
-       * 呈现要求：**这是一次相遇，不是一张角色创建表单。**
-       * 所以画面主体是雨夜与猫，文字只有一句旁白加一张小卡片，
-       * 按钮说的是「再等等」与「就是它了」，不是「随机」与「确定」。
-       *
-       * 尺寸不写死在这里：夜幕高度与窗口尺寸都来自 src/adopt/constants.ts，
-       * 由 main.ts 写进 CSS 变量。数字散成两份迟早对不上。
-       */
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --bg: #0b0e1a;
+        --panel: #11162a;
+        --panel-2: #161c34;
+        --line: #2c3a68;
+        --muted: #7882a8;
+        --text: #d8dcf0;
+        --cyan: #4deeea;
+        --yellow: #ffd94a;
+        --pink: #f652a0;
       }
-      html,
-      body {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #0b0e1a;
-        color: #d8dcf0;
-        font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-        user-select: none;
+      html, body {
+        width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+        font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif; user-select: none;
       }
-      /*
-       * 让开自绘的标题条（fixed 在窗口顶部，src/chrome/）。
-       * 那个高度由 mountChrome 写进 --chrome-h，只有一份 - 别在这里写死。
-       * 窗口高度那边也加了同一段（withChrome），所以雨夜与文字的排版一像素都没动。
-       */
-      body {
-        padding-top: var(--chrome-h);
+      body { padding-top: var(--chrome-h); }
+      button, select, input { font: inherit; }
+      #layout {
+        height: 100%; display: grid; grid-template-columns: minmax(0, 1.04fr) minmax(360px, .96fr);
       }
-      /* 雨夜。猫在里面走动，走出边界的部分被裁掉，才有「从画面外走来」 */
-      #night {
-        position: relative;
-        width: 100%;
-        height: var(--sky-h);
-        overflow: hidden;
-      }
-      #sky {
-        position: absolute;
-        inset: 0;
-      }
-      /*
-       * 猫贴夜幕下沿：脚在精灵的下沿，贴底才站在地上。横向由 display.place() 写 transform。
-       * z-index 让它压在下面那道渐变之上 - 渐变的高度会盖到猫的脚，
-       * 而爪子被一层半透明的黑抹掉之后，猫看起来是浮在地上的。
-       */
+      #encounter { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+      #night { position: relative; width: 100%; height: var(--sky-h); min-height: var(--sky-h); overflow: hidden; }
+      #sky { position: absolute; inset: 0; }
       #cat {
-        position: absolute;
-        left: 0;
-        bottom: 0;
-        z-index: 2;
-        display: block;
-        image-rendering: pixelated;
-        -webkit-user-drag: none;
+        position: absolute; left: 0; bottom: 0; z-index: 2; display: block;
+        image-rendering: pixelated; -webkit-user-drag: none;
       }
-      /* 夜幕与文字之间的过渡，避免出现一条生硬的分界线 */
       #night::after {
-        content: '';
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 1;
-        height: 16px;
-        background: linear-gradient(180deg, rgba(11, 14, 26, 0) 0%, #0b0e1a 100%);
-        pointer-events: none;
+        content: ''; position: absolute; inset: auto 0 0; z-index: 1; height: 24px;
+        background: linear-gradient(180deg, transparent, var(--bg)); pointer-events: none;
       }
-
-      #panel {
-        padding: 6px 22px 18px;
-      }
-      #lede {
-        font-size: 13.5px;
-        line-height: 1.7;
-        color: #aab3d8;
-        min-height: 23px;
-      }
-      #lede b {
-        color: #ffd94a;
-        font-weight: 600;
-      }
-
-      #card {
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-top: 10px;
-      }
-      #breed {
-        font-size: 19px;
-        font-weight: 600;
-        letter-spacing: 1px;
-        color: #4deeea;
-      }
-      #shape {
-        font-size: 12px;
-        color: #5b6488;
-      }
-      #traits {
-        display: flex;
-        gap: 8px;
-        list-style: none;
-        margin-top: 12px;
-        flex-wrap: wrap;
-      }
+      #story { min-height: 0; flex: 1; padding: 14px 24px 20px; display: flex; flex-direction: column; }
+      #lede { color: #aab3d8; font-size: 14px; line-height: 1.7; min-height: 48px; }
+      #lede b { color: var(--yellow); font-weight: 600; }
+      #card { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+      #breed { color: var(--cyan); font-size: 21px; font-weight: 650; letter-spacing: 1px; }
+      #shape { color: var(--muted); font-size: 12px; }
+      #traits { display: flex; gap: 8px; list-style: none; margin-top: 12px; flex-wrap: wrap; }
       #traits li {
-        font-size: 12px;
-        color: #d8dcf0;
-        background: #161c34;
-        border: 1px solid #2c3a68;
-        border-radius: 999px;
-        padding: 4px 12px;
+        font-size: 12px; background: var(--panel-2); border: 1px solid var(--line);
+        border-radius: 999px; padding: 5px 12px;
       }
-
-      .row {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        margin-top: 18px;
-      }
-      .row[hidden] {
-        display: none;
-      }
-      /*
-       * 起名：输入框独占一行，按钮另起一行。
-       *
-       * 三样东西挤一行在 464 的窗口里放不下 - 输入框、「再想想」、「就叫这个」
-       * 加起来会把确认按钮挤出右边界（实测被裁掉）。而且中文按钮的宽度随字体
-       * 变化，Windows 换成 YaHei 之后余量还会不一样，靠调 gap 是压不住的。
-       */
-      #naming {
-        margin-top: 18px;
-      }
-      /*
-       * 打量这一步比起名少了一个输入框，按钮行往上顶 48 像素，于是窗口底下空出
-       * 一块 - 空旷会让这一页看起来像个配置对话框。把两步的按钮行对齐到同一条线上：
-       * 18（起名的上边距）+ 输入框 + 10（按钮行的上边距）正好是这里的 68（输入框实测 40 高）。
-       * 好处不只是不空：**点「就是它了」时界面不会整体跳一下。**
-       */
-      #meeting {
-        margin-top: 68px;
-      }
-      #naming[hidden] {
-        display: none;
-      }
-      #naming .row {
-        margin-top: 10px;
-        justify-content: flex-end;
-      }
-      button {
-        cursor: pointer;
-        font-family: inherit;
-        font-size: 13px;
-        border-radius: 6px;
-        padding: 9px 18px;
-        border: 1px solid #2c3a68;
-        background: #161c34;
-        color: #aab3d8;
-      }
-      button:hover:enabled {
-        border-color: #4deeea;
-        color: #4deeea;
-      }
-      button:disabled {
-        opacity: 0.4;
-        cursor: default;
-      }
-      button.primary {
-        background: #4deeea;
-        border-color: #4deeea;
-        color: #07091a;
-        font-weight: 600;
-      }
-      button.primary:hover:enabled {
-        background: #7ef4f1;
-        border-color: #7ef4f1;
-        color: #07091a;
-      }
+      .identity-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; margin-top: 17px; }
+      .small { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
       #name {
-        display: block;
-        width: 100%;
-        font-family: inherit;
-        font-size: 14px;
-        color: #ffd94a;
-        background: #07091a;
-        border: 1px solid #2c3a68;
-        border-radius: 6px;
-        padding: 9px 12px;
-        user-select: text;
+        min-width: 0; color: var(--text); background: #07091a; border: 1px solid var(--line);
+        border-radius: 7px; padding: 9px 11px; outline: none;
       }
-      #name:focus {
-        outline: none;
-        border-color: #4deeea;
+      .dropdown { position: relative; min-width: 0; }
+      .dropdown-trigger {
+        width: 100%; min-width: 0; display: flex; align-items: center; justify-content: space-between;
+        gap: 18px; height: 38px; padding: 0 12px; color: var(--text); text-align: left;
+        background:
+          linear-gradient(135deg, rgba(77, 238, 234, .08), transparent 42%),
+          linear-gradient(180deg, #10172c, #090d1d);
+        box-shadow: inset 0 1px rgba(255, 255, 255, .025), 0 0 0 1px rgba(7, 9, 26, .5);
       }
-      #hint {
-        margin-top: 8px;
-        font-size: 12px;
-        min-height: 17px;
-        color: #5b6488;
+      .dropdown-trigger::after {
+        content: ''; width: 7px; height: 7px; flex: 0 0 auto;
+        border-right: 1.5px solid var(--cyan); border-bottom: 1.5px solid var(--cyan);
+        transform: translateY(-2px) rotate(45deg); transition: transform .15s ease;
       }
-      #hint.bad {
-        color: #f652a0;
+      .dropdown.open .dropdown-trigger { border-color: var(--cyan); color: #f1f3ff; }
+      .dropdown.open .dropdown-trigger::after { transform: translateY(2px) rotate(225deg); }
+      .dropdown-menu {
+        position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 6px);
+        max-height: 238px; overflow-y: auto; padding: 5px; border: 1px solid #38517f;
+        border-radius: 8px; background: rgba(9, 13, 29, .98);
+        box-shadow: 0 14px 38px rgba(0, 0, 0, .48), inset 0 1px rgba(255, 255, 255, .04);
+        backdrop-filter: blur(14px);
+      }
+      .dropdown-menu[hidden] { display: none; }
+      .dropdown-option {
+        width: 100%; display: block; padding: 8px 10px; border: 0; border-radius: 5px;
+        color: #aab3d8; text-align: left; background: transparent;
+      }
+      .dropdown-option:hover, .dropdown-option[aria-selected='true'] {
+        color: var(--cyan); background: rgba(77, 238, 234, .1);
+      }
+      .dropdown-option[aria-selected='true']::before { content: '·'; margin-right: 7px; color: var(--yellow); }
+      #name:focus { border-color: var(--cyan); }
+      button {
+        cursor: pointer; border: 1px solid var(--line); border-radius: 7px;
+        padding: 9px 15px; background: var(--panel-2); color: #aab3d8;
+      }
+      button:hover:enabled { border-color: var(--cyan); color: var(--cyan); }
+      button:disabled { opacity: .42; cursor: default; }
+      button.primary { background: var(--cyan); border-color: var(--cyan); color: #07091a; font-weight: 650; }
+      button.primary:hover:enabled { background: #7ef4f1; color: #07091a; }
+      .identity-tools > button, .preview-actions > button {
+        align-self: end; height: 38px; padding-top: 0; padding-bottom: 0;
+      }
+      #meeting, #naming .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: auto; padding-top: 16px; }
+      #naming { margin-top: auto; padding-top: 14px; }
+      #naming[hidden], #meeting[hidden] { display: none; }
+      #name { width: 100%; color: var(--yellow); user-select: text; }
+      #hint { min-height: 18px; color: var(--muted); font-size: 12px; margin-top: 8px; }
+      #hint.bad { color: var(--pink); }
+
+      #customize { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+      .custom-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--line); }
+      .custom-head h1 { font-size: 17px; letter-spacing: .5px; }
+      .custom-head p { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 5px; }
+      .preview-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 13px; align-items: end; }
+      .preview-actions { display: flex; gap: 8px; }
+      #randomize { border-color: #49618f; color: var(--yellow); }
+      #randomize:hover:enabled { border-color: var(--yellow); color: #fff2a6; }
+      .tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 12px 22px 0; gap: 8px; }
+      .tab[aria-selected='true'] { border-color: var(--cyan); color: var(--cyan); background: #102538; }
+      #tuning-fields { flex: 1; min-height: 0; display: flex; }
+      #controls {
+        flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+        padding: 14px 22px 30px; scrollbar-color: #344773 transparent; scrollbar-width: thin;
+      }
+      #controls::-webkit-scrollbar { width: 8px; }
+      #controls::-webkit-scrollbar-thumb { background: #344773; border-radius: 999px; border: 2px solid var(--panel); }
+      fieldset { border: 0; min-width: 0; }
+      fieldset:disabled { opacity: .48; }
+      .group + .group { margin-top: 20px; }
+      .group h2 {
+        color: var(--yellow); font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+        border-bottom: 1px solid #222b4d; padding-bottom: 8px; margin-bottom: 11px;
+      }
+      .control + .control { margin-top: 14px; }
+      .control-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+      .control-head output { color: var(--cyan); font-variant-numeric: tabular-nums; }
+      .range { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; gap: 8px; align-items: center; margin-top: 6px; }
+      .range span { color: #616b93; font-size: 10px; }
+      .range span:last-child { text-align: right; }
+      input[type='range'] { width: 100%; accent-color: var(--cyan); }
+      .locked {
+        display: none; margin: 12px 22px 0; padding: 10px 12px; border: 1px solid #6f5f29;
+        color: var(--yellow); background: #221f18; border-radius: 7px; font-size: 12px;
+      }
+      #customize.locked-mode .locked { display: block; }
+      @media (max-width: 760px) {
+        #layout { grid-template-columns: minmax(0, 1fr); }
+        #encounter { display: none; }
       }
     </style>
   </head>
   <body>
-    <div id="night">
-      <canvas id="sky"></canvas>
-      <canvas id="cat"></canvas>
-    </div>
-
-    <div id="panel">
-      <p id="lede"></p>
-      <div id="card">
-        <span id="breed"></span>
-        <span id="shape"></span>
-      </div>
-      <ul id="traits"></ul>
-
-      <div class="row" id="meeting">
-        <button id="next">再等等</button>
-        <button id="keep" class="primary">就是它了</button>
-      </div>
-
-      <form id="naming" hidden>
-        <!--
-          刻意不写 maxlength：它按 UTF-16 长度截断，而名字的上限是按码点算的
-          （src/adopt/name.ts）。写上之后 emoji 名字会被砍成一半额度，
-          还会在半个代理对上截断。超长交给校验去说人话。
-        -->
-        <input id="name" type="text" autocomplete="off" placeholder="给它起个名字" />
-        <div class="row">
-          <button id="back" type="button">再想想</button>
-          <button id="confirm" class="primary" type="submit">就叫这个</button>
+    <main id="layout">
+      <section id="encounter">
+        <div id="night"><canvas id="sky"></canvas><canvas id="cat"></canvas></div>
+        <div id="story">
+          <p id="lede"></p>
+          <div id="card"><span id="breed"></span><span id="shape"></span></div>
+          <ul id="traits"></ul>
+          <div class="identity-tools">
+            <div class="small">品种
+              <div class="dropdown" id="breed-dropdown">
+                <button class="dropdown-trigger" id="breed-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+                <div class="dropdown-menu" id="breed-menu" role="listbox" hidden></div>
+              </div>
+            </div>
+            <button id="reroll" type="button">换个花纹</button>
+          </div>
+          <div id="meeting"><button id="keep" class="primary">确认领养</button></div>
+          <form id="naming" hidden>
+            <input id="name" type="text" autocomplete="off" placeholder="给它起个名字" />
+            <div class="form-actions">
+              <button id="back" type="button">再看看</button>
+              <button id="confirm" class="primary" type="submit">带它回家</button>
+            </div>
+          </form>
+          <p id="hint"></p>
         </div>
-      </form>
-      <p id="hint"></p>
-    </div>
-
+      </section>
+      <aside id="customize">
+        <div class="custom-head">
+          <h1>让它更像你心里的那只猫</h1>
+          <p>性格已经由它自己决定；这里只调整形象与动作。确认领养后会封存，直到下一次领养。</p>
+          <div class="preview-row">
+            <div class="small">预览动作
+              <div class="dropdown" id="action-dropdown">
+                <button class="dropdown-trigger" id="action-trigger" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+                <div class="dropdown-menu" id="action-menu" role="listbox" hidden></div>
+              </div>
+            </div>
+            <div class="preview-actions">
+              <button id="randomize" type="button">完全随机</button>
+              <button id="reset" type="button">重置</button>
+            </div>
+          </div>
+        </div>
+        <div class="locked">正在起名。返回上一步仍可继续调整；带它回家后参数会永久封存。</div>
+        <div class="tabs">
+          <button id="art-tab" class="tab" type="button" aria-selected="true">调形象</button>
+          <button id="motion-tab" class="tab" type="button" aria-selected="false">调动作</button>
+        </div>
+        <fieldset id="tuning-fields"><div id="controls"></div></fieldset>
+      </aside>
+    </main>
     <script type="module" src="/src/adopt/main.ts"></script>
   </body>
 </html>

@@ -1,4 +1,10 @@
-import type { BreedKey } from '../render/types.js';
+import type {
+  BreedKey,
+  CatArtTuning,
+  MarkingChoice,
+  MotionProfile,
+  Personality,
+} from '../render/index.js';
 import {
   INITIAL_BOND,
   INITIAL_ENERGY,
@@ -14,6 +20,10 @@ export interface AdoptionSpec {
   breed: BreedKey;
   seed: number;
   name: string;
+  personality?: Personality;
+  marking?: MarkingChoice;
+  art?: CatArtTuning;
+  motion?: MotionProfile;
   /** 出生时刻，epoch ms。由平台层注入。 */
   bornAt: number;
   /** 本地时区偏移，分钟（东八区 = 480）。由平台层注入。 */
@@ -35,6 +45,10 @@ export function createWorld(spec: AdoptionSpec): World {
       seed: spec.seed,
       bornAt: spec.bornAt,
       name: spec.name,
+      ...(spec.personality ? { personality: { ...spec.personality } } : {}),
+      ...(spec.marking ? { marking: { ...spec.marking } } : {}),
+      ...(spec.art ? { art: { ...spec.art } } : {}),
+      ...(spec.motion ? { motion: structuredClone(spec.motion) } : {}),
     },
     clock: spec.bornAt,
     carryMs: 0,
@@ -74,7 +88,13 @@ export function createWorld(spec: AdoptionSpec): World {
 export function draftOf(world: World): World {
   return {
     ...world,
-    identity: { ...world.identity },
+    identity: {
+      ...world.identity,
+      ...(world.identity.personality ? { personality: { ...world.identity.personality } } : {}),
+      ...(world.identity.marking ? { marking: { ...world.identity.marking } } : {}),
+      ...(world.identity.art ? { art: { ...world.identity.art } } : {}),
+      ...(world.identity.motion ? { motion: structuredClone(world.identity.motion) } : {}),
+    },
     needs: { ...world.needs },
     stats: { ...world.stats },
     diary: world.diary.slice(),

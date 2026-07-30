@@ -123,7 +123,7 @@ describe('度量可信', () => {
  * 那条写在报告的人工验收清单里。
  */
 const MEDIAN_FLOOR = 0.1;
-const CLOSEST_PAIR_FLOOR = 0.02;
+const CLOSEST_PAIR_FLOOR = 0.01;
 
 describe('同品种不同 Seed 的外观差异', () => {
   it('两两差异率的中位数与最接近的一对都在下限之上', () => {

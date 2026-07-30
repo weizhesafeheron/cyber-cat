@@ -54,8 +54,10 @@ export const TRAIT_HIGH = 2 / 3;
  * Microsoft YaHei，行高与 PingFang 并不相同 - 卡着 443 排在 macOS 上正好，
  * 到 Windows 上就可能把最后一行提示裁掉，而这是个本地看不见的问题。
  */
-export const ADOPT_W = 464;
-export const ADOPT_H = 468;
+export const ADOPT_W = 920;
+export const ADOPT_H = 720;
+/** 左侧雨夜预览区的设计宽度。入场动画按这里裁切，不按整个双栏窗口。 */
+export const ADOPT_PREVIEW_W = 478;
 
 /** 雨夜画面的高度，CSS 逻辑像素。猫贴在它的下沿。 */
 export const SKY_H = H * ADOPT_SCALE + 22;
@@ -69,10 +71,10 @@ export const HALF_SPRITE = (W * ADOPT_SCALE) / 2;
  * 偏左是有意的：正中会与下方的文字块中轴重合，看起来像一张对齐好的说明图；
  * 偏开之后画面右侧留出的雨幕成了「它刚从那边走来」的方向暗示。
  */
-export const REST_X = ADOPT_W * 0.44;
+export const REST_X = 230;
 
 /** 入场起点与离场终点：都在画面外一个身位，看不到猫凭空出现或消失。 */
-export const ENTER_X = ADOPT_W + HALF_SPRITE;
+export const ENTER_X = ADOPT_PREVIEW_W + HALF_SPRITE;
 export const EXIT_X = -HALF_SPRITE;
 
 /**

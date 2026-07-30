@@ -67,6 +67,51 @@ describe('确定性', () => {
 });
 
 describe('存档序列化往返', () => {
+  it('新领养的性格、形象与动作快照不会在往返时丢失', () => {
+    const world = makeWorld({
+      patch: {
+        identity: {
+          breed: 'cow',
+          seed: 42,
+          bornAt: 100,
+          name: '团子',
+          personality: { active: 0.2, clingy: 0.8, greedy: 0.4 },
+          marking: { variant: 'mask', seed: 20260730 },
+          art: {
+            roundness: 0.6,
+            headSize: 0,
+            earSize: 0,
+            earShape: 0,
+            earSpread: 0,
+            legLength: -0.2,
+            eyeSize: 0.3,
+            tailVolume: 0,
+            fluffiness: 0,
+            colorEnergy: 0,
+            outlineStrength: 0.4,
+            shadingDepth: 0,
+            cheekWidth: 0.5,
+            muzzleSize: 0,
+            markingTemplate: 0.7,
+            jointBlend: 0.5,
+          },
+          motion: {
+            walk: {
+              tempo: -0.2,
+              strideLength: 0.3,
+              footLift: -0.2,
+              bodyBob: -0.8,
+              headBob: -0.4,
+              gaitFlow: 0.6,
+              tailBalance: 0.2,
+            },
+          },
+        },
+      },
+    });
+    expect(parseWorld(serializeWorld(world)).identity).toEqual(world.identity);
+  });
+
   it('往返之后继续步进，结果与未序列化时一致', () => {
     const world = runTicks(makeWorld({ hour: 6, patch: { bowl: 2 } }), 20).world;
 

@@ -177,11 +177,14 @@ describe('世界层的两道闸门', () => {
     }
   });
 
-  it('起跳只发生在猫本来就在走动或站着的时候', () => {
+  it('站立与被动休息姿势可以自然转去起跳，明确动作不会被打断', () => {
     expect(perchStartOk('walk')).toBe(true);
     expect(perchStartOk('idle')).toBe(true);
-    // 打哈欠、伸懒腰、舔毛中途插一次起跳，读起来是动作被打断。
-    for (const a of ['yawn', 'stretch', 'groom', 'eat', 'sleep', 'lie', 'sit', 'pounce'] as const) {
+    // 坐下与趴下都是循环姿势，没有必须等到的收尾帧；收到邀请后运动层会先站起来走。
+    expect(perchStartOk('sit')).toBe(true);
+    expect(perchStartOk('lie')).toBe(true);
+    // 这些动作有明确内容，中途插一次起跳读起来才是真正被打断。
+    for (const a of ['yawn', 'stretch', 'groom', 'eat', 'sleep', 'pounce'] as const) {
       expect(perchStartOk(a), `${a} 时不该起跳`).toBe(false);
     }
     expect(perchStartOk(null)).toBe(false);
@@ -242,6 +245,30 @@ describe('要不要上去、待多久', () => {
   it('前台有个能站的窗口，猫最终会上去', () => {
     const at = firstOfferAt(run({ seconds: 600, active: 1 }).frames);
     expect(at).not.toBeNull();
+  });
+
+  it('首次看到合格窗口不会额外等待重复冷却，并且最迟约 16 秒发出邀请', () => {
+    // rnd 永远返回 1：性格抽签一次也不会提前命中，只能靠最长等待兜底。
+    let desire = initialPerchDesire();
+    let offeredAt: number | null = null;
+    const dt = 1 / 60;
+    for (let tS = dt; tS <= 20; tS += dt) {
+      desire = nextPerchDesire(desire, {
+        dt,
+        allowed: true,
+        startOk: true,
+        surface: SURFACE,
+        active: 0,
+        rnd: () => 1,
+      });
+      if (desire.offer !== null) {
+        offeredAt = tS;
+        break;
+      }
+    }
+    expect(offeredAt).not.toBeNull();
+    expect(offeredAt!).toBeGreaterThanOrEqual(16);
+    expect(offeredAt!).toBeLessThan(17);
   });
 
   it('窗口刚切到前台的那一秒内绝不起跳 - 不做跟随前台窗口的 UI 控件', () => {

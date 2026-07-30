@@ -1,9 +1,8 @@
-import { BREEDS } from '../render/index.js';
+import { BREEDS, materializeCat } from '../render/index.js';
 import { MS_PER_DAY, MS_PER_MINUTE } from '../world/index.js';
 import { lifespanDays } from '../memorial/index.js';
 import type { Memorial, MemorialEntry } from '../memorial/index.js';
 import { diaryText } from '../diary/index.js';
-import { makeCat } from '../render/index.js';
 
 /**
  * 告别页的文案。
@@ -81,7 +80,7 @@ export interface DiaryDay {
  */
 export function diaryByDay(entry: MemorialEntry, tzOffsetMinutes: number): DiaryDay[] {
   const bornDay = dayIndex(entry.identity.bornAt, tzOffsetMinutes);
-  const cat = makeCat(entry.identity.breed, entry.identity.seed);
+  const cat = materializeCat(entry.identity);
   const sorted = [...entry.diary].sort((a, b) => a.at - b.at);
 
   const days: DiaryDay[] = [];
@@ -93,8 +92,7 @@ export function diaryByDay(entry: MemorialEntry, tzOffsetMinutes: number): Diary
       days.push(current);
     }
     current.lines.push({
-      // 文案按性格分化（ticket 13），所以要把那只猫重建出来 -
-      // 外观与性格一律由「品种 + Seed」重建，档案里不存派生值（与 world 同一条纪律）。
+      // 文案按性格分化（ticket 13），所以要从封存档案重建那只猫。
       text: diaryText(event, cat),
       at: event.at,
       important: event.important,

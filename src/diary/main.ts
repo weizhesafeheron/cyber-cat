@@ -17,7 +17,7 @@
 import { contentReady, closeDiary, inTauri, resizeSelf } from '../app/ipc.js';
 import { mountChrome } from '../chrome/index.js';
 import { loadWorld } from '../app/persist.js';
-import { makeCat } from '../render/index.js';
+import { materializeCat } from '../render/index.js';
 import { companionDays, worldNow } from '../world/index.js';
 import type { World } from '../world/index.js';
 import { DIARY_MIN_H, DIARY_MIN_W, DIARY_VISIBLE_ENTRIES } from './constants.js';
@@ -54,7 +54,7 @@ function dayNode(day: DiaryDay): HTMLElement {
 }
 
 function render(world: World): void {
-  const cat = makeCat(world.identity.breed, world.identity.seed);
+  const cat = materializeCat(world.identity);
   const name = world.identity.name;
   const days = companionDays(world, world.diedAt ?? worldNow(world));
 

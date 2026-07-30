@@ -1,104 +1,183 @@
-import { BREED_KEYS } from '../render/index.js';
-import type { BreedKey } from '../render/index.js';
+import {
+  ART_TUNING_CONTROLS,
+  BREED_KEYS,
+  DEFAULT_ART_TUNING,
+  hasBreed,
+  markingChoiceFor,
+  markingVariantsFor,
+  normalizeArtTuning,
+  normalizeMotionTuning,
+  randomPersonality,
+  type ActionKey,
+  type BreedKey,
+  type CatArtTuning,
+  type CatMotionTuning,
+  type MotionProfile,
+  type MarkingChoice,
+  type Personality,
+} from '../render/index.js';
 import { SEED_SPACE } from './constants.js';
 import type { AdoptedIdentity } from './identity.js';
 import { normalizeName } from './name.js';
 
 /**
- * 领养流程的纯逻辑。
- *
- * 分工：这里只回答「现在是哪只猫、下一步能做什么」，**不碰 DOM、不取时钟、
- * 不自己产随机数**（随机源注入）。按钮回调里只有状态迁移的调用。
- *
- * 为什么必须是纯的：验收项里有「七个品种都能被抽到」与「同品种不同 Seed 的猫
- * 明显不同」。埋在点击回调里的话，这两条只能靠人手点几十次去撞，撞不到也不知道
- * 是运气差还是实现错。
- *
- * 术语按 CONTEXT.md 的「领养」：猫**主动走来**，用户可以让它再等等（重新抽取），
- * 直到遇到想留下的那只。代码里叫「来客」不叫「候选项」，是为了别在写界面文案时
- * 顺手写出「生成一只猫」。
+ * 领养中的可编辑草稿。性格在 beginAdoption 时只抽一次；所有外观操作都必须原样保留它。
+ * 确认并起名后，草稿随身份一起进入存档，运行环境没有再编辑的入口。
  */
-
-/** 一只来访的猫。「品种 + Seed」就足以完整重建它的外观与性格（ADR 0002）。 */
 export interface Candidate {
   readonly breed: BreedKey;
   readonly seed: number;
+  readonly personality: Personality;
+  readonly marking: MarkingChoice;
+  readonly art: CatArtTuning;
+  readonly motion: MotionProfile;
 }
 
-/** meeting = 正在打量这只猫；naming = 已经决定留下它，正在起名。 */
 export type AdoptionPhase = 'meeting' | 'naming';
 
 export interface AdoptionFlow {
   readonly phase: AdoptionPhase;
   readonly candidate: Candidate;
-  /**
-   * 还没发完的那副牌。
-   *
-   * **不是「每次随机挑一个品种」。** 均匀随机允许连着来七只橘猫 - 概率虽小，
-   * 但落到某个用户头上他看到的就是「这游戏只有橘猫」。一副洗好的牌发完再洗，
-   * 保证任意连续七只覆盖全部七个品种。
-   */
-  readonly bag: readonly BreedKey[];
-  /** 已经来过几只（含当前这只）。呈现上用来区分「第一只」与「又来了一只」。 */
+  /** 兼容自动化样本采集；产品界面不再把猫一只只赶走。 */
   readonly met: number;
 }
 
-/** 洗一副新牌。`avoid` 是上一只的品种，洗完不让它排在第一张。 */
-function shuffle(rnd: () => number, avoid?: BreedKey): BreedKey[] {
-  const bag = BREED_KEYS.slice();
-  for (let i = bag.length - 1; i > 0; i--) {
-    // rnd 的契约是 [0, 1)，但注入的实现可能是别人写的 - 越界一次就丢一个品种。
-    const j = Math.min(i, Math.max(0, Math.floor(rnd() * (i + 1))));
-    const tmp = bag[i]!;
-    bag[i] = bag[j]!;
-    bag[j] = tmp;
-  }
-  // 连着来两只同品种会让人以为品种就那么几个，和上一只重了就换到队尾去。
-  if (avoid !== undefined && bag[0] === avoid && bag.length > 1) {
-    const last = bag.length - 1;
-    const tmp = bag[0]!;
-    bag[0] = bag[last]!;
-    bag[last] = tmp;
-  }
-  return bag;
-}
-
-/** Seed 取整数：mulberry32 吃的是整数，小数会让两个不同的 Seed 落到同一只猫。 */
 function nextSeed(rnd: () => number): number {
   return Math.floor(Math.min(Math.max(rnd(), 0), 0.999999999) * SEED_SPACE);
 }
 
-function deal(
-  bag: readonly BreedKey[],
-  rnd: () => number,
-  avoid?: BreedKey,
-): { candidate: Candidate; bag: readonly BreedKey[] } {
-  const pool = bag.length > 0 ? bag : shuffle(rnd, avoid);
-  return { candidate: { breed: pool[0]!, seed: nextSeed(rnd) }, bag: pool.slice(1) };
+function randomTuningValue(rnd: () => number): number {
+  const unit = Math.min(Math.max(rnd(), 0), 1);
+  return Math.round((unit * 2 - 1) * 100) / 100;
 }
 
-/** 第一只猫走来。 */
 export function beginAdoption(rnd: () => number): AdoptionFlow {
-  const { candidate, bag } = deal([], rnd);
-  return { phase: 'meeting', candidate, bag, met: 1 };
+  const breedIndex = Math.min(BREED_KEYS.length - 1, Math.max(0, Math.floor(rnd() * BREED_KEYS.length)));
+  const breed = BREED_KEYS[breedIndex]!;
+  const seed = nextSeed(rnd);
+  // 初次花纹 Seed 从体型 Seed 做确定性扰动，不额外消费领养随机流；这样新增档案字段
+  // 不会改变后续来访猫的 Seed 序列。之后点“换个花纹”才会单独重抽它。
+  const markingSeed = ((seed ^ 0x6d2b79f5) >>> 0) % SEED_SPACE;
+  return {
+    phase: 'meeting',
+    candidate: {
+      breed,
+      seed,
+      personality: randomPersonality(rnd),
+      marking: markingChoiceFor(breed, markingSeed),
+      art: { ...DEFAULT_ART_TUNING },
+      motion: {},
+    },
+    met: 1,
+  };
+}
+
+export function selectBreed(flow: AdoptionFlow, breed: BreedKey): AdoptionFlow {
+  if (!hasBreed(breed)) return flow;
+  return {
+    ...flow,
+    candidate: {
+      ...flow.candidate,
+      breed,
+      marking: markingChoiceFor(breed, flow.candidate.marking.seed),
+    },
+  };
+}
+
+/** 只换花纹模板与模板内 Seed；体型、性格和用户已经调过的参数都不变。 */
+export function rerollAppearance(flow: AdoptionFlow, rnd: () => number): AdoptionFlow {
+  const variants = markingVariantsFor(flow.candidate.breed);
+  const current = variants.findIndex((entry) => entry.key === flow.candidate.marking.variant);
+  const seed = nextSeed(rnd);
+  let next = seed % variants.length;
+  if (next === current) next = (next + 1) % variants.length;
+  return {
+    ...flow,
+    candidate: {
+      ...flow.candidate,
+      marking: { variant: variants[next]!.key, seed },
+    },
+  };
 }
 
 /**
- * 再等等，换下一只。**不限次数**（验收项）。
- *
- * 所以这里没有任何计数上限，也没有「稀有度」之类的暗门 - 用户想看多久看多久。
+ * 从完整品种目录重新抽一只，并随机所有外观参数。
+ * 性格属于这次相遇的猫本身，不随定制按钮重抽；动作统一恢复默认，避免随机组合
+ * 让猫的行为失去协调感。
  */
-export function meetNext(flow: AdoptionFlow, rnd: () => number): AdoptionFlow {
-  const { candidate, bag } = deal(flow.bag, rnd, flow.candidate.breed);
-  return { phase: 'meeting', candidate, bag, met: flow.met + 1 };
+export function randomizeVisuals(flow: AdoptionFlow, rnd: () => number): AdoptionFlow {
+  const breedIndex = Math.min(BREED_KEYS.length - 1, Math.max(0, Math.floor(rnd() * BREED_KEYS.length)));
+  const breed = BREED_KEYS[breedIndex]!;
+  const seed = nextSeed(rnd);
+  const markingSeed = nextSeed(rnd);
+  const art = { ...DEFAULT_ART_TUNING };
+  for (const { key } of ART_TUNING_CONTROLS) art[key] = randomTuningValue(rnd);
+  return {
+    ...flow,
+    candidate: {
+      breed,
+      seed,
+      personality: flow.candidate.personality,
+      marking: markingChoiceFor(breed, markingSeed),
+      art,
+      motion: {},
+    },
+  };
 }
 
-/** 就是它了：留下这只，进入起名。 */
+/**
+ * 旧的“下一只”采样接口。产品界面已经改为选品种 + 换花纹，但保留它供渲染回归
+ * 测试均衡采样；它同样不会重抽性格。
+ */
+export function meetNext(flow: AdoptionFlow, rnd: () => number): AdoptionFlow {
+  const current = BREED_KEYS.indexOf(flow.candidate.breed);
+  const breed = BREED_KEYS[(current + 1 + BREED_KEYS.length) % BREED_KEYS.length]!;
+  return {
+    phase: 'meeting',
+    met: flow.met + 1,
+    candidate: {
+      ...flow.candidate,
+      breed,
+      seed: nextSeed(rnd),
+      marking: markingChoiceFor(breed, flow.candidate.marking.seed),
+    },
+  };
+}
+
+export function setArtTuning(
+  flow: AdoptionFlow,
+  patch: Partial<CatArtTuning>,
+): AdoptionFlow {
+  return {
+    ...flow,
+    candidate: {
+      ...flow.candidate,
+      art: normalizeArtTuning({ ...flow.candidate.art, ...patch }),
+    },
+  };
+}
+
+export function setMotionTuning(
+  flow: AdoptionFlow,
+  action: ActionKey,
+  patch: Partial<CatMotionTuning>,
+): AdoptionFlow {
+  return {
+    ...flow,
+    candidate: {
+      ...flow.candidate,
+      motion: {
+        ...flow.candidate.motion,
+        [action]: normalizeMotionTuning({ ...flow.candidate.motion[action], ...patch }),
+      },
+    },
+  };
+}
+
 export function accept(flow: AdoptionFlow): AdoptionFlow {
   return { ...flow, phase: 'naming' };
 }
 
-/** 再想想：从起名退回来继续看这只猫。**不换猫** - 退回来还是刚才那只。 */
 export function resumeMeeting(flow: AdoptionFlow): AdoptionFlow {
   return { ...flow, phase: 'meeting' };
 }
@@ -107,18 +186,20 @@ export type NamingResult =
   | { readonly ok: true; readonly identity: AdoptedIdentity }
   | { readonly ok: false; readonly reason: string };
 
-/**
- * 给它起名，得到完整身份。
- *
- * 只在 naming 阶段有效：还在打量的阶段就能起名意味着界面上存在一条能绕过
- * 「决定留下」的通路，那一步是这个流程的全部意义所在。
- */
 export function nameIt(flow: AdoptionFlow, raw: string): NamingResult {
   if (flow.phase !== 'naming') return { ok: false, reason: '还没决定留下它' };
   const checked = normalizeName(raw);
   if (!checked.ok) return { ok: false, reason: checked.reason };
   return {
     ok: true,
-    identity: { breed: flow.candidate.breed, seed: flow.candidate.seed, name: checked.name },
+    identity: {
+      breed: flow.candidate.breed,
+      seed: flow.candidate.seed,
+      personality: { ...flow.candidate.personality },
+      marking: { ...flow.candidate.marking },
+      art: { ...flow.candidate.art },
+      motion: { ...flow.candidate.motion },
+      name: checked.name,
+    },
   };
 }

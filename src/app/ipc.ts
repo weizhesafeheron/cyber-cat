@@ -381,7 +381,7 @@ export async function closeDiary(): Promise<void> {
 /**
  * 领养窗口把选定的猫交回宠物窗口。
  *
- * 用事件而不是命令：载荷的形状（品种 + Seed + 名字）是 TypeScript 侧的领域约定，
+ * 用事件而不是命令：封存档案的载荷形状是 TypeScript 侧的领域约定，
  * 让 Rust 也认识它等于把同一个协议写两遍。Rust 只知道有一条事件通道。
  */
 export async function announceAdopted(payload: unknown): Promise<void> {

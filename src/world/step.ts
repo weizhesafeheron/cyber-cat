@@ -1,5 +1,5 @@
 import type { ActionKey } from '../render/index.js';
-import { makeCat } from '../render/index.js';
+import { materializeCat } from '../render/index.js';
 import { BEATS_PER_TICK, BEAT_MS } from './constants.js';
 import { draftOf } from './create.js';
 import { renderIntentOf } from './intent.js';
@@ -35,8 +35,7 @@ import type { StepResult, World, WorldEvent, WorldInputs } from './types.js';
  * 的问题，在这里悄悄截断只会把一个可见的故障变成一个查不出来的状态错乱。
  */
 export function step(world: World, elapsedMs: number, inputs: WorldInputs = {}): StepResult {
-  // 外观与性格都由「品种 + Seed」确定性重建，因此 world 里不存派生值。
-  const cat = makeCat(world.identity.breed, world.identity.seed);
+  const cat = materializeCat(world.identity);
   const draft = draftOf(world);
   const events: WorldEvent[] = [];
 

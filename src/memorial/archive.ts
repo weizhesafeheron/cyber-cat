@@ -19,7 +19,7 @@ export function emptyMemorial(): Memorial {
  * 两条记录是不是同一只猫。
  *
  * 比 Seed **加上出生时间**，不只比 Seed：Seed 空间是 2^31，撞车概率低但不是零，
- * 而且用户完全可能在领养时反复「再等等」直到又遇到一只同 Seed 的猫。
+ * 而且用户完全可能在领养时反复换花纹直到又遇到一只同 Seed 的猫。
  * 名字不参与比较 - 它是身份的一部分，但重名不代表同一只。
  */
 export function sameCat(a: CatIdentity, b: CatIdentity): boolean {

@@ -1,5 +1,4 @@
-import { BREEDS } from '../render/index.js';
-import type { BreedKey } from '../render/types.js';
+import { parseAdopted } from '../adopt/identity.js';
 import type { WorldEvent, WorldEventKind } from '../world/index.js';
 import { MEMORIAL_SAVE_VERSION } from './constants.js';
 import type { Memorial, MemorialEntry } from './types.js';
@@ -30,6 +29,10 @@ export function serializeMemorial(archive: Memorial): string {
         seed: c.identity.seed,
         bornAt: c.identity.bornAt,
         name: c.identity.name,
+        ...(c.identity.personality ? { personality: c.identity.personality } : {}),
+        ...(c.identity.marking ? { marking: c.identity.marking } : {}),
+        ...(c.identity.art ? { art: c.identity.art } : {}),
+        ...(c.identity.motion ? { motion: c.identity.motion } : {}),
       },
       diedAt: c.diedAt,
       stats: { feedCount: c.stats.feedCount, petCount: c.stats.petCount },
@@ -95,9 +98,13 @@ function entry(raw: unknown, index: number): MemorialEntry {
   const where = `cats[${index}]`;
   const c = record(raw, where);
   const identity = record(c['identity'], `${where}.identity`);
-  const breed = identity['breed'];
-  if (typeof breed !== 'string' || !(breed in BREEDS)) {
-    throw new MemorialSaveError(`${where}.identity.breed 是未知品种 ${JSON.stringify(breed)}`);
+  let adopted;
+  try {
+    adopted = parseAdopted(identity);
+  } catch (error) {
+    throw new MemorialSaveError(
+      `${where}.identity 无效（${error instanceof Error ? error.message : String(error)}）`,
+    );
   }
   const stats = record(c['stats'], `${where}.stats`);
   const diary = c['diary'];
@@ -105,10 +112,14 @@ function entry(raw: unknown, index: number): MemorialEntry {
 
   return {
     identity: {
-      breed: breed as BreedKey,
-      seed: num(identity, 'seed', `${where}.identity`),
+      breed: adopted.breed,
+      seed: adopted.seed,
       bornAt: num(identity, 'bornAt', `${where}.identity`),
-      name: str(identity, 'name', `${where}.identity`),
+      name: adopted.name,
+      ...(adopted.personality ? { personality: adopted.personality } : {}),
+      ...(adopted.marking ? { marking: adopted.marking } : {}),
+      ...(adopted.art ? { art: adopted.art } : {}),
+      ...(adopted.motion ? { motion: adopted.motion } : {}),
     },
     // 档案里只有离开了的猫，所以 diedAt 必须是个真实的时刻，不接受 null。
     diedAt: num(c, 'diedAt', where),

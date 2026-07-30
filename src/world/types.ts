@@ -12,14 +12,20 @@
  */
 import type { PropKind } from '../props/types.js';
 import type { MicroOpts, WorldActionKey } from '../render/index.js';
-import type { BreedKey, Pose } from '../render/types.js';
+import type {
+  BreedKey,
+  CatArtTuning,
+  MarkingChoice,
+  MotionProfile,
+  Personality,
+  Pose,
+} from '../render/index.js';
 
 /**
  * 猫的身份。
  *
- * 「品种 + Seed + 出生时间 + 名字」四元组唯一确定一只猫，外观与性格都能由它
- * 完整重建（makeCat）。因此存档里不存任何外观或性格的派生值 -
- * 存了就有两份真相，迟早不一致。
+ * 新领养会封存不可重建的性格、形象与动作快照；旧存档只含品种 + Seed 时仍按
+ * 旧规则恢复。运行期不修改身份。
  */
 export interface CatIdentity {
   breed: BreedKey;
@@ -27,6 +33,14 @@ export interface CatIdentity {
   /** epoch ms。由平台层注入，世界层不读时钟。 */
   bornAt: number;
   name: string;
+  /** 旧存档缺省时由 Seed 的旧规则重建；新领养会保存独立随机性格。 */
+  personality?: Personality;
+  /** 新领养封存的花纹模板与独立 Seed；旧存档缺省时沿用基础 Seed 花纹。 */
+  marking?: MarkingChoice;
+  /** 领养确认时封存。缺省代表旧存档的原始画风。 */
+  art?: CatArtTuning;
+  /** 只存用户改过的动作；缺省动作使用原始参数。 */
+  motion?: MotionProfile;
 }
 
 /** 三条需求，量表 0..100。 */

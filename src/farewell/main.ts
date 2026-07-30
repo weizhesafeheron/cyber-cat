@@ -18,7 +18,15 @@ import { mountChrome } from '../chrome/index.js';
 import { loadMemorial } from '../app/persist.js';
 import { emptyMemorial } from '../memorial/index.js';
 import type { Memorial } from '../memorial/index.js';
-import { ACTIONS, CatRenderer, makeCat, makeMicro, stepMicro } from '../render/index.js';
+import {
+  ACTIONS,
+  CatRenderer,
+  makeMicro,
+  materializeCat,
+  motionTuningFor,
+  stepMicro,
+  tuneMotionPose,
+} from '../render/index.js';
 import { CatDisplay } from '../app/display.js';
 import { PORTRAIT_H, PORTRAIT_SCALE, PORTRAIT_W } from './constants.js';
 import { requestAnotherCat } from './handoff.js';
@@ -68,10 +76,14 @@ function applyGeometry(): void {
  * 反而更让人不安。
  */
 function paintPortrait(): void {
-  const { breed, seed } = archive.cats[viewing]!.identity;
-  const cat = makeCat(breed, seed);
+  const identity = archive.cats[viewing]!.identity;
+  const { seed } = identity;
+  const cat = materializeCat(identity);
   const micro = stepMicro(makeMicro(seed), 0, { blink: false, ear: false, tilt: false });
-  display.paint(renderer.render(cat, ACTIONS['sit'].make(0, cat, micro)));
+  const tuning = motionTuningFor(identity.motion ? { motion: identity.motion } : undefined, 'sit');
+  display.paint(
+    renderer.render(cat, tuneMotionPose('sit', ACTIONS['sit'].make(0, cat, micro), tuning, cat)),
+  );
   display.place(PORTRAIT_W / 2);
 }
 
