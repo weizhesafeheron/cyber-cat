@@ -105,7 +105,7 @@ macOS 与 Windows。没有账号，不联网，所有东西都存在你自己的
 
 ### macOS
 
-下载 `CyberCat_x.y.z_aarch64.dmg`，拖进「应用程序」。
+下载 `CyberCat_x.y.z_universal.dmg`（同一个包同时支持 Apple Silicon 与 Intel），拖进「应用程序」。
 
 包**没有签名和公证**，所以第一次打开要绕一下 Gatekeeper：在「应用程序」里右键点它 → 打开 → 再点一次「打开」。
 或者去「系统设置 → 隐私与安全性」点「仍要打开」。
@@ -137,6 +137,26 @@ macOS 与 Windows。没有账号，不联网，所有东西都存在你自己的
 
 ---
 
+## 让 GitHub 帮你构建
+
+`.github/workflows/build.yml` 有一个两平台的矩阵：macOS 出 universal DMG，Windows 出 MSI 与 NSIS。
+两个平台的包**必须各自在对应系统上构建**，不能交叉编译，所以是矩阵而不是一台机器出两份。
+
+- **要一份包拿去装**：Actions 页面 → build → Run workflow。产物挂在那次运行的 artifact 里，保留 30 天。**不会产生任何 Release。**
+- **要正式发一版**：把 `src-tauri/tauri.conf.json` 的 `version` 改好，提交，然后打 tag 推上去：
+
+  ```bash
+  git tag v0.1.0 && git push origin v0.1.0
+  ```
+
+  这会建一个**草稿 Release** 并把两个平台的安装包挂上去。草稿是刻意的 - 发布之前你还得在 macOS 与 Windows 上各装一次。
+
+- push 到 main 只跑测试与类型检查，不构建 - macOS runner 按 10 倍计费，没必要每次提交都烧两台机器。
+
+签名是可选的：仓库里配了 `APPLE_CERTIFICATE` 等 secret 之后，同一个 workflow 会自动签名并公证，不用改任何配置。没配就是 ad-hoc 签名的包。
+
+---
+
 ## 自己构建
 
 ### 两个平台都需要
@@ -162,6 +182,14 @@ xcode-select --install
 
 - `src-tauri/target/release/bundle/dmg/CyberCat_x.y.z_aarch64.dmg`
 - `src-tauri/target/release/bundle/macos/CyberCat.app`
+
+要出**同时支持 Apple Silicon 与 Intel** 的那一个包（CI 出的就是它）：
+
+```bash
+rustup target add x86_64-apple-darwin aarch64-apple-darwin
+npm run tauri build -- --target universal-apple-darwin
+# → src-tauri/target/universal-apple-darwin/release/bundle/dmg/CyberCat_x.y.z_universal.dmg
+```
 
 要产出**签名并公证**的 DMG，构建前设好这几个环境变量（需要 Apple Developer 账号）：
 
