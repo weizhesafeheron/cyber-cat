@@ -28,6 +28,15 @@ const PROPS_FILE: &str = "props.json";
 /// 这份文件比另外两份要紧：里面的猫都死了，坏掉就再也演化不回来。
 const MEMORIAL_FILE: &str = "memorial.json";
 
+/// 用户的开关（这一版只有安静模式）。
+///
+/// **第四份文件。** 不能塞进 world.json：世界层必须是纯函数且可离线回放
+/// （ADR 0001），而安静模式不是时间的函数 - 它是用户在某一刻拨动的开关，
+/// 塞进去会让「同一段时间推演出同一个结果」这条不变量失效。
+/// 也不能塞进 props.json：那份是家具的摆放，与「猫要不要安静」是两件事，
+/// 而且挂件的写盘是节流的（拖动时每两秒一次），开关不该跟着那个节奏走。
+const SETTINGS_FILE: &str = "settings.json";
+
 fn data_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -77,6 +86,16 @@ pub fn save_props(app: AppHandle, contents: String) -> Result<(), String> {
 #[tauri::command]
 pub fn load_props(app: AppHandle) -> Result<Option<String>, String> {
     read_optional(&data_path(&app, PROPS_FILE)?)
+}
+
+#[tauri::command]
+pub fn save_settings(app: AppHandle, contents: String) -> Result<(), String> {
+    write_atomic(&data_path(&app, SETTINGS_FILE)?, contents)
+}
+
+#[tauri::command]
+pub fn load_settings(app: AppHandle) -> Result<Option<String>, String> {
+    read_optional(&data_path(&app, SETTINGS_FILE)?)
 }
 
 #[tauri::command]

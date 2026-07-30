@@ -677,3 +677,198 @@ fn keyboard_idle_seconds() -> Option<f64> {
 pub fn input_idle() -> Option<f64> {
     keyboard_idle_seconds()
 }
+
+
+// ---------------------------------------------------------------------------
+// 让开规则（issue #15）：全屏应用 / 投屏演示时猫要消失
+// ---------------------------------------------------------------------------
+
+/// 现在是不是该让开（全屏应用 / 投屏演示）。
+///
+/// ADR 0004「桌面是猫的领地，但用户永远优先」的兑现点之一：用户在全屏看片、
+/// 在投屏做演示时，桌面上不该有一只猫在走。隐藏/恢复的节奏、滞后与状态推演都在
+/// 前端，这里只回答「此刻是不是」这一个事实。
+///
+/// **不需要任何用户授权**，与 ADR 0005 同一条底线。两个平台用到的三个 API
+/// （`SHQueryUserNotificationState`、`CGDisplayIsInMirrorSet`、以及复用
+/// `foreground_window` 的 CGWindowList）都不经过 TCC / UAC，也都不会弹对话框。
+/// 被否决的做法记在各平台实现的注释里 - 简而言之：**任何要屏幕录制或辅助功能
+/// 授权的探测都不能用**，那会把一个零摩擦的挂件变成要去系统设置里勾选的东西。
+///
+/// **失效方向一律是 `false`**（读不到 = 猫照常出现）。反过来会更糟：
+/// 一只永远不出现的猫会被用户当成程序坏了，而一只在全屏视频上多待了一会儿的猫
+/// 只是有点烦人。所有降级分支都按这个方向写。
+pub fn presenting(window: &WebviewWindow) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        mac_present::presenting(window)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        win_present::presenting(window)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // Linux 没有跨合成器统一的「有人在全屏」查询（X11 要读 _NET_WM_STATE，
+        // Wayland 各合成器各不相同），而 MVP 只验收 macOS 与 Windows。
+        // 返回 false 的后果是猫在全屏应用上照常出现 - 见上面的失效方向。
+        let _ = window;
+        Ok(false)
+    }
+}
+
+/// macOS：前台窗口盖满某块显示器，或任一显示器处于镜像组。
+///
+/// macOS **没有**免授权的「有人正在录屏/投屏」查询，所以这里只能靠两条可靠信号，
+/// 任一成立即让开。被否决的更直接的做法：
+/// - `SCShareableContent` / ScreenCaptureKit 能直接说出谁在共享，但强制要屏幕录制
+///   授权（ADR 0005 明确禁止迁移到它）。
+/// - `AXUIElement` 读窗口的 `AXFullScreen` 属性要辅助功能授权，且未授权时是硬失败
+///   （`kAXErrorAPIDisabled`），拿不到任何这里需要的额外信息。
+/// - macOS 的「专注模式 / 勿扰」状态没有公开 API，只能去解析
+///   `~/Library/DoNotDisturb/DB/Assertions.json`，那是私有格式，每个大版本都在变。
+///
+/// 两条已知漏判，都被有意接受（漏判 = 猫照常出现，是安全方向）：
+/// - **演示态窗口层级高于 0**。Keynote 放映、部分会议软件的共享工具条走的是
+///   遮蔽层（layer 远大于 0），会被 `foreground_window` 的 `kCGWindowLayer != 0`
+///   过滤掉。要接住它们就得每次全量枚举所有层级的窗口，代价是这个判断从 0.07 ms
+///   变回 0.4 ms 且要新写一套枚举 - 而这类场景通常同时接了投影仪，被信号一接住。
+/// - **AirPlay 的「扩展桌面」模式不是镜像**，`CGDisplayIsInMirrorSet` 为 false。
+///   那种用法本质上是多了一块屏，用户的主屏没有在被看，猫留着也合理。
+#[cfg(target_os = "macos")]
+mod mac_present {
+    use core_graphics::display::{CGDirectDisplayID, CGDisplay, CGGetActiveDisplayList};
+    use tauri::WebviewWindow;
+
+    /// 一次最多看几块屏。八块足够覆盖任何真实桌面，放栈上就不用每次轮询都堆分配
+    /// （`CGDisplay::active_displays()` 会先查一次数量再 `vec![]`，两次 FFI 加一次分配）。
+    const MAX_DISPLAYS: usize = 8;
+
+    /// 判「盖满」时容许的误差，单位是点。
+    ///
+    /// 不是零：显示器边界与窗口矩形分别由不同子系统给出，缩放屏（HiDPI 的
+    /// 「看起来像 1512x982」这类非整数比例）上换算到点之后可能差不到一个点。
+    /// 给 1 点的余量比让一次真全屏漏判划算。
+    const SLACK: f64 = 1.0;
+
+    /// 当前活跃（可绘制）的显示器列表，写进调用方的栈数组，返回有效个数。
+    ///
+    /// 读不到就返回 0，上层两条信号随之都判 false - 失效方向是猫照常出现。
+    fn active_displays(buf: &mut [CGDirectDisplayID; MAX_DISPLAYS]) -> usize {
+        let mut count: u32 = 0;
+        // SAFETY: buf 是栈上活着的定长数组，容量与第一个参数一致；count 是栈上的 u32。
+        let err = unsafe {
+            CGGetActiveDisplayList(MAX_DISPLAYS as u32, buf.as_mut_ptr(), &mut count)
+        };
+        if err != 0 {
+            return 0;
+        }
+        (count as usize).min(MAX_DISPLAYS)
+    }
+
+    pub fn presenting(window: &WebviewWindow) -> Result<bool, String> {
+        let mut ids = [0 as CGDirectDisplayID; MAX_DISPLAYS];
+        let n = active_displays(&mut ids);
+        let ids = &ids[..n];
+
+        // 信号一：镜像组 = 投屏。
+        //
+        // `CGDisplayIsInMirrorSet` 是 CoreGraphics 的公开 C 函数，纯查询显示器配置，
+        // 不碰任何一个像素，因此**不在 TCC 的管辖范围内**（TCC 管的是「读屏幕内容」，
+        // 不是「读屏幕拓扑」）。会议室接投影仪、AirPlay 选「镜像」、以及
+        // QuickTime / 各家会议软件触发的屏幕镜像都会让相关显示器进入镜像组。
+        //
+        // 放在前面是因为它比信号二便宜：不需要枚举任何窗口。
+        if ids.iter().any(|&id| CGDisplay::new(id).is_in_mirror_set()) {
+            return Ok(true);
+        }
+
+        // 信号二：前台窗口盖满整块显示器 = 原生全屏。
+        //
+        // 比的是**显示器的完整 frame**（`CGDisplayBounds`）而不是去掉菜单栏/程序坞的
+        // 可用区，这一条是本判断的全部分辨力所在：最大化（zoom）的窗口等于可用区，
+        // 原生全屏的窗口等于完整 frame，两者只差菜单栏那几十个点。拿可用区来比会把
+        // 「用户只是把窗口最大化了」也算成全屏，那猫就基本不用出来了。
+        //
+        // 复用 `foreground_window`：它已经做完了「排除宠物自己」「排除 layer != 0 的
+        // 浮层」「稳态下只查锁定的那一个 windowID」这三件事，重写一遍窗口枚举既贵又
+        // 会和特效 3.1 的行为分叉。它返回的 `kCGWindowBounds` 是点，与
+        // `CGDisplayBounds` 同一个全局坐标系（主屏左上角为原点、Y 向下），可以直接比。
+        let front = match super::foreground_window(window)? {
+            Some(f) => f,
+            // 前台是宠物自己、或前台 app 没有普通窗口。判 false = 猫照常出现。
+            None => return Ok(false),
+        };
+        for &id in ids {
+            let b = CGDisplay::new(id).bounds();
+            // 显示器刚拔掉/正在重配时可能读到退化矩形，拿它比会恒真。
+            if b.size.width <= 0.0 || b.size.height <= 0.0 {
+                continue;
+            }
+            let covers = front.x <= b.origin.x + SLACK
+                && front.y <= b.origin.y + SLACK
+                && front.x + front.w >= b.origin.x + b.size.width - SLACK
+                && front.y + front.h >= b.origin.y + b.size.height - SLACK;
+            if covers {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// Windows：`SHQueryUserNotificationState`（shell32）。
+///
+/// 这是 Windows 上「现在该不该打扰用户」的**正经答案**，系统自己的 toast 通知就是
+/// 按它决定要不要弹的。用它而不是自己比窗口矩形与显示器矩形，是因为它一并覆盖了
+/// 独占全屏的 D3D 应用（那种窗口根本不在正常的窗口列表里）和用户手动开的演示模式。
+///
+/// **不需要任何授权**：shell32 的普通导出函数，读的是当前交互式会话的 shell 状态，
+/// 不涉及 UAC 提权、不弹任何对话框，也没有对应的隐私开关。被否决的替代品：
+/// `IVirtualDesktopManager` 是未文档化的 COM 接口，`SetWinEventHook` 要常驻钩子
+/// （属于 mvp-scope 第 9 节明确不做的「拦截系统事件」）。
+///
+/// **未在真机验证过**（本项目的开发机是 macOS）。为写这段查过的东西：
+/// windows crate 0.61 里函数在 `Win32::UI::Shell`，需要 `Win32_UI_Shell` feature
+/// （已加进 Cargo.toml）；C 原型 `SHSTDAPI SHQueryUserNotificationState(
+/// QUERY_USER_NOTIFICATION_STATE *pquns)` 被生成成返回
+/// `Result<QUERY_USER_NOTIFICATION_STATE>` 的无参函数，出参已被包进返回值；
+/// `QUERY_USER_NOTIFICATION_STATE` 是 `#[repr(transparent)] struct(pub i32)`，
+/// 派生了 `PartialEq`，所以可以直接和 `QUNS_*` 常量比。
+#[cfg(target_os = "windows")]
+mod win_present {
+    use tauri::WebviewWindow;
+    use windows::Win32::UI::Shell::{
+        SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE,
+        QUNS_RUNNING_D3D_FULL_SCREEN,
+    };
+
+    pub fn presenting(window: &WebviewWindow) -> Result<bool, String> {
+        // 这条路径不需要窗口句柄，参数只是为了和 macOS 那支签名一致。
+        let _ = window;
+
+        // SAFETY: 无参数查询，出参由 windows crate 自己在栈上准备并包进 Result。
+        let state = match unsafe { SHQueryUserNotificationState() } {
+            Ok(s) => s,
+            // 文档说非交互式会话（服务、登录界面）会失败。判 false = 猫照常出现，
+            // 而那些场景下根本没有桌面给猫站。
+            Err(_) => return Ok(false),
+        };
+
+        // 算「该让开」的三个取值：
+        // - QUNS_BUSY(2)：有全屏应用在跑。全屏看片、全屏浏览器、全屏游戏都落这里。
+        // - QUNS_RUNNING_D3D_FULL_SCREEN(3)：独占全屏的 D3D 应用（老式全屏游戏）。
+        // - QUNS_PRESENTATION_MODE(4)：用户自己开了演示模式。这是用户**明确说过**
+        //   「别打扰我」，比任何几何推断都可靠。
+        //
+        // 明确**不算**的三个：
+        // - QUNS_NOT_PRESENT(1)：锁屏、屏保、快速用户切换。那时候屏幕上本来就看不到
+        //   猫，隐藏它换不到任何东西，却多一条「状态卡住 → 猫再也不出现」的风险。
+        // - QUNS_QUIET_TIME(6)：新装系统头几小时的静默期，与演示无关。
+        // - QUNS_APP(7)：Win8 沉浸式外壳里跑全屏 Store 应用。Win10/11 上 Store 应用
+        //   就是普通窗口，这个值要么打不出来，要么会在用户只是打开「设置」时误报。
+        Ok(state == QUNS_BUSY
+            || state == QUNS_RUNNING_D3D_FULL_SCREEN
+            || state == QUNS_PRESENTATION_MODE)
+    }
+}

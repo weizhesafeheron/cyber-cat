@@ -28,7 +28,7 @@ import type {
 } from '../render/index.js';
 import { clamp } from '../render/rng.js';
 import { MS_PER_HOUR, renderIntentOf, step, worldNow } from '../world/index.js';
-import type { RenderIntent, UserAction, World } from '../world/index.js';
+import type { CatStatus, RenderIntent, UserAction, World } from '../world/index.js';
 import { ADOPT_H, ADOPT_W } from '../adopt/constants.js';
 import { beginAdoption } from '../adopt/flow.js';
 import type { AdoptedIdentity } from '../adopt/identity.js';
@@ -61,8 +61,11 @@ import {
   openAdoption,
   openDiary,
   probeCursor,
+  probePresenting,
   probeStage,
+  pushQuietMenu,
   setPassThrough,
+  setTrayIcon,
   waitForAdopted,
 } from './ipc.js';
 import { notifyIfSick, tauriNotifyPorts } from './notify.js';
@@ -109,12 +112,24 @@ import {
   teaseVerdict,
 } from '../tease/index.js';
 import type { CursorPoint, TeaseState } from '../tease/index.js';
+import type { TrayIconState } from '../tray/index.js';
 import type { Heart } from './hearts.js';
 import { PawCanvas } from './paws.js';
-import { loadWorld, onTrayAction, pushTrayStatus, saveWorld } from './persist.js';
+import {
+  loadSettings,
+  loadWorld,
+  onTrayAction,
+  pushTrayStatus,
+  saveSettings,
+  saveWorld,
+} from './persist.js';
+import { restrainedAction, restraint } from './restraint.js';
+import { DEFAULT_SETTINGS, withQuiet } from './settings.js';
+import type { Settings } from './settings.js';
 import { PropsHost } from './props.js';
 import { TARGET_SCALE } from './stage.js';
-import { trayStatus } from './status.js';
+import { trayIcon } from '../tray/index.js';
+import { trayIconState, trayStatus } from './status.js';
 
 /** 单帧用于推进动画相位的最大时长。掉帧时不要让动作跳一大段。 */
 const MAX_ANIM_DT = 0.05;
@@ -131,6 +146,17 @@ const DRAG_THRESHOLD_PX = 5;
 /** 存档与托盘的刷新节流。 */
 const SAVE_INTERVAL_MS = 30_000;
 const TRAY_INTERVAL_MS = 5_000;
+
+/**
+ * 「该不该让开」多久问一次，毫秒。
+ *
+ * 1 秒是按**恢复的延迟**定的，不是按检测成本定的：用户退出全屏之后猫最多晚一秒
+ * 回来，读起来像它自己缓过神，而不是卡住。反过来进入全屏时晚一秒才藏起来是
+ * 可以接受的 - 那一秒里用户正在切换，本来就在看别的东西。
+ * 检测本身很便宜（见 platform::presenting），但它是跨进程调用，
+ * 60 Hz 地问是纯浪费。
+ */
+const YIELD_INTERVAL_MS = 1_000;
 
 /**
  * 重读舞台几何的间隔。
@@ -300,6 +326,30 @@ let lastWallMs = Date.now();
 let lastSaveMs = 0;
 let lastTrayMs = 0;
 let lastMetricsMs = 0;
+let lastYieldMs = 0;
+/**
+ * 托盘图标上画的是哪一档。null = 还没画过。
+ *
+ * 只在这一档变化时才换图：换图标是一次 5KB 的跨进程调用，而状态摘要每 5 秒推一次，
+ * 跟着它一起换等于每 5 秒白搬一张图。
+ */
+let trayIconShown: TrayIconState | null = null;
+
+/**
+ * 用户的开关。启动时从 settings.json 读，用户在托盘里拨一次写一次。
+ *
+ * **不进 World**：世界层必须可离线回放（ADR 0001），而开关不是时间的函数。
+ * 后果是安静模式期间猫照样会饿会困 - 那正是票上要的「隐藏与恢复期间状态继续推演」。
+ */
+let settings: Settings = DEFAULT_SETTINGS;
+
+/**
+ * 此刻别人在全屏或投屏（让开规则）。
+ *
+ * 与安静模式不同，它**不持久化**：它描述的是这一刻的桌面，不是用户的偏好。
+ * 重启之后重新探测一次就有了。
+ */
+let presenting = false;
 
 /** 最近一帧里头中心的列位，精灵像素。台词气泡按它对齐尾尖。 */
 let lastHeadX = 0;
@@ -369,16 +419,27 @@ const passthrough = new PollingPassthrough(tracker, setPassThrough);
  * 猫已离开时返回 null 并清空画布 - 不能留着上一帧，那会变成一只不动的僵尸猫。
  * 那之后桌面上什么都没有，该看的东西在告别页窗口里（app/farewell.ts）。
  */
+/**
+ * 把桌面上属于猫的一切擦掉。
+ *
+ * 两条路都会走到这里：猫离开了（永久），以及让开规则生效（临时）。
+ * 抽成一个函数是因为**漏掉任何一块画布都会留下一块残影**，而那两条路都不该留下
+ * 任何痕迹 - 死掉的猫头顶飘着一个气泡，或者全屏演示时屏幕角上留着几个爪印。
+ */
+function blank(): void {
+  display.clear();
+  paws.clear();
+  heartCanvas.clear();
+  bubbleRect = null;
+  bubble.clear();
+  say.clear();
+  lastFrame = null;
+}
+
 function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult | null {
   if (motion.playing === null) {
-    display.clear();
-    paws.clear();
-    heartCanvas.clear();
     // 猫不在了，头顶也就没有气泡可冒。死掉的猫的日记由告别页承接（ticket 13）。
-    bubbleRect = null;
-    bubble.clear();
-    say.clear();
-    lastFrame = null;
+    blank();
     return null;
   }
   // 播什么动作只看 motion.playing - 即时反馈已经在 frame() 里作为动作喂给
@@ -465,6 +526,57 @@ function paintSay(nowMs: number): void {
   );
 }
 
+/**
+ * 与画面无关的周期性事务：存档、托盘、几何校正。
+ *
+ * 抽出来是因为**让开期间这些照样要做**（票上的「隐藏与恢复期间猫的状态继续正常推演，
+ * 不丢失」）。让开那条路会提前返回、不画任何东西，如果这三件事留在 frame() 尾巴上，
+ * 一场两小时的全屏演示期间猫的状态一次都不会落盘 - 中途关机就全丢了。
+ */
+function housekeeping(wall: number, hadEvents: boolean, status: CatStatus): void {
+  // 有事发生就立刻存一次，其余时候按节流存 - 生病、死亡这类事件不能因为
+  // 恰好在两次定时保存之间关机而丢掉。
+  if (hadEvents || wall - lastSaveMs > SAVE_INTERVAL_MS) {
+    lastSaveMs = wall;
+    void saveWorld(world);
+  }
+  if (wall - lastTrayMs > TRAY_INTERVAL_MS) {
+    lastTrayMs = wall;
+    void pushTrayStatus(trayStatus(world, status));
+  }
+  // 图标本身反映状态（issue #15 第一条）：不打开任何界面就知道猫怎么样了。
+  // **画的是这只猫自己的配色**，所以要把 cat 传进去（src/tray/icon.ts）。
+  const wanted = trayIconState(status);
+  if (wanted !== trayIconShown) {
+    trayIconShown = wanted;
+    // 2 倍：tray-icon 在 macOS 上把图标缩放到 18 点高，2 倍正好是 Retina 上的
+    // 一比一（见 src/tray/icon.ts 文件头）。
+    const icon = trayIcon(cat, wanted, 2);
+    void setTrayIcon(icon.rgba, icon.w, icon.h);
+  }
+  if (wall - lastMetricsMs > STAGE_METRICS_INTERVAL_MS) {
+    lastMetricsMs = wall;
+    void refreshStage();
+  }
+}
+
+/**
+ * 该不该让开。每 YIELD_INTERVAL_MS 问一次 Rust。
+ *
+ * **探测失败一律当成「不该让开」**：失效方向必须是猫照常出现 -
+ * 一只永远不出现的猫会被当成程序坏了，而一只在全屏视频上多待了一秒的猫只是有点烦。
+ */
+function pollYield(now: number): void {
+  if (now - lastYieldMs < YIELD_INTERVAL_MS) return;
+  lastYieldMs = now;
+  void probePresenting().then((on) => {
+    presenting = on;
+  });
+}
+
+/** 让开状态的上一帧值。只在切换的那一帧动画布与挂件，不必每帧擦一次。 */
+let yielded = false;
+
 function frame(now: number): void {
   const animDt = Math.min(MAX_ANIM_DT, (now - lastFrameMs) / 1000);
   lastFrameMs = now;
@@ -487,12 +599,51 @@ function frame(now: number): void {
   // 曾经在 draw() 里覆盖播放的动作而没告诉运动层，结果点走路中的猫会
   // 「一边伸懒腰一边横向漂移」 - 因为世界层还在说走路，位置照推。
   // 这么改之后「当前播什么动作」只有 motion.playing 一个来源。
-  const effective = now < reactionUntilMs ? REACTION : intent.action;
+  const reacting = now < reactionUntilMs;
 
   // 即时反馈期间不给锚点：用户刚点了猫，猫在原地回应他，不该扭头就往食盆走。
   // 与上面「反馈要作为动作喂给运动层」是同一条理由 - 位移的开关只有一处。
   const g = geometry();
-  const anchorX = now < reactionUntilMs ? null : props.anchorX(intent.anchor, motion.x, g);
+  const anchorX = reacting ? null : props.anchorX(intent.anchor, motion.x, g);
+
+  // 两个全局兜底合成这一刻的许可（src/app/restraint.ts 的真值表）。
+  // **它在所有主动行为之前算一次**，而不是在每处各写一个 if - 那样漏掉一处
+  // 就会出现「安静模式下猫仍然会扑光标」，而且没有一处测试碰得到。
+  const allow = restraint(settings.quiet, presenting, intent.anchor !== null);
+  const effective = restrainedAction(reacting ? REACTION : intent.action, allow.roam);
+
+  pollYield(now);
+
+  // 让开规则：猫整只消失。
+  //
+  // **做法是「窗口留着但什么都不画」，不是隐藏窗口。** rAF 对隐藏窗口不触发，
+  // 真把宠物窗口 hide 掉的话帧循环就停了，也就再也没人来问「全屏退出了吗」-
+  // 猫会一直不回来（这个坑在启动流程上踩过两次，见 lib.rs 的 content_ready）。
+  // 挂件是独立窗口、不驱动任何循环，所以它们是真的隐藏。
+  if (allow.hidden) {
+    if (!yielded) {
+      yielded = true;
+      blank();
+      // 一块什么都没画的透明窗口绝不能截获点击 - 用户正在全屏演示，
+      // 看不见的死区正是这条规则要防的事情本身。
+      passthrough.yieldTo(true);
+      void props.suppress(true);
+    }
+    // 世界照常推演（上面那次 step 已经做完了），存档与托盘照常刷新。
+    housekeeping(wall, r.events.length > 0, intent.status);
+    // 生病的系统通知照发：系统自己会在全屏时压住通知，那是用户在系统设置里的选择，
+    // 不该由我们代劳。**但告别页不弹** - 那是一扇会抢焦点的窗口，
+    // 盖在别人的演示上是这条规则最不能接受的失败。farewell.observe 是幂等的，
+    // 跳过这一帧只是把它推迟到猫回来那一帧，不会漏掉。
+    void notifyIfSick(r.events, world, tauriNotifyPorts);
+    requestAnimationFrame(frame);
+    return;
+  }
+  if (yielded) {
+    yielded = false;
+    passthrough.yieldTo(false);
+    void props.suppress(false);
+  }
 
   // 前台窗口：每帧问一次轮询器（它自己节流），把读到的矩形翻成一条可站的表面，
   // 再交给判断层决定这一刻要不要邀请猫上去。
@@ -502,12 +653,13 @@ function frame(now: number): void {
   foreground.poll(now, {
     // 猫在动或者已经在窗口上时用高频：前者随时可能起跳，后者要跟着窗口走。
     active: motion.perch !== null || motion.playing === 'walk',
-    hidden: document.hidden,
+    // 让开期间也当成隐藏：那时猫不会上任何窗口，问了也没人用这个矩形。
+    hidden: document.hidden || !allow.perch,
   });
   perchDesire = nextPerchDesire(perchDesire, {
     dt: animDt,
     // 即时反馈期间也不上去：与「不给锚点」同一条理由 - 用户刚点了猫。
-    allowed: now >= reactionUntilMs && perchAllowed(intent.status, intent.anchor),
+    allowed: !reacting && allow.perch && perchAllowed(intent.status, intent.anchor),
     startOk: perchStartOk(effective),
     surface: perchSurfaceOf(foreground.window, g, display.pixelRatio),
     active: cat.personality.active,
@@ -522,7 +674,10 @@ function frame(now: number): void {
     action: effective,
     hold: holdAt,
     cursorX: cursorScreenX,
-    teaseLandingX: teaseThisFrame(intent, now, g),
+    // 安静模式与让开是逗猫棒的**第七道闸门**：不满足就连轨迹判定都不做
+    // （tease/gates.ts 那六道说的是「这只猫此刻想不想玩」，这一条说的是
+    // 「现在允不允许玩」，两件事不该混在同一个函数里）。
+    teaseLandingX: allow.tease ? teaseThisFrame(intent, now, g) : null,
     anchorX,
     perch: perchDesire.offer,
     cat,
@@ -568,20 +723,7 @@ function frame(now: number): void {
   void notifyIfSick(r.events, world, tauriNotifyPorts);
   void farewell.observe(world);
 
-  // 有事发生就立刻存一次，其余时候按节流存 - 生病、死亡这类事件不能因为
-  // 恰好在两次定时保存之间关机而丢掉。
-  if (r.events.length > 0 || wall - lastSaveMs > SAVE_INTERVAL_MS) {
-    lastSaveMs = wall;
-    void saveWorld(world);
-  }
-  if (wall - lastTrayMs > TRAY_INTERVAL_MS) {
-    lastTrayMs = wall;
-    void pushTrayStatus(trayStatus(world, intent.status));
-  }
-  if (wall - lastMetricsMs > STAGE_METRICS_INTERVAL_MS) {
-    lastMetricsMs = wall;
-    void refreshStage();
-  }
+  housekeeping(wall, r.events.length > 0, intent.status);
 
   requestAnimationFrame(frame);
 }
@@ -990,7 +1132,26 @@ void onTrayAction((id) => {
   // 托盘里的两个挂件开关。挂件可隐藏，但要能再打开，所以是勾选项而不是「隐藏」。
   else if (id === 'prop-bowl') void props.toggle('bowl');
   else if (id === 'prop-bed') void props.toggle('bed');
+  // 安静模式。**它不是一次 UserAction** - 世界层不认识这个开关（塞进去会毁掉
+  // 离线推演的等价性，见 app/restraint.ts）。所以这里只改应用层的状态、写盘、
+  // 再把勾选状态推回托盘。
+  else if (id === 'quiet') void toggleQuiet();
 });
+
+/**
+ * 拨动安静模式。
+ *
+ * 三件事的顺序：先改内存（下一帧立刻生效），再推托盘（用户要马上看到勾上了），
+ * 最后写盘。写盘失败只记录 - 开关本帧已经生效了，代价只是下次启动回到旧值，
+ * 而为此把已经生效的状态回滚会让用户看到勾选自己跳回去。
+ */
+async function toggleQuiet(): Promise<void> {
+  settings = withQuiet(settings, !settings.quiet);
+  await pushQuietMenu(settings.quiet);
+  await saveSettings(settings).catch((err: unknown) => {
+    console.error('[cyber-cat] 保存安静模式失败，下次启动会回到旧值：', err);
+  });
+}
 
 // 点食盆与点托盘的「喂食」是同一件事：都只是往碗里添粮这个**邀请**，
 // 吃不吃仍然由猫决定（world/tick.ts 的进食分支）。
@@ -1100,6 +1261,11 @@ void onAdoptAnother(() => void adoptAnother());
  * 摆好** - 否则头几秒猫会按默认位置去找食盆，然后食盆突然挪到别处。
  */
 async function boot(): Promise<void> {
+  // 开关要在第一帧之前读到：安静模式下猫应该一开始就趴着，
+  // 而不是先站起来走两步再想起来现在该安静。
+  settings = await loadSettings();
+  void pushQuietMenu(settings.quiet);
+
   install(await ensureWorld(gate));
 
   const intent = renderIntentOf(world, cat);

@@ -102,6 +102,14 @@ export class PropsHost {
    * 那份存档覆盖掉。这条竞态在真机上表现为「每次重启食盆都回到屏幕中间」。
    */
   private booted = false;
+  /**
+   * 让开规则：临时把挂件藏起来。
+   *
+   * **不动 `state` 里那个 visible** - 那是用户在托盘里勾的，属于他的偏好；
+   * 让开是「此刻别人在全屏演示」，退出之后必须原样回来。混成一个字段的话，
+   * 一次全屏视频会把用户藏起来的猫窝重新显示出来。
+   */
+  private hidingForOthers = false;
 
   /**
    * 构造时就要有一份摆放，不能等读盘。
@@ -219,6 +227,21 @@ export class PropsHost {
     this.schedulePersist();
   }
 
+  /**
+   * 让开规则的开关：把两个挂件一起藏起来 / 放回来。
+   *
+   * 猫藏起来的做法是「不画」（宠物窗口必须留着，否则 rAF 停了就再也没人来问
+   * 该不该回来，见 app/main.ts 的注释），而挂件是独立窗口、不驱动任何循环，
+   * 所以它们是真的隐藏。
+   *
+   * 状态没变就什么都不做：这条每次轮询都会被调到。
+   */
+  async suppress(on: boolean): Promise<void> {
+    if (this.hidingForOthers === on) return;
+    this.hidingForOthers = on;
+    await this.apply();
+  }
+
   /** 碗里的份数变了就推给食盆窗口。份数没变时什么都不做 - 每帧发一次是纯浪费。 */
   onBowlPortions(portions: number): void {
     if (portions === this.portions) return;
@@ -290,7 +313,12 @@ export class PropsHost {
 
   /** 下发一个挂件的位置与可见性。`force` 用于挂件窗口重启后的补发。 */
   private async applyOne(kind: PropKind, force: boolean): Promise<void> {
-    const p = this.state[kind];
+    // 让开期间下发的是「同一个位置但不可见」，而不是改过的状态：
+    // 去重比的也必须是这一份，否则解除让开时会被判成「没变」而不补发，
+    // 挂件就再也回不来了。
+    const p = this.hidingForOthers
+      ? { ...this.state[kind], visible: false }
+      : this.state[kind];
     const prev = this.applied[kind];
     if (!force && prev !== undefined && samePlacement(prev, p)) return;
     this.applied = { ...this.applied, [kind]: p };

@@ -213,6 +213,67 @@ describe('读档完成前不接受挂件报上来的位置', () => {
   });
 });
 
+describe('让开规则：临时藏起来，不动用户记的显隐', () => {
+  it('藏起来是下发「不可见」，而不是改状态', async () => {
+    const io = ports();
+    const host = new PropsHost(GEOM, io.p);
+    await host.boot(GEOM);
+    const before = io.placed.length;
+
+    await host.suppress(true);
+
+    const added = io.placed.slice(before);
+    expect(added.map((x) => x.kind).sort()).toEqual([...PROP_KINDS].sort());
+    expect(added.every((x) => !x.visible)).toBe(true);
+    // 用户记的那份没被动过 - 托盘里的勾选也不该跟着变
+    for (const kind of PROP_KINDS) {
+      expect(host.placements[kind].visible, `${kind} 的存档状态被改了`).toBe(true);
+    }
+    expect(io.menu).toHaveLength(1);
+  });
+
+  it('解除之后原样回来', async () => {
+    const io = ports();
+    const host = new PropsHost(GEOM, io.p);
+    await host.boot(GEOM);
+    await host.suppress(true);
+    const before = io.placed.length;
+
+    await host.suppress(false);
+
+    const added = io.placed.slice(before);
+    // 这条守的是去重：如果去重比的是「用户记的那份」而不是「实际下发的那份」，
+    // 解除时会被判成「没变」而不补发，挂件就再也回不来了。
+    expect(added.every((x) => x.visible)).toBe(true);
+    expect(added.map((x) => x.kind).sort()).toEqual([...PROP_KINDS].sort());
+  });
+
+  it('用户自己藏起来的那个，解除让开之后仍然是藏着的', async () => {
+    // 一场全屏视频不该把用户藏起来的猫窝重新显示出来。
+    const io = ports();
+    const host = new PropsHost(GEOM, io.p);
+    await host.boot(GEOM);
+    await host.toggle('bed');
+    await host.suppress(true);
+    const before = io.placed.length;
+
+    await host.suppress(false);
+
+    const bed = io.placed.slice(before).find((x) => x.kind === 'bed');
+    expect(bed?.visible ?? false).toBe(false);
+  });
+
+  it('状态没变时不重复下发 - 这条每次轮询都会被调到', async () => {
+    const io = ports();
+    const host = new PropsHost(GEOM, io.p);
+    await host.boot(GEOM);
+    await host.suppress(false);
+    const after = io.placed.length;
+    await host.suppress(false);
+    expect(io.placed.length).toBe(after);
+  });
+});
+
 describe('点食盆是邀请，不是喂食', () => {
   it('点食盆只触发一次回调，点猫窝什么都不做', async () => {
     const io = ports();

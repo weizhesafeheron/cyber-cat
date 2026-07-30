@@ -49,6 +49,8 @@ export class PollingPassthrough implements PassthroughController {
   private applied: boolean = INITIAL_PASS_THROUGH;
   /** 拖拽期间强制关闭穿透。见 hold()。 */
   private forced = false;
+  /** 让开规则期间强制打开穿透。见 yieldTo()。 */
+  private yielding = false;
 
   constructor(
     private readonly cursor: CursorSource,
@@ -76,7 +78,26 @@ export class PollingPassthrough implements PassthroughController {
     this.apply(false);
   }
 
+  /**
+   * 让开规则期间强制**打开**穿透（与 hold 相反的那一头）。
+   *
+   * 让开的做法是「窗口留着但什么都不画」（宠物窗口不能真的隐藏，否则 rAF 停了
+   * 就再也没人来问该不该回来，见 app/main.ts）。那么这一整段时间里桌面上有一块
+   * 什么都没有的透明窗口，它绝不能截获点击 - 用户正在全屏演示，
+   * 一块看不见的死区是这条规则要防的事情本身。
+   */
+  yieldTo(on: boolean): void {
+    this.yielding = on;
+    if (!on) return;
+    if (this.applied === true) return;
+    this.applied = true;
+    this.apply(true);
+  }
+
   update(frame: HitFrame, now: number, rects: readonly HitRect[] = []): void {
+    // 让开期间连判定都不做：那时画布是空的，掩膜里没有猫，
+    // 拿它去跑判定只会把「光标在猫身上」的滞后状态清成一堆无意义的中间值。
+    if (this.yielding) return;
     // 被强制关着的时候仍然更新判定状态（松手后才不会跳一下），但不下发。
     if (this.forced) {
       this.state = stepHit(

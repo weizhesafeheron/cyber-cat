@@ -68,10 +68,14 @@ core-graphics = "0.25"
 # DWMWA_EXTENDED_FRAME_BOUNDS 是硬要求：GetWindowRect 在**最大化窗口**下顶边
 # 比可见顶边高 11 像素（Windows 11 25H2 实测），猫会浮空。
 # GetDpiForWindow 用来按目标窗口所在显示器的 DPI 换算坐标。
+# Win32_UI_Shell 只为 SHQueryUserNotificationState（让开规则，issue #15）：
+# 系统自己判断「现在能不能弹 toast」用的就是它，比自己比窗口矩形多覆盖了
+# 独占全屏的 D3D 应用和用户手动开的演示模式。
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
   "Win32_UI_HiDpi",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

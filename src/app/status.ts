@@ -5,6 +5,7 @@ import {
   worldNow,
 } from '../world/index.js';
 import type { CatStatus, World } from '../world/index.js';
+import type { TrayIconState } from '../tray/index.js';
 import type { TrayStatusPayload } from './persist.js';
 
 /**
@@ -62,4 +63,18 @@ export function trayStatus(world: World, status: CatStatus): TrayStatusPayload {
     // 告别页那个入口反过来：只有猫离开之后才有东西可看。
     memorial: world.dead,
   };
+}
+
+/**
+ * 托盘图标该画哪一档。
+ *
+ * 六档状态并成五档：**「在挨饿」与「饿了」用同一张图**。两者的区别是一个倒计时，
+ * 18×18 的图标上没有第二个记号的位置，硬分成两档只会让两张图看起来一样
+ * （见 src/tray/icon.ts 的判据）。那条信息由 summaryLine 承担 -
+ * 它会写「还有 N 小时后会生病」。
+ *
+ * 映射写在这一层而不是画图那一层：图标模块是纯美术，不该认识世界层的状态枚举。
+ */
+export function trayIconState(status: CatStatus): TrayIconState {
+  return status === 'starving' ? 'hungry' : status;
 }

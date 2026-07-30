@@ -28,6 +28,8 @@ struct TrayItems<R: Runtime> {
     /// 两个挂件的显示开关。勾选状态由前端推过来（摆放存档在那边）。
     prop_bowl: CheckMenuItem<R>,
     prop_bed: CheckMenuItem<R>,
+    /// 安静模式。勾选状态由前端推过来（settings.json 在那边）。
+    quiet: CheckMenuItem<R>,
 }
 
 /// 托盘菜单项的句柄。Mutex 只护一个 Option，锁的持有时间极短。
@@ -66,6 +68,12 @@ pub fn build(app: &App) -> tauri::Result<()> {
     let prop_bed = CheckMenuItem::with_id(app, "prop-bed", "猫窝", true, true, None::<&str>)?;
     let props = Submenu::with_items(app, "桌面挂件", true, &[&prop_bowl, &prop_bed])?;
 
+    // 安静模式。用勾选项而不是两个互斥的动作项：它是一个持续的状态
+    // （跨重启保持），菜单上必须一眼看出现在开着还是关着。
+    // 初值 false 是因为菜单在 setup 里建，那时前端还没读到 settings.json；
+    // 读完会立刻由 update_quiet_menu 纠正。
+    let quiet = CheckMenuItem::with_id(app, "quiet", "安静模式", true, false, None::<&str>)?;
+
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
     let menu = Menu::with_items(
@@ -80,6 +88,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
             &memorial,
             &props,
             &PredefinedMenuItem::separator(app)?,
+            &quiet,
             &quit,
         ],
     )?;
@@ -94,6 +103,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
         memorial,
         prop_bowl,
         prop_bed,
+        quiet,
     }))));
 
     TrayIconBuilder::with_id("tray")
@@ -111,7 +121,11 @@ pub fn build(app: &App) -> tauri::Result<()> {
             // 记的那份保持一致 - 在这里直接 show/hide 会让两边漂移。
             // 日记与告别页也交回前端：窗口尺寸是呈现层的判断，而且日记还有第二个
             // 入口（猫头顶的气泡），两个入口走同一条路才不会出现两套窗口生命周期。
-            id @ ("feed" | "medicate" | "memorial" | "prop-bowl" | "prop-bed" | "diary") => {
+            // 安静模式也交回前端：它要写 settings.json、要把勾选状态推回来，
+            // 而且「安静时猫做什么」全在呈现层（src/app/restraint.ts）。
+            // 在这里直接记一个布尔量会让两边漂移。
+            id @ ("feed" | "medicate" | "memorial" | "prop-bowl" | "prop-bed" | "diary"
+            | "quiet") => {
                 // 交回前端，由它作为一次 UserAction 走进 step。
                 if let Err(e) = app.emit(TRAY_ACTION_EVENT, id) {
                     eprintln!("[cyber-cat] 发送托盘动作 {id} 失败：{e}");
@@ -175,6 +189,51 @@ pub fn update_tray(
         let _ = tray.set_tooltip(Some(&summary));
     }
     Ok(())
+}
+
+/// 换掉托盘图标本身。
+///
+/// **像素由前端画**（src/tray/icon.ts）：那张图是**这只猫**的配色，
+/// 而品种调色板在渲染层，Rust 侧不认识它。把猫头画在这里等于把调色板抄一遍。
+///
+/// 传的是裸 RGBA 而不是 PNG：编码一次再解码一次纯属白费，而这条命令只在
+/// 猫的总体状态变化时调（几分钟一次量级），一次 5KB 的 IPC 无关紧要。
+#[tauri::command]
+pub fn set_tray_icon(
+    app: AppHandle,
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let expected = (width as usize) * (height as usize) * 4;
+    if rgba.len() != expected {
+        return Err(format!(
+            "托盘图标像素数不对：{}×{} 应当是 {expected} 字节，收到 {}",
+            width,
+            height,
+            rgba.len()
+        ));
+    }
+    let tray = app.tray_by_id("tray").ok_or("托盘尚未初始化")?;
+    tray.set_icon(Some(tauri::image::Image::new_owned(rgba, width, height)))
+        .map_err(|e| format!("换托盘图标失败：{e}"))
+}
+
+/// 把托盘里安静模式的勾选状态对齐到前端记的那份开关。
+///
+/// 单独一个命令，理由同 update_prop_menu：它只在用户拨动开关与启动读档时变，
+/// 而 update_tray 是每几秒一次的状态刷新。
+#[tauri::command]
+pub fn update_quiet_menu(handles: State<'_, TrayHandles>, quiet: bool) -> Result<(), String> {
+    let guard = handles
+        .0
+        .lock()
+        .map_err(|_| "托盘状态锁已损坏".to_string())?;
+    let items = guard.as_ref().ok_or("托盘尚未初始化")?;
+    items
+        .quiet
+        .set_checked(quiet)
+        .map_err(|e| format!("勾选安静模式失败：{e}"))
 }
 
 /// 把托盘里两个挂件的勾选状态对齐到前端记的那份摆放。

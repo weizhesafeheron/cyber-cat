@@ -2,9 +2,11 @@ import { parseMemorial, serializeMemorial } from '../memorial/index.js';
 import { PropsSaveError, parseProps, serializeProps } from '../props/index.js';
 import { SaveFormatError, parseWorld, serializeWorld } from '../world/index.js';
 import { inTauri } from './ipc.js';
+import { DEFAULT_SETTINGS, parseSettings } from './settings.js';
 import type { Memorial } from '../memorial/index.js';
 import type { PropsState } from '../props/index.js';
 import type { World } from '../world/index.js';
+import type { Settings } from './settings.js';
 
 /**
  * 存档的应用层适配。
@@ -133,6 +135,33 @@ export async function saveMemorial(archive: Memorial): Promise<void> {
   if (!inTauri) return;
   const invoke = await getInvoke();
   await invoke('save_memorial', { contents: serializeMemorial(archive) });
+}
+
+/**
+ * 读用户的开关（settings.json）。
+ *
+ * **读坏了不抛，退回默认值**（parseSettings）：这份文件里没有不可再生的东西，
+ * 而一个开关读不出来就让猫起不来是不成比例的 - 与 memorial.json 的策略相反，
+ * 那份坏了必须让调用方知道，因为里面的猫都死了、覆盖上去就没了。
+ */
+export async function loadSettings(): Promise<Settings> {
+  if (!inTauri) return DEFAULT_SETTINGS;
+  try {
+    const invoke = await getInvoke();
+    const text = await invoke<string | null>('load_settings');
+    if (text == null) return DEFAULT_SETTINGS;
+    return parseSettings(JSON.parse(text));
+  } catch (err) {
+    console.error('[cyber-cat] 读开关失败，按默认值继续：', err);
+    return DEFAULT_SETTINGS;
+  }
+}
+
+/** 写用户的开关。用户拨一次写一次 - 这不是每帧都在变的东西，不需要节流。 */
+export async function saveSettings(settings: Settings): Promise<void> {
+  if (!inTauri) return;
+  const invoke = await getInvoke();
+  await invoke('save_settings', { contents: JSON.stringify(settings) });
 }
 
 // 显示窗口的 pet_ready 封装在 ipc.ts - IPC 层只保留一份，避免两处各自维护

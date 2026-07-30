@@ -94,6 +94,15 @@ fn foreground_window(
     platform::foreground_window(&window)
 }
 
+/// 现在该不该让开（别人在全屏或投屏）。见 `platform::presenting`。
+///
+/// 前端每秒问一次（YIELD_INTERVAL_MS）。**探测失败在前端被当成「不该让开」** -
+/// 失效方向必须是猫照常出现，一只永远不出现的猫会被当成程序坏了。
+#[tauri::command]
+fn presenting(window: WebviewWindow) -> Result<bool, String> {
+    platform::presenting(&window)
+}
+
 /// 把舞台挪到桌面上的某个位置。**只在猫走到舞台边缘时调**，见 `platform::move_window`。
 #[tauri::command]
 fn move_stage(window: WebviewWindow, x: f64, y: f64) -> Result<(), String> {
@@ -148,6 +157,7 @@ pub fn run() {
             move_stage,
             resize_self,
             foreground_window,
+            presenting,
             adopt::open_adoption,
             adopt::close_adoption,
             adopt::cancel_adoption,
@@ -163,8 +173,12 @@ pub fn run() {
             save::load_props,
             save::save_memorial,
             save::load_memorial,
+            save::save_settings,
+            save::load_settings,
             tray::update_tray,
-            tray::update_prop_menu
+            tray::update_prop_menu,
+            tray::update_quiet_menu,
+            tray::set_tray_icon
         ])
         .setup(|app| {
             platform::configure_app(app);

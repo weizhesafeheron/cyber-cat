@@ -145,6 +145,45 @@ export async function placeProp(
   await invoke<void>('place_prop', { kind, x, y, visible });
 }
 
+/**
+ * 换掉托盘图标本身。像素由 src/tray/icon.ts 画好，这里只负责搬过去。
+ *
+ * `Array.from` 是必要的：`Uint8Array` 经 JSON 序列化会变成
+ * `{"0":12,"1":34,...}` 这种对象，Rust 侧的 `Vec<u8>` 反序列化不了 -
+ * 症状是命令报参数类型错误，而托盘图标停在上一张。
+ *
+ * 失败只记录：图标没换成是「托盘上看不出状态」，tooltip 与菜单文案还在。
+ */
+export async function setTrayIcon(
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const invoke = await invoker();
+    await invoke<void>('set_tray_icon', { rgba: Array.from(rgba), width, height });
+  } catch (err) {
+    console.error('[cyber-cat] 换托盘图标失败：', err);
+  }
+}
+
+/**
+ * 刷新托盘里安静模式的勾选状态。
+ *
+ * 失败只记录：勾选状态对不上是「菜单上看着没勾」，而开关本身已经生效了。
+ * 为此把已经生效的状态回滚会让用户看到勾选自己跳回去，那更糟。
+ */
+export async function pushQuietMenu(quiet: boolean): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const invoke = await invoker();
+    await invoke<void>('update_quiet_menu', { quiet });
+  } catch (err) {
+    console.error('[cyber-cat] 刷新安静模式菜单失败：', err);
+  }
+}
+
 /** 刷新托盘里两个挂件的显示/隐藏勾选状态。 */
 export async function pushPropMenu(bowl: boolean, bed: boolean): Promise<void> {
   if (!inTauri) return;
@@ -281,6 +320,24 @@ export async function openDiary(
     await invoke<void>('open_diary', { width, height, minWidth, minHeight });
   } catch (err) {
     console.error('[cyber-cat] 打开日记窗口失败：', err);
+  }
+}
+
+/**
+ * 现在该不该让开（别人在全屏应用里，或者在投屏演示）。
+ *
+ * **失败一律返回 false**（不让开）：失效方向必须是猫照常出现 -
+ * 一只永远不出现的猫会被当成程序坏了，而一只在全屏视频上多待一秒的猫只是有点烦。
+ * 浏览器里调试时同理。
+ */
+export async function probePresenting(): Promise<boolean> {
+  if (!inTauri) return false;
+  try {
+    const invoke = await invoker();
+    return await invoke<boolean>('presenting');
+  } catch (err) {
+    console.error('[cyber-cat] 探测全屏/投屏失败，按不让开继续：', err);
+    return false;
   }
 }
 
