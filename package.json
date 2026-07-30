@@ -14,7 +14,8 @@
     "tauri": "tauri",
     "app:dev": "tauri dev",
     "app:build": "tauri build",
-    "icons": "vite-node tools/make-icons.ts"
+    "icons": "vite-node tools/make-icons.ts",
+    "check:win": "sh tools/check-windows.sh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
