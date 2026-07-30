@@ -1,0 +1,215 @@
+<title>托盘图标：七品种 × 五状态</title>
+<style>
+  /*
+   * 托盘图标的验收页。
+   *
+   * 配色沿用应用自己那套（深靛蓝 + 青 + 黄），与领养页、日记页同一套 -
+   * 这一页展示的就是这个应用的美术，用别的配色看不出它在真实环境里的样子。
+   *
+   * 图标是 1 倍的 PNG（18 像素高），全部靠 image-rendering: pixelated 整数放大。
+   * 不预先渲染放大版：整数倍最近邻在浏览器里是精确的，而多一份放大图就多一处
+   * 可能与真机不一致的地方。
+   */
+  :root {
+    --bg: #0b0e1a;
+    --card: #161c34;
+    --line: #2c3a68;
+    --ink: #d8dcf0;
+    --dim: #aab3d8;
+    --faint: #5b6488;
+    --cyan: #4deeea;
+    --yellow: #ffd94a;
+    --pink: #ff8fb0;
+    /* macOS 深色菜单栏与浅色菜单栏的实测底色 */
+    --bar-dark: #3c3e34;
+    --bar-light: #ececee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 24px 96px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    line-height: 1.7;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: 0.5px; }
+  .sub { color: var(--dim); margin: 0 0 4px; }
+  .note { color: var(--faint); font-size: 13px; margin: 0 0 24px; }
+  h2 { font-size: 15px; color: var(--cyan); margin: 34px 0 10px; letter-spacing: 1px; }
+
+  img { image-rendering: pixelated; display: block; }
+
+  /* --- 真实尺寸：18 点高，等于菜单栏上的实际大小 --- */
+  .real { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; }
+  .barsim {
+    display: flex; align-items: center; gap: 10px;
+    padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line);
+    min-width: 0;
+  }
+  .barsim.dark { background: var(--bar-dark); }
+  .barsim.light { background: var(--bar-light); }
+  .barsim .lbl { font-size: 11px; letter-spacing: 0.5px; white-space: nowrap; }
+  .barsim.dark .lbl { color: #cfd2c8; }
+  .barsim.light .lbl { color: #55565c; }
+  /* 1 倍 = 18 像素高。Retina 上菜单栏正好按这个点数显示 */
+  .barsim img { height: 18px; }
+
+  /* --- 放大版：看清每一档改了哪些像素 --- */
+  .grid { overflow-x: auto; }
+  table { border-collapse: collapse; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: middle; }
+  thead th {
+    font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: 1px;
+    border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  tbody th {
+    font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap;
+    border-bottom: 1px solid #131936;
+  }
+  tbody td { border-bottom: 1px solid #131936; }
+  tbody tr:hover th, tbody tr:hover td { background: #101736; }
+  .row-dark, .row-light { padding: 6px 8px; border-radius: 4px; }
+  .row-dark { background: var(--bar-dark); }
+  .row-light { background: var(--bar-light); }
+  /* 5 档一行，中间 2 像素间隙，整体放大 4 倍 */
+  .zoom img { height: 72px; }
+  .desc { font-size: 12px; color: var(--faint); }
+  .desc b { color: var(--dim); font-weight: 600; }
+
+  .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; margin-top: 4px; }
+  .legend div {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    font-size: 12.5px; color: var(--dim); min-width: 0;
+  }
+  .legend b { display: block; color: var(--ink); font-size: 13px; margin-bottom: 2px; }
+  .legend .weak { color: var(--pink); }
+
+  form {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin-top: 30px;
+  }
+  form h2 { margin-top: 0; }
+  label.opt { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; font-size: 14px; cursor: pointer; }
+  label.opt input { margin-top: 5px; }
+  label.opt b { color: var(--ink); font-weight: 600; }
+  label.opt em { color: var(--faint); font-style: normal; font-size: 12px; display: block; }
+  textarea {
+    width: 100%; margin-top: 10px; min-height: 62px; background: var(--bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-family: inherit; font-size: 13px;
+  }
+  button.send {
+    margin-top: 14px; background: var(--cyan); color: #06202a; border: 0; border-radius: 6px;
+    padding: 9px 18px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer;
+  }
+</style>
+
+<div class="wrap">
+  <h1>托盘图标：七品种 × 五状态</h1>
+  <p class="sub">图标是这只猫自己的品种配色画的 18×18 像素猫头，五档状态各改两处。</p>
+  <p class="note">
+    下面所有图都是同一份 1 倍 PNG（18 像素高）用整数最近邻放大出来的，和真机上菜单栏里的形状完全一致。
+    奶牛猫那一行用的是你现在这只（小米，seed 1060975906），其余品种用同一颗种子好比较结构差异。
+  </p>
+
+  <h2>真实尺寸（这就是菜单栏上的大小）</h2>
+  <div class="real">
+    <div class="barsim dark"><span class="lbl">深色菜单栏</span><img src="tray-cow.png" alt="奶牛猫五档" /></div>
+    <div class="barsim light"><span class="lbl">浅色菜单栏</span><img src="tray-cow.png" alt="奶牛猫五档" /></div>
+  </div>
+  <p class="note">左起：正常 · 睡着 · 饿了 · 生病 · 已离开</p>
+
+  <h2>放大四倍看每一档改了什么</h2>
+  <div class="grid">
+    <table>
+      <thead>
+        <tr>
+          <th>品种</th>
+          <th>深色菜单栏底</th>
+          <th>浅色菜单栏底</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>奶牛猫 <span class="desc">（小米）</span></th>
+          <td class="zoom"><div class="row-dark"><img src="tray-cow.png" alt="奶牛猫" /></div></td>
+          <td class="zoom"><div class="row-light"><img src="tray-cow.png" alt="奶牛猫" /></div></td>
+        </tr>
+        <tr>
+          <th>橘猫</th>
+          <td class="zoom"><div class="row-dark"><img src="tray-orange.png" alt="橘猫" /></div></td>
+          <td class="zoom"><div class="row-light"><img src="tray-orange.png" alt="橘猫" /></div></td>
+        </tr>
+        <tr>
+          <th>黑猫</th>
+          <td class="zoom"><div class="row-dark"><img src="tray-black.png" alt="黑猫" /></div></td>
+          <td class="zoom"><div class="row-light"><img src="tray-black.png" alt="黑猫" /></div></td>
+        </tr>
+        <tr>
+          <th>布偶猫</th>
+          <td class="zoom"><div class="row-dark"><img src="tray-ragdoll.png" alt="布偶猫" /></div></td>
+          <td class="zoom"><div class="row-light"><img src="tray-ragdoll.png" alt="布偶猫" /></div></td>
+        </tr>
+        <tr>
+          <th>德文卷毛</th>
+          <td class="zoom"><div class="row-dark"><img src="tray-devon.png" alt="德文卷毛" /></div></td>
+          <td class="zoom"><div class="row-light"><img src="tray-devon.png" alt="德文卷毛" /></div></td>
+        </tr>
+        <tr>
+          <th>美短</th>
+          <td class="zoom"><div class="row-dark"><img src="tray-amshort.png" alt="美短" /></div></td>
+          <td class="zoom"><div class="row-light"><img src="tray-amshort.png" alt="美短" /></div></td>
+        </tr>
+        <tr>
+          <th>阿比西尼亚</th>
+          <td class="zoom"><div class="row-dark"><img src="tray-aby.png" alt="阿比西尼亚" /></div></td>
+          <td class="zoom"><div class="row-light"><img src="tray-aby.png" alt="阿比西尼亚" /></div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>每一档靠什么分开</h2>
+  <div class="legend">
+    <div><b>正常</b>睁眼、带瞳孔与高光。<b style="display:inline">唯一没有徽章的一档</b>，所以「有没有徽章」本身就是第一层信息。</div>
+    <div><b>睡着</b>闭成横线的眼睛 + 压平的耳朵 + 右下角 Z 徽章。<span class="weak">这一档最弱：18 像素上那个 Z 糊成一个带折线的小方块，真正在起作用的是闭眼与压耳。</span></div>
+    <div><b>饿了</b>张嘴 + 右下角空食盆徽章。「在挨饿」共用这一张 - 两者差的是个倒计时，18 像素上没有第二个记号的位置。</div>
+    <div><b>生病</b>全身降饱和并偏橄榄色 + 半闭的病眼 + 红十字徽章。整块调色让它在缩到最小时也能认出来。</div>
+    <div><b>已离开</b>整体灰掉 + 叉眼。刻意做得最不像活猫。</div>
+  </div>
+
+  <form
+    data-lavish-question="tray-icon"
+    onsubmit="event.preventDefault();
+      const f = new FormData(event.currentTarget);
+      const choice = f.get('verdict');
+      const note = (f.get('note') || '').toString().trim();
+      if (!choice) return;
+      window.lavish.queuePrompt(
+        '托盘图标验收：' + choice + (note ? '\n\n补充：' + note : ''),
+        { tag: 'choice', text: '托盘图标：' + choice, element: event.currentTarget,
+          data: { question: 'tray-icon', answer: choice, note } }
+      );"
+  >
+    <h2>要不要改</h2>
+    <label class="opt">
+      <input type="radio" name="verdict" value="就这样，不用改" />
+      <span><b>就这样，不用改</b><em>五档都分得开，睡着那档靠闭眼与压耳已经够了</em></span>
+    </label>
+    <label class="opt">
+      <input type="radio" name="verdict" value="重画睡着那档的 Z（去掉徽章底，Z 直接画在透明背景上、只留 1 像素描边）" />
+      <span><b>重画睡着那档的 Z</b><em>去掉徽章的深色底，让 Z 直接画在透明背景上、只留 1 像素描边，腾出两个像素给字形</em></span>
+    </label>
+    <label class="opt">
+      <input type="radio" name="verdict" value="睡着那档干脆不要徽章，只靠闭眼与压耳" />
+      <span><b>睡着那档干脆不要徽章</b><em>只靠闭眼与压平的耳朵，少一个糊成一团的记号</em></span>
+    </label>
+    <label class="opt">
+      <input type="radio" name="verdict" value="别的地方要改（见补充）" />
+      <span><b>别的地方要改</b><em>写在下面</em></span>
+    </label>
+    <textarea name="note" placeholder="补充（可选）：哪一档、哪个品种、想改成什么样"></textarea>
+    <button class="send" type="submit">选好了，发给我</button>
+  </form>
+</div>
