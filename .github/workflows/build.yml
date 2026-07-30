@@ -126,6 +126,10 @@ jobs:
 
       # 把安装包拢进一个平铺的目录再上传。
       #
+      # 目录名不能叫 dist：那是 vite 前端构建的输出目录（vite.config.ts 的 outDir），
+      # tauri-action 跑完后里面已经躺着 index.html 和一堆 js，往里拷安装包再整个上传，
+      # artifact 里就混进了全部前端产物。踩过。
+      #
       # 直接上传原路径的话，zip 里会套着 release/bundle/nsis/ 这几层 -
       # upload-artifact 只会去掉所有匹配项的**公共前缀**，而 macOS 的 dmg 在
       # target/universal-apple-darwin/ 下、Windows 的 msi 在 target/ 下，
@@ -136,13 +140,13 @@ jobs:
       - name: 收拢安装包
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p installers
           find src-tauri/target -type f \
             \( -path '*/bundle/dmg/*.dmg' \
             -o -path '*/bundle/msi/*.msi' \
             -o -path '*/bundle/nsis/*.exe' \) \
-            -exec cp {} dist/ \;
-          ls -l dist
+            -exec cp {} installers/ \;
+          ls -l installers
 
       # 手动触发时把产物存成 artifact：那种情况下没有 Release 可挂。
       # if-no-files-found: error - 静默地上传一个空压缩包比失败更难查。
@@ -152,4 +156,4 @@ jobs:
           name: cybercat-${{ matrix.platform }}
           if-no-files-found: error
           retention-days: 30
-          path: dist/*
+          path: installers/*
