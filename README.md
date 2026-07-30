@@ -57,6 +57,7 @@ npm run harness     # 渲染核心的人工验证页，每个品种 × 每个动
 - [0010](docs/adr/0011-return-bubble-in-stage.md) 回归气泡是舞台里的覆盖层，命中区是一个矩形
 - [0012](docs/adr/0012-surfaces-and-perching.md) 表面模型：猫可以停在前台窗口上沿，但纵向永远不是自由变量
 - [0013](docs/adr/0013-custom-title-bar.md) 三扇弹出窗口自绘标题栏，不用系统的
+- [0014](docs/adr/0014-yield-by-drawing-nothing.md) 让开规则用「什么都不画」实现，不隐藏宠物窗口
 
 ## 原型
 
