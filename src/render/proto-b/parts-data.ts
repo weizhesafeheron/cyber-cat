@@ -1,0 +1,263 @@
+/** 由 tools/proto-b/make-parts.ts 生成，勿手改。规范来源是同目录 assets/parts.json。 */
+import type { PartsDoc } from './types.js';
+
+export const PARTS_DOC: PartsDoc = {
+  "canvas": {
+    "w": 144,
+    "h": 112,
+    "ground": 101
+  },
+  "parts": [
+    {
+      "id": "body",
+      "parent": null,
+      "pivot": [
+        70,
+        80
+      ],
+      "z": 2,
+      "images": {
+        "stand": "body-stand.png",
+        "sit": "body-sit.png",
+        "curl0": "body-curl0.png",
+        "curl1": "body-curl1.png"
+      }
+    },
+    {
+      "id": "tail",
+      "parent": "body",
+      "pivot": [
+        46,
+        71
+      ],
+      "z": 0,
+      "images": {
+        "stand": "tail-stand.png",
+        "sit": "tail-sit.png"
+      }
+    },
+    {
+      "id": "head",
+      "parent": "body",
+      "pivot": [
+        92,
+        60
+      ],
+      "z": 4,
+      "images": {
+        "base": "head.png"
+      }
+    },
+    {
+      "id": "ear-back",
+      "parent": "head",
+      "pivot": [
+        86,
+        34
+      ],
+      "z": 5,
+      "images": {
+        "base": "ear-back.png"
+      }
+    },
+    {
+      "id": "ear-front",
+      "parent": "head",
+      "pivot": [
+        107,
+        34
+      ],
+      "z": 5,
+      "images": {
+        "base": "ear-front.png"
+      }
+    },
+    {
+      "id": "eyes",
+      "parent": "head",
+      "pivot": [
+        95,
+        48
+      ],
+      "z": 6,
+      "images": {
+        "open": "eyes-open.png",
+        "half": "eyes-half.png",
+        "closed": "eyes-closed.png"
+      }
+    },
+    {
+      "id": "mouth",
+      "parent": "head",
+      "pivot": [
+        100,
+        55
+      ],
+      "z": 6,
+      "images": {
+        "idle": "mouth-idle.png",
+        "open": "mouth-open.png"
+      }
+    },
+    {
+      "id": "bowl",
+      "parent": null,
+      "pivot": [
+        124,
+        98
+      ],
+      "z": 8,
+      "images": {
+        "base": "bowl.png"
+      }
+    },
+    {
+      "id": "leg-near-front",
+      "parent": null,
+      "pivot": [
+        82,
+        79
+      ],
+      "z": 3,
+      "images": {
+        "stand": "leg-near-front-stand.png",
+        "fwd": "leg-near-front-fwd.png",
+        "back": "leg-near-front-back.png",
+        "dangle": "leg-near-front-dangle.png"
+      }
+    },
+    {
+      "id": "leg-near-back",
+      "parent": null,
+      "pivot": [
+        60,
+        79
+      ],
+      "z": 3,
+      "images": {
+        "stand": "leg-near-back-stand.png",
+        "fwd": "leg-near-back-fwd.png",
+        "back": "leg-near-back-back.png",
+        "dangle": "leg-near-back-dangle.png"
+      }
+    },
+    {
+      "id": "leg-far-front",
+      "parent": null,
+      "pivot": [
+        77,
+        78
+      ],
+      "z": 1,
+      "images": {
+        "stand": "leg-far-front-stand.png",
+        "fwd": "leg-far-front-fwd.png",
+        "back": "leg-far-front-back.png",
+        "dangle": "leg-far-front-dangle.png"
+      }
+    },
+    {
+      "id": "leg-far-back",
+      "parent": null,
+      "pivot": [
+        55,
+        78
+      ],
+      "z": 1,
+      "images": {
+        "stand": "leg-far-back-stand.png",
+        "fwd": "leg-far-back-fwd.png",
+        "back": "leg-far-back-back.png",
+        "dangle": "leg-far-back-dangle.png"
+      }
+    }
+  ],
+  "masks": {
+    "body-stand.png": {
+      "tabby": "body-stand.mask-tabby.png",
+      "cow": "body-stand.mask-cow.png"
+    },
+    "body-sit.png": {
+      "tabby": "body-sit.mask-tabby.png",
+      "cow": "body-sit.mask-cow.png"
+    },
+    "body-curl0.png": {
+      "tabby": "body-curl0.mask-tabby.png",
+      "cow": "body-curl0.mask-cow.png"
+    },
+    "body-curl1.png": {
+      "tabby": "body-curl1.mask-tabby.png",
+      "cow": "body-curl1.mask-cow.png"
+    },
+    "head.png": {
+      "tabby": "head.mask-tabby.png",
+      "cow": "head.mask-cow.png",
+      "point": "head.mask-point.png"
+    },
+    "ear-back.png": {
+      "point": "ear-back.mask-point.png"
+    },
+    "ear-front.png": {
+      "cow": "ear-front.mask-cow.png",
+      "point": "ear-front.mask-point.png"
+    },
+    "tail-stand.png": {
+      "tabby": "tail-stand.mask-tabby.png",
+      "cow": "tail-stand.mask-cow.png",
+      "point": "tail-stand.mask-point.png"
+    },
+    "tail-sit.png": {
+      "tabby": "tail-sit.mask-tabby.png",
+      "cow": "tail-sit.mask-cow.png",
+      "point": "tail-sit.mask-point.png"
+    },
+    "leg-near-front-stand.png": {
+      "point": "leg-near-front-stand.mask-point.png"
+    },
+    "leg-near-front-fwd.png": {
+      "point": "leg-near-front-fwd.mask-point.png"
+    },
+    "leg-near-front-back.png": {
+      "point": "leg-near-front-back.mask-point.png"
+    },
+    "leg-near-front-dangle.png": {
+      "point": "leg-near-front-dangle.mask-point.png"
+    },
+    "leg-near-back-stand.png": {
+      "point": "leg-near-back-stand.mask-point.png"
+    },
+    "leg-near-back-fwd.png": {
+      "point": "leg-near-back-fwd.mask-point.png"
+    },
+    "leg-near-back-back.png": {
+      "point": "leg-near-back-back.mask-point.png"
+    },
+    "leg-near-back-dangle.png": {
+      "point": "leg-near-back-dangle.mask-point.png"
+    },
+    "leg-far-front-stand.png": {
+      "point": "leg-far-front-stand.mask-point.png"
+    },
+    "leg-far-front-fwd.png": {
+      "point": "leg-far-front-fwd.mask-point.png"
+    },
+    "leg-far-front-back.png": {
+      "point": "leg-far-front-back.mask-point.png"
+    },
+    "leg-far-front-dangle.png": {
+      "point": "leg-far-front-dangle.mask-point.png"
+    },
+    "leg-far-back-stand.png": {
+      "point": "leg-far-back-stand.mask-point.png"
+    },
+    "leg-far-back-fwd.png": {
+      "point": "leg-far-back-fwd.mask-point.png"
+    },
+    "leg-far-back-back.png": {
+      "point": "leg-far-back-back.mask-point.png"
+    },
+    "leg-far-back-dangle.png": {
+      "point": "leg-far-back-dangle.mask-point.png"
+    }
+  }
+} as const;

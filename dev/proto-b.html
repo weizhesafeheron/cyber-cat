@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CYBER-CAT · 原型 B 分层部件</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: #0b0e1a;
+        color: #d8dcf0;
+        font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        padding: 20px 24px 60px;
+      }
+      h1 { font-size: 20px; letter-spacing: 1px; }
+      h1 .en { color: #f652a0; font-family: ui-monospace, monospace; }
+      .note {
+        margin: 10px 0 18px;
+        padding: 10px 14px;
+        background: #12172b;
+        border-left: 3px solid #4deeea;
+        border-radius: 4px;
+        font-size: 13px;
+        line-height: 1.75;
+        color: #aab3d8;
+        max-width: 90ch;
+      }
+      .note b { color: #ffd94a; }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 22px;
+        align-items: center;
+        padding: 12px 14px;
+        background: #10142a;
+        border: 1px solid #2c3a68;
+        border-radius: 8px;
+        margin-bottom: 18px;
+      }
+      .bar label { font-size: 12.5px; color: #aab3d8; display: inline-flex; align-items: center; gap: 6px; }
+      .bar select, .bar input[type="number"] {
+        background: #07091a;
+        color: #ffd94a;
+        border: 1px solid #2c3a68;
+        border-radius: 5px;
+        padding: 5px 8px;
+        font-family: ui-monospace, monospace;
+        font-size: 12.5px;
+      }
+      #fps { color: #4deeea; font-family: ui-monospace, monospace; font-size: 12.5px; }
+      table { border-collapse: collapse; }
+      th, td {
+        border: 1px solid #222a4d;
+        padding: 6px 8px;
+        text-align: center;
+        vertical-align: bottom;
+        font-size: 12px;
+        color: #aab3d8;
+      }
+      th small { display: block; color: #5b6390; font-weight: normal; font-size: 10.5px; }
+      canvas {
+        image-rendering: pixelated;
+        background:
+          repeating-conic-gradient(#141930 0% 25%, #10142a 0% 50%) 0 0 / 24px 24px;
+        border-radius: 4px;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>原型 B <span class="en">LAYERED PARTS</span> · 分层部件资产</h1>
+    <div class="note">
+      高细像素<b>分层部件</b>（身体/头/耳/眼睑/尾独立图层，Mana Seed 同布局）+
+      程序骨骼式驱动 + <b>ID 调色板换色</b>与<b>花纹 mask 叠加</b>。
+      同一套部件位图服务所有行的配色/花纹 - 看点：部件接缝、换色后描边与光影是否完好、
+      眨眼时全身其他部件是否纹丝不动（局部静止）。
+      URL 加 <b>?t=秒数</b> 冻结在指定时刻（截图用）。
+    </div>
+    <div class="bar">
+      <label>缩放
+        <select id="scale">
+          <option value="1">1x (144×112)</option>
+          <option value="2" selected>2x (288×224)</option>
+          <option value="3">3x</option>
+        </select>
+      </label>
+      <span id="fps"></span>
+    </div>
+    <table id="grid"></table>
+    <script type="module" src="./proto-b.ts"></script>
+  </body>
+</html>
