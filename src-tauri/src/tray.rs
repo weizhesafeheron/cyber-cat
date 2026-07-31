@@ -116,7 +116,19 @@ pub fn build(app: &App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "quit" => app.exit(0),
+            "quit" => {
+                #[cfg(target_os = "windows")]
+                {
+                    // Windows 上从托盘回调里调用 `AppHandle::exit` 只会把退出请求
+                    // 投递回 tao 事件循环；实机上菜单已经关闭，但请求偶尔不会被消费，
+                    // 表现为点「退出」完全没反应。先让 Tauri 释放托盘、窗口与 WebView，
+                    // 再结束进程，既不会留下托盘幽灵图标，也不依赖下一轮事件循环。
+                    app.cleanup_before_exit();
+                    std::process::exit(0);
+                }
+                #[cfg(not(target_os = "windows"))]
+                app.exit(0);
+            }
             // 挂件的显示开关也交回前端：摆放存档在那边，而且勾选状态必须与它
             // 记的那份保持一致 - 在这里直接 show/hide 会让两边漂移。
             // 日记与告别页也交回前端：窗口尺寸是呈现层的判断，而且日记还有第二个

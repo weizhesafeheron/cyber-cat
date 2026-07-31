@@ -25,7 +25,9 @@ pub const FAREWELL_LABEL: &str = "farewell";
 ///
 /// 幂等：已经开着就把它带到前面。宠物窗口在两条路上都会调它 -
 /// 刚发现猫死了，以及用户从托盘再打开一次。
-#[tauri::command]
+// 原因同 adopt::open_adoption：Windows 的建窗命令不能占着 WebView2 IPC 回调。
+#[cfg_attr(target_os = "windows", tauri::command(async))]
+#[cfg_attr(not(target_os = "windows"), tauri::command)]
 pub fn open_farewell(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     if let Some(existing) = app.get_webview_window(FAREWELL_LABEL) {
         let _ = existing.set_focus();

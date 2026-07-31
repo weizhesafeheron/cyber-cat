@@ -558,9 +558,39 @@ pub fn move_window(window: &WebviewWindow, x: f64, y: f64) -> Result<(), String>
     let outer = window.outer_position().map_err(|e| e.to_string())?;
     let inset_x = f64::from(inner.x - outer.x) / scale;
     let inset_y = f64::from(inner.y - outer.y) / scale;
-    window
-        .set_position(LogicalPosition::new(x - inset_x, y - inset_y))
+    let outer_position = LogicalPosition::new(x - inset_x, y - inset_y);
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, SWP_NOACTIVATE, SWP_NOCOPYBITS, SWP_NOSIZE, SWP_NOZORDER,
+        };
+
+        // tao 的默认实现带 SWP_ASYNCWINDOWPOS。平时偶尔挪一次窗口没有问题，但拎着猫
+        // 时纵向位置会每帧变化，异步移动会在窗口线程排队，透明 WebView 就会短暂同时
+        // 留下旧位置与新位置。这里同步落位，并明确丢弃旧客户区位图，避免拖动残影。
+        let position = outer_position.to_physical::<i32>(scale);
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                None,
+                position.x,
+                position.y,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOSIZE | SWP_NOZORDER,
+            )
+        }
         .map_err(|e| e.to_string())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        window
+            .set_position(outer_position)
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// 把窗口的客户区改成给定的逻辑尺寸。

@@ -24,7 +24,9 @@ pub const DIARY_LABEL: &str = "diary";
 /// 回归气泡。两者点开的是同一页，不该有两套窗口生命周期。
 /// 尺寸**四个数全由前端给**，包括下限。日记页自绘了标题栏，而标题条的高度只在
 /// src/chrome/constants.ts 有一份 - 下限要把它算进去，写死在这里就成了第二份。
-#[tauri::command]
+// 原因同 adopt::open_adoption：Windows 的建窗命令不能占着 WebView2 IPC 回调。
+#[cfg_attr(target_os = "windows", tauri::command(async))]
+#[cfg_attr(not(target_os = "windows"), tauri::command)]
 pub fn open_diary(
     app: AppHandle,
     width: f64,
