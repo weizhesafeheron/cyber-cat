@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CYBER-CAT · 视觉对比（现状 / 原型 A / 原型 B）</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: #0b0e1a;
+        color: #d8dcf0;
+        font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        padding: 20px 24px 60px;
+      }
+      h1 { font-size: 20px; letter-spacing: 1px; }
+      h1 .en { color: #f652a0; font-family: ui-monospace, monospace; }
+      h2 { font-size: 15px; margin: 26px 0 10px; color: #4deeea; }
+      .note {
+        margin: 10px 0 18px;
+        padding: 10px 14px;
+        background: #12172b;
+        border-left: 3px solid #4deeea;
+        border-radius: 4px;
+        font-size: 13px;
+        line-height: 1.75;
+        color: #aab3d8;
+        max-width: 96ch;
+      }
+      .note b { color: #ffd94a; }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 22px;
+        align-items: center;
+        padding: 12px 14px;
+        background: #10142a;
+        border: 1px solid #2c3a68;
+        border-radius: 8px;
+        margin-bottom: 18px;
+        position: sticky;
+        top: 0;
+        z-index: 5;
+      }
+      .bar label { font-size: 12.5px; color: #aab3d8; display: inline-flex; align-items: center; gap: 6px; }
+      .bar input[type="number"] {
+        width: 130px;
+        background: #07091a;
+        color: #ffd94a;
+        border: 1px solid #2c3a68;
+        border-radius: 5px;
+        padding: 5px 8px;
+        font-family: ui-monospace, monospace;
+        font-size: 12.5px;
+      }
+      .bar select, .bar button {
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 12.5px;
+        background: #1c2445;
+        color: #aab3d8;
+        border: 1px solid #2c3a68;
+        border-radius: 5px;
+        padding: 6px 13px;
+      }
+      .bar button:hover { border-color: #4deeea; color: #4deeea; }
+      .bar button.on { border-color: #f652a0; color: #f652a0; }
+      .group { display: flex; gap: 10px; align-items: center; padding-right: 14px; border-right: 1px solid #232c52; flex-wrap: wrap; }
+      .group:last-child { border-right: none; }
+      .group > span:first-child { font-size: 11px; color: #5b6488; letter-spacing: 1px; }
+
+      .columns { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+      .col {
+        background: #10142a;
+        border: 1px solid #2c3a68;
+        border-radius: 8px;
+        padding: 12px 14px 16px;
+      }
+      .col h3 { font-size: 13px; color: #ffd94a; margin-bottom: 3px; }
+      .col small { display: block; color: #5b6488; font-size: 11px; margin-bottom: 10px; }
+      .stage {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(180deg, #171d36 0%, #1a2140 89%, #202a52 89%, #1c2445 100%);
+        border-radius: 4px;
+      }
+      .stage.placeholder {
+        color: #5b6488;
+        font-size: 13px;
+        letter-spacing: 2px;
+        border: 1px dashed #2c3a68;
+      }
+      canvas { image-rendering: pixelated; display: block; }
+
+      .idrows { display: flex; flex-direction: column; gap: 14px; }
+      .idrow { display: flex; gap: 12px; align-items: center; }
+      .idrow > span {
+        width: 74px;
+        text-align: right;
+        font-size: 12px;
+        color: #4deeea;
+        flex: none;
+      }
+      .idrow .stage { padding: 0 4px; }
+      .idcell { text-align: center; }
+      .idcell small { display: block; color: #5b6488; font-size: 10px; margin-top: 2px; }
+    </style>
+  </head>
+  <body>
+    <h1><span class="en">CYBER-CAT</span> · 视觉对比页（issue #24 判决台）</h1>
+    <div class="note">
+      三栏 = <b>现状 72×56</b> / <b>原型 A：程序化着色升级 144×112</b> / <b>原型 B（占位）</b>。
+      同 seed、同场景、同一份逐帧姿态同步播放；场景按钮覆盖判决清单的六个必测场景（issue #21 resolution）。<br />
+      原型 A 的四项技法：解析法线的 2-3 阶体积光影、hue shift 高光、selout 选择性描边、seed 确定性毛簇。
+      姿态/动作系统一行未动。<br />
+      原型 B 接入方式：在 <b>src/render/proto-b/index.ts</b> 具名导出
+      <b>render(canvas, spec, scene, t, pose)</b>，本页会自动亮起该栏。
+    </div>
+
+    <div class="bar">
+      <div class="group">
+        <span>猫</span>
+        <select id="breed"></select>
+        <input type="number" id="seed" value="20260731" />
+        <button id="reroll">🎲 换一只</button>
+      </div>
+      <div class="group">
+        <span>场景</span>
+        <span id="sceneBtns" style="display:flex;gap:8px;flex-wrap:wrap"></span>
+      </div>
+      <div class="group">
+        <span>缩放</span>
+        <select id="scale">
+          <option value="1">1×（144 基准）</option>
+          <option value="2" selected>2×</option>
+          <option value="3">3×</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="columns" id="columns"></div>
+
+    <h2>辨识度 · 6 只不同品种/seed 同屏站立</h2>
+    <div class="note">
+      上排现状、下排原型 A，同 seed 同微动作。看点：着色升级后个体与品种差异是否仍然一眼可分，
+      有没有被统一的光影「洗」成同一只猫。
+    </div>
+    <div class="idrows" id="idrows"></div>
+
+    <script type="module" src="./compare.ts"></script>
+  </body>
+</html>
