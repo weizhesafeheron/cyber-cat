@@ -10,7 +10,6 @@
  */
 import {
   ACTIONS,
-  CatRenderer,
   H,
   W,
   hitTest,
@@ -30,6 +29,7 @@ import type {
   WorldActionKey,
 } from '../render/index.js';
 import { clamp } from '../render/rng.js';
+import { XiaomiSprites } from './xiaomi-sprites.js';
 import { MS_PER_HOUR, renderIntentOf, step, worldNow } from '../world/index.js';
 import type { CatStatus, RenderIntent, UserAction, World } from '../world/index.js';
 import { ADOPT_H, ADOPT_W } from '../adopt/constants.js';
@@ -206,7 +206,8 @@ const say = new SayCanvas(document.getElementById('say') as HTMLCanvasElement, E
  * 重启之后没人记得上一次摸猫冒了几颗心。
  */
 let hearts: readonly Heart[] = [];
-const renderer = new CatRenderer();
+/** A 方案试运行：所有真实动作直接使用小米的高清完整帧。 */
+const xiaomiSprites = new XiaomiSprites();
 
 /**
  * 桌面可用区，屏幕逻辑坐标。
@@ -452,10 +453,11 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
     world.identity.motion ? { motion: world.identity.motion } : undefined,
     motion.playing,
   );
+  const tunedT = tuneMotionTime(animT, motionTuning, motion.playing, cat);
   const base = tuneMotionPose(
     motion.playing,
     ACTIONS[motion.playing].make(
-      tuneMotionTime(animT, motionTuning, motion.playing, cat),
+      tunedT,
       cat,
       mi,
     ),
@@ -470,9 +472,10 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
   // 头在哪一列。台词气泡的尾巴尖按它对齐 - 由渲染层算，不在气泡那边拍一个偏移量
   // （头的列位取决于品种的体宽，拍死会在瘦品种上偏三四个精灵像素）。
   lastHeadX = headColumn(cat, posed, motion.dir);
-  const res = renderer.render(cat, posed);
+  const sprite = xiaomiSprites.frame(motion.playing, tunedT, motion.dir);
+  const res = sprite.hit;
   lastFrame = res;
-  display.paint(res);
+  display.paintSprite(sprite.visual);
   // 猫在舞台内的位置与爪印每帧都要跟着走，否则猫会站在原地「走路」。
   display.place(catInStage(motion));
   paws.paint(pawsInStage(motion, nowMs), display.scale, display.pixelRatio);
@@ -1366,12 +1369,15 @@ void onAdoptAnother(() => void adoptAnother());
  * 摆好** - 否则头几秒猫会按默认位置去找食盆，然后食盆突然挪到别处。
  */
 async function boot(): Promise<void> {
+  // 动作条带与存档读取可以并行。首帧之前必须全部解码完成，否则透明窗口会先出现。
+  const spritesReady = xiaomiSprites.load();
   // 开关要在第一帧之前读到：安静模式下猫应该一开始就趴着，
   // 而不是先站起来走两步再想起来现在该安静。
   settings = await loadSettings();
   void pushQuietMenu(settings.quiet);
 
   install(await ensureWorld(gate));
+  await spritesReady;
 
   const intent = renderIntentOf(world, cat);
   primeMotion(intent.action);

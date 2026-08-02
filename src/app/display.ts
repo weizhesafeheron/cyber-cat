@@ -19,6 +19,16 @@ export interface CssBox {
   h: number;
 }
 
+/** 一格已经完成构图的高清精灵。显示层只负责整格缩放与朝向镜像。 */
+export interface SpritePaintFrame {
+  readonly source: CanvasImageSource;
+  readonly sx: number;
+  readonly sy: number;
+  readonly sw: number;
+  readonly sh: number;
+  readonly flipX: boolean;
+}
+
 /**
  * 设备缩放倍数：目标逻辑倍数 × dpr 后取整，至少 1。
  *
@@ -144,6 +154,34 @@ export class CatDisplay {
     this.srcCtx.putImageData(this.img, 0, 0);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.ctx.drawImage(this.src, 0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  /**
+   * 画一格高清完整帧。
+   *
+   * 与 paint(RenderResult) 共用同一张屏幕画布、尺寸与整数物理像素缩放规则，
+   * 但不先压成 72×56 再放大。这样 A 方案的脸部和毛色细节能真实进入产品。
+   */
+  paintSprite(frame: SpritePaintFrame): void {
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.save();
+    if (frame.flipX) {
+      ctx.translate(this.canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(
+      frame.source,
+      frame.sx,
+      frame.sy,
+      frame.sw,
+      frame.sh,
+      0,
+      0,
+      this.canvas.width,
+      this.canvas.height,
+    );
+    ctx.restore();
   }
 
   /** 什么都不画。猫死后没有姿态可画，画布必须真的空，不能留着上一帧。 */

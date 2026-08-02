@@ -29,6 +29,13 @@ export { headColumn } from './poses.js';
 export { earAttachment, type EarAttachment } from './parts.js';
 export { mulberry32 } from './rng.js';
 export {
+  XIAOMI_FRAME_COUNT,
+  XIAOMI_FRAME_H,
+  XIAOMI_FRAME_MS,
+  XIAOMI_FRAME_W,
+  xiaomiFrameIndex,
+} from './xiaomi.js';
+export {
   ART_TUNING_CONTROLS,
   DEFAULT_ART_TUNING,
   normalizeArtTuning,

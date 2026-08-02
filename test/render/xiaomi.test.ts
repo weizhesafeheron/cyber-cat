@@ -1,0 +1,21 @@
+import { describe, expect, it } from 'vitest';
+import { XIAOMI_FRAME_COUNT, XIAOMI_FRAME_MS, xiaomiFrameIndex } from '../../src/render/index.js';
+
+describe('小米完整帧时间映射', () => {
+  it('循环动作按六格首尾相接', () => {
+    const frameSeconds = XIAOMI_FRAME_MS.walk / 1000;
+    expect(xiaomiFrameIndex('walk', 0)).toBe(0);
+    expect(xiaomiFrameIndex('walk', frameSeconds * 5)).toBe(5);
+    expect(xiaomiFrameIndex('walk', frameSeconds * XIAOMI_FRAME_COUNT)).toBe(0);
+  });
+
+  it('一次性动作停在末格而不是重播', () => {
+    const frameSeconds = XIAOMI_FRAME_MS.yawn / 1000;
+    expect(xiaomiFrameIndex('yawn', frameSeconds * 4)).toBe(4);
+    expect(xiaomiFrameIndex('yawn', frameSeconds * 20)).toBe(5);
+  });
+
+  it('负时间钳制到第一格', () => {
+    expect(xiaomiFrameIndex('idle', -1)).toBe(0);
+  });
+});
