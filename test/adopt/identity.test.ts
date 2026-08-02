@@ -75,4 +75,9 @@ describe('身份载荷解析', () => {
       parseAdopted({ ...profile, marking: { variant: '不存在', seed: 42 } }),
     ).toThrow(AdoptionPayloadError);
   });
+
+  it('只携带随机性格的新品种领养结果可以通过', () => {
+    const personality = { active: 0.2, clingy: 0.4, greedy: 0.6 };
+    expect(parseAdopted({ ...GOOD, personality })).toEqual({ ...GOOD, personality });
+  });
 });
