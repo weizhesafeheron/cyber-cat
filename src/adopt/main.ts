@@ -1,5 +1,6 @@
+import { BreedSprites } from '../app/breed-sprites.js';
 import { CatDisplay } from '../app/display.js';
-import { faceDir, walkSpeedFor } from '../app/motion.js';
+import { walkSpeedFor } from '../app/motion.js';
 import {
   announceAdopted,
   cancelAdoption,
@@ -9,30 +10,8 @@ import {
 } from '../app/ipc.js';
 import { GROUND_FROM_BOTTOM } from '../app/stage.js';
 import { mountChrome } from '../chrome/index.js';
-import {
-  ACTIONS,
-  ACTION_KEYS,
-  ART_TUNING_CONTROLS,
-  BREEDS,
-  BREED_KEYS,
-  CatRenderer,
-  DEFAULT_ART_TUNING,
-  DEFAULT_MOTION_TUNING,
-  makeMicro,
-  materializeCat,
-  motionTuningControlsFor,
-  motionTuningFor,
-  stepMicro,
-  tuneMotionPose,
-  tuneMotionTime,
-} from '../render/index.js';
-import type {
-  ActionKey,
-  Cat,
-  CatArtTuningKey,
-  CatMotionTuningKey,
-  MicroState,
-} from '../render/index.js';
+import { BREEDS, BREED_KEYS, materializeCat } from '../render/index.js';
+import type { ActionKey, BreedKey, Cat } from '../render/index.js';
 import { walkFrame } from './arrival.js';
 import {
   ADOPT_SCALE,
@@ -44,17 +23,7 @@ import {
   SETTLE_S,
   SKY_H,
 } from './constants.js';
-import {
-  accept,
-  beginAdoption,
-  nameIt,
-  randomizeVisuals,
-  rerollAppearance,
-  resumeMeeting,
-  selectBreed,
-  setArtTuning,
-  setMotionTuning,
-} from './flow.js';
+import { accept, beginAdoption, nameIt, resumeMeeting, selectBreed } from './flow.js';
 import type { AdoptionFlow } from './flow.js';
 import { handOff } from './handoff.js';
 import { introOf } from './intro.js';
@@ -63,16 +32,13 @@ import type { RainBox, RainField } from './rain.js';
 import { SkyCanvas } from './sky.js';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
-const night = $('night');
+
 const ui = {
+  night: $('night'),
   lede: $('lede'),
   breed: $('breed'),
   shape: $('shape'),
-  traits: $<HTMLUListElement>('traits'),
-  breedDropdown: $('breed-dropdown'),
-  breedTrigger: $<HTMLButtonElement>('breed-trigger'),
-  breedMenu: $('breed-menu'),
-  reroll: $<HTMLButtonElement>('reroll'),
+  traits: $('traits'),
   meeting: $('meeting'),
   naming: $<HTMLFormElement>('naming'),
   name: $<HTMLInputElement>('name'),
@@ -80,29 +46,17 @@ const ui = {
   keep: $<HTMLButtonElement>('keep'),
   back: $<HTMLButtonElement>('back'),
   confirm: $<HTMLButtonElement>('confirm'),
-  customize: $('customize'),
-  fields: $<HTMLFieldSetElement>('tuning-fields'),
-  controls: $('controls'),
-  actionDropdown: $('action-dropdown'),
-  actionTrigger: $<HTMLButtonElement>('action-trigger'),
-  actionMenu: $('action-menu'),
-  artTab: $<HTMLButtonElement>('art-tab'),
-  motionTab: $<HTMLButtonElement>('motion-tab'),
-  randomize: $<HTMLButtonElement>('randomize'),
-  reset: $<HTMLButtonElement>('reset'),
+  choose: $('choose'),
+  breedGrid: $('breed-grid'),
 };
 
-const skyBox = (): RainBox => ({ w: night.clientWidth || ADOPT_W / 2, h: SKY_H });
-const renderer = new CatRenderer();
+const skyBox = (): RainBox => ({ w: ui.night.clientWidth || ADOPT_W / 2, h: SKY_H });
 const sky = new SkyCanvas($<HTMLCanvasElement>('sky'));
 const display = new CatDisplay($<HTMLCanvasElement>('cat'), ADOPT_SCALE, skyBox);
+const sprites = new BreedSprites();
 
-type TuningTab = 'art' | 'motion';
-let tab: TuningTab = 'art';
-let previewAction: ActionKey = 'walk';
 let flow: AdoptionFlow = beginAdoption(Math.random);
 let cat: Cat = materializeCat(flow.candidate);
-let micro: MicroState = makeMicro(flow.candidate.seed);
 let stageT = 0;
 let animT = 0;
 let playing: ActionKey | null = null;
@@ -119,9 +73,33 @@ function groundY(): number {
   return SKY_H - GROUND_FROM_BOTTOM * display.spriteScale;
 }
 
-function refreshCat(resetMicro = false): void {
+function refreshCat(): void {
   cat = materializeCat(flow.candidate);
-  if (resetMicro) micro = makeMicro(flow.candidate.seed);
+}
+
+function paintCard(canvas: HTMLCanvasElement, breed: BreedKey): void {
+  const frame = sprites.frameAt(breed, 'sit', 0, 1).visual;
+  const ratio = Math.max(1, window.devicePixelRatio || 1);
+  const width = Math.round(112 * ratio);
+  const height = Math.round(82 * ratio);
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { alpha: true });
+  if (!ctx) return;
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, width, height);
+  const scale = Math.min(width / frame.sw, height / frame.sh);
+  const dw = Math.round(frame.sw * scale);
+  const dh = Math.round(frame.sh * scale);
+  const dx = Math.round((width - dw) / 2);
+  const dy = Math.round((height - dh) / 2);
+  ctx.drawImage(frame.source, frame.sx, frame.sy, frame.sw, frame.sh, dx, dy, dw, dh);
+}
+
+function syncBreedSelection(): void {
+  ui.breedGrid.querySelectorAll<HTMLButtonElement>('.breed-card').forEach((button) => {
+    button.setAttribute('aria-selected', String(button.dataset['breed'] === flow.candidate.breed));
+  });
 }
 
 function showCandidate(): void {
@@ -129,7 +107,6 @@ function showCandidate(): void {
   ui.lede.innerHTML = '雨声里有脚步。<b>它在你面前停下，也把选择留给了你。</b>';
   ui.breed.textContent = intro.breed;
   ui.shape.textContent = intro.shape;
-  ui.breedTrigger.textContent = BREEDS[flow.candidate.breed].label;
   ui.traits.replaceChildren(
     ...intro.traits.map((trait) => {
       const li = document.createElement('li');
@@ -137,165 +114,48 @@ function showCandidate(): void {
       return li;
     }),
   );
+  syncBreedSelection();
 }
 
 function showPhase(): void {
   const naming = flow.phase === 'naming';
   ui.meeting.hidden = naming;
   ui.naming.hidden = !naming;
-  ui.fields.disabled = naming;
-  ui.breedTrigger.disabled = naming;
-  ui.reroll.disabled = naming;
-  ui.randomize.disabled = naming;
-  ui.reset.disabled = naming;
-  ui.customize.classList.toggle('locked-mode', naming);
+  ui.choose.classList.toggle('locked-mode', naming);
+  ui.breedGrid.querySelectorAll<HTMLButtonElement>('.breed-card').forEach((button) => {
+    button.disabled = naming;
+  });
   ui.hint.classList.remove('bad');
   ui.hint.textContent = naming
-    ? `给它起个名字。带它回家后，形象与动作会封存（最多 ${NAME_MAX_CHARS} 个字）`
-    : '你可以先预览每个动作，再确认领养。';
+    ? `给它起个名字。以后你看到的就是刚刚选中的这只猫（最多 ${NAME_MAX_CHARS} 个字）`
+    : '选择一个品种，确认后再给它起名字。';
   if (naming) ui.name.focus();
 }
 
-function valueText(value: number): string {
-  if (Math.abs(value) < 0.005) return '当前';
-  return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
-}
-
-function rangeControl(
-  key: CatArtTuningKey | CatMotionTuningKey,
-  label: string,
-  low: string,
-  high: string,
-  value: number,
-  onInput: (value: number) => void,
-): HTMLElement {
-  const box = document.createElement('div');
-  box.className = 'control';
-  const head = document.createElement('div');
-  head.className = 'control-head';
-  const title = document.createElement('span');
-  title.textContent = label;
-  const output = document.createElement('output');
-  output.textContent = valueText(value);
-  const range = document.createElement('div');
-  range.className = 'range';
-  const lowNode = document.createElement('span');
-  lowNode.textContent = low;
-  const highNode = document.createElement('span');
-  highNode.textContent = high;
-  const input = document.createElement('input');
-  input.type = 'range';
-  input.min = '-100';
-  input.max = '100';
-  input.step = '1';
-  input.value = String(Math.round(value * 100));
-  input.dataset['key'] = key;
-  input.addEventListener('input', () => {
-    const next = Number(input.value) / 100;
-    output.textContent = valueText(next);
-    onInput(next);
-  });
-  head.append(title, output);
-  range.append(lowNode, input, highNode);
-  box.append(head, range);
-  return box;
-}
-
-function renderControls(): void {
-  ui.artTab.setAttribute('aria-selected', String(tab === 'art'));
-  ui.motionTab.setAttribute('aria-selected', String(tab === 'motion'));
-  ui.controls.replaceChildren();
-
-  if (tab === 'motion') {
-    const group = document.createElement('section');
-    group.className = 'group';
-    const heading = document.createElement('h2');
-    heading.textContent = `动作观感 · ${ACTIONS[previewAction].label}`;
-    group.append(heading);
-    const tuning = motionTuningFor({ motion: flow.candidate.motion }, previewAction);
-    for (const control of motionTuningControlsFor(previewAction)) {
-      group.append(
-        rangeControl(control.key, control.label, control.low, control.high, tuning[control.key], (value) => {
-          flow = setMotionTuning(flow, previewAction, { [control.key]: value });
-        }),
-      );
-    }
-    ui.controls.append(group);
-    return;
-  }
-
-  const groups = new Map<string, HTMLElement>();
-  for (const control of ART_TUNING_CONTROLS) {
-    let group = groups.get(control.group);
-    if (!group) {
-      group = document.createElement('section');
-      group.className = 'group';
-      const heading = document.createElement('h2');
-      heading.textContent = control.group;
-      group.append(heading);
-      groups.set(control.group, group);
-      ui.controls.append(group);
-    }
-    group.append(
-      rangeControl(control.key, control.label, control.low, control.high, flow.candidate.art[control.key], (value) => {
-        flow = setArtTuning(flow, { [control.key]: value });
+function buildBreedCards(): void {
+  ui.breedGrid.replaceChildren(
+    ...BREED_KEYS.map((breed) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'breed-card';
+      button.dataset['breed'] = breed;
+      button.setAttribute('role', 'option');
+      button.setAttribute('aria-selected', String(breed === flow.candidate.breed));
+      const canvas = document.createElement('canvas');
+      const label = document.createElement('span');
+      label.textContent = BREEDS[breed].label;
+      paintCard(canvas, breed);
+      button.append(canvas, label);
+      button.addEventListener('click', () => {
+        flow = selectBreed(flow, breed);
         refreshCat();
+        animT = 0;
+        playing = null;
         showCandidate();
-      }),
-    );
-  }
-}
-
-interface DropdownSpec {
-  root: HTMLElement;
-  trigger: HTMLButtonElement;
-  menu: HTMLElement;
-}
-
-function closeDropdown(spec: DropdownSpec): void {
-  spec.root.classList.remove('open');
-  spec.trigger.setAttribute('aria-expanded', 'false');
-  spec.menu.hidden = true;
-}
-
-function toggleDropdown(spec: DropdownSpec): void {
-  const opening = spec.menu.hidden;
-  closeDropdown(breedDropdown);
-  closeDropdown(actionDropdown);
-  if (!opening) return;
-  spec.root.classList.add('open');
-  spec.trigger.setAttribute('aria-expanded', 'true');
-  spec.menu.hidden = false;
-}
-
-function addDropdownOption(
-  spec: DropdownSpec,
-  value: string,
-  label: string,
-  selected: () => boolean,
-  choose: () => void,
-): void {
-  const option = document.createElement('button');
-  option.type = 'button';
-  option.className = 'dropdown-option';
-  option.dataset['value'] = value;
-  option.setAttribute('role', 'option');
-  option.textContent = label;
-  option.addEventListener('click', () => {
-    choose();
-    for (const node of Array.from(spec.menu.querySelectorAll<HTMLElement>('.dropdown-option'))) {
-      node.setAttribute('aria-selected', String(node.dataset['value'] === value));
-    }
-    closeDropdown(spec);
-  });
-  option.setAttribute('aria-selected', String(selected()));
-  spec.menu.append(option);
-}
-
-function syncDropdownSelection(spec: DropdownSpec, value: string): void {
-  for (const node of Array.from(spec.menu.querySelectorAll<HTMLElement>('.dropdown-option'))) {
-    node.setAttribute('aria-selected', String(node.dataset['value'] === value));
-  }
+      });
+      return button;
+    }),
+  );
 }
 
 function render(dt: number): void {
@@ -308,28 +168,16 @@ function render(dt: number): void {
     speed: walkSpeedFor(cat, display.spriteScale),
     settleS: SETTLE_S,
   });
-  const action = arrival.action === 'sit' ? previewAction : arrival.action;
-  const tuning = motionTuningFor({ motion: flow.candidate.motion }, action);
+  const action = arrival.action;
   if (action !== playing) {
     playing = action;
     animT = 0;
   } else {
-    // 节奏只缩放本帧经过的时间。若用新节奏重算累计时间，拖动滑杆时会让
-    // 已经播放过的整段动画反复跳相位，视觉上像高频闪动。
-    animT += tuneMotionTime(dt, tuning, action, cat);
+    animT += dt;
   }
-  const mi = stepMicro(micro, dt, {
-    blink: true,
-    ear: true,
-    tilt: action === 'idle' || action === 'sit',
-  });
-  const pose = tuneMotionPose(
-    action,
-    ACTIONS[action].make(animT, cat, mi),
-    tuning,
-    cat,
-  );
-  display.paint(renderer.render(cat, faceDir(pose, arrival.dir)));
+  const dir: 1 | -1 = arrival.dir < 0 ? -1 : 1;
+  const sprite = sprites.frame(flow.candidate.breed, action, animT, dir);
+  display.paintSprite(sprite.visual);
   display.place(arrival.x);
 }
 
@@ -340,84 +188,6 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 
-const breedDropdown: DropdownSpec = {
-  root: ui.breedDropdown,
-  trigger: ui.breedTrigger,
-  menu: ui.breedMenu,
-};
-const actionDropdown: DropdownSpec = {
-  root: ui.actionDropdown,
-  trigger: ui.actionTrigger,
-  menu: ui.actionMenu,
-};
-for (const breed of BREED_KEYS) {
-  addDropdownOption(
-    breedDropdown,
-    breed,
-    BREEDS[breed].label,
-    () => breed === flow.candidate.breed,
-    () => {
-      flow = selectBreed(flow, breed);
-      refreshCat(true);
-      showCandidate();
-    },
-  );
-}
-for (const action of ACTION_KEYS) {
-  addDropdownOption(
-    actionDropdown,
-    action,
-    ACTIONS[action].label,
-    () => action === previewAction,
-    () => {
-      previewAction = action;
-      ui.actionTrigger.textContent = ACTIONS[action].label;
-      animT = 0;
-      playing = null;
-      renderControls();
-    },
-  );
-}
-ui.actionTrigger.textContent = ACTIONS[previewAction].label;
-ui.breedTrigger.addEventListener('click', () => toggleDropdown(breedDropdown));
-ui.actionTrigger.addEventListener('click', () => toggleDropdown(actionDropdown));
-document.addEventListener('click', (event) => {
-  const target = event.target as Node;
-  if (!ui.breedDropdown.contains(target)) closeDropdown(breedDropdown);
-  if (!ui.actionDropdown.contains(target)) closeDropdown(actionDropdown);
-});
-ui.reroll.addEventListener('click', () => {
-  flow = rerollAppearance(flow, Math.random);
-  refreshCat();
-  showCandidate();
-});
-ui.randomize.addEventListener('click', () => {
-  flow = randomizeVisuals(flow, Math.random);
-  syncDropdownSelection(breedDropdown, flow.candidate.breed);
-  refreshCat(true);
-  showCandidate();
-  animT = 0;
-  playing = null;
-  renderControls();
-});
-ui.artTab.addEventListener('click', () => {
-  tab = 'art';
-  renderControls();
-});
-ui.motionTab.addEventListener('click', () => {
-  tab = 'motion';
-  renderControls();
-});
-ui.reset.addEventListener('click', () => {
-  if (tab === 'art') {
-    flow = setArtTuning(flow, DEFAULT_ART_TUNING);
-    refreshCat();
-    showCandidate();
-  } else {
-    flow = setMotionTuning(flow, previewAction, DEFAULT_MOTION_TUNING);
-  }
-  renderControls();
-});
 ui.keep.addEventListener('click', () => {
   flow = accept(flow);
   showPhase();
@@ -453,7 +223,13 @@ ui.naming.addEventListener('submit', (event) => {
   });
 });
 
-window.addEventListener('resize', applyGeometry);
+window.addEventListener('resize', () => {
+  applyGeometry();
+  ui.breedGrid.querySelectorAll<HTMLCanvasElement>('canvas').forEach((canvas) => {
+    const breed = canvas.parentElement?.dataset['breed'];
+    if (breed) paintCard(canvas, breed);
+  });
+});
 matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('change', applyGeometry);
 mountChrome({
   close: {
@@ -465,14 +241,16 @@ mountChrome({
   },
 });
 
-applyGeometry();
-showCandidate();
-showPhase();
-renderControls();
-render(0);
-void contentReady(true)
-  .then(() => {
-    lastFrameMs = performance.now();
-    requestAnimationFrame(frame);
-  })
-  .catch((error: unknown) => console.error('[cyber-cat] 显示领养窗口失败：', error));
+async function boot(): Promise<void> {
+  applyGeometry();
+  await sprites.load();
+  buildBreedCards();
+  showCandidate();
+  showPhase();
+  render(0);
+  await contentReady(true);
+  lastFrameMs = performance.now();
+  requestAnimationFrame(frame);
+}
+
+void boot().catch((error: unknown) => console.error('[cyber-cat] 显示领养窗口失败：', error));

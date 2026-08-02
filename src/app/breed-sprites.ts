@@ -1,13 +1,15 @@
 import {
   ACTION_KEYS,
+  BREED_KEYS,
   H,
   W,
   XIAOMI_FRAME_COUNT,
   XIAOMI_FRAME_H,
   XIAOMI_FRAME_W,
+  getBreed,
   xiaomiFrameIndex,
 } from '../render/index.js';
-import type { ActionKey, RenderResult } from '../render/index.js';
+import type { ActionKey, BreedKey, RenderResult } from '../render/index.js';
 import type { SpritePaintFrame } from './display.js';
 
 interface CachedFrame {
@@ -15,20 +17,21 @@ interface CachedFrame {
   readonly mirrored: RenderResult;
 }
 
-export interface XiaomiFrame {
+export interface BreedSpriteFrame {
   readonly visual: SpritePaintFrame;
   readonly hit: RenderResult;
   readonly index: number;
 }
 
-const assetUrl = (action: ActionKey): string => `/pets/xiaomi/actions/${action}.webp`;
+const sourceUrl = (asset: string, action: ActionKey): string =>
+  `/pets/${asset}/actions/${action}.webp`;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.decoding = 'async';
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`小米动作素材加载失败：${src}`));
+    image.onerror = () => reject(new Error(`猫咪动作素材加载失败：${src}`));
     image.src = src;
   });
 }
@@ -52,42 +55,42 @@ function mirrored(result: RenderResult): RenderResult {
 }
 
 /**
- * 小米 A 方案运行时：预载 15 条完整帧条带，并缓存每格的 72×56 命中掩膜。
- *
- * 屏幕上画的是 288×224 高清整格；命中仍使用产品既有的 72×56 逻辑坐标，
- * 因而拖拽、点击穿透、逗猫与舞台运动都不需要改协议。
+ * 按品种加载独立的高清完整帧资源。每个品种目录都必须提供完整 15 条动作，
+ * 运行时只逐格裁切和镜像，不再做换色、局部拼接或形变。
  */
-export class XiaomiSprites {
-  private readonly strips = new Map<ActionKey, HTMLImageElement>();
-  private readonly frames = new Map<ActionKey, readonly CachedFrame[]>();
-  private loaded = false;
+export class BreedSprites {
+  private readonly strips = new Map<string, Map<ActionKey, HTMLImageElement>>();
+  private readonly frames = new Map<string, readonly CachedFrame[]>();
 
-  get ready(): boolean {
-    return this.loaded;
+  async load(breeds: readonly BreedKey[] = BREED_KEYS): Promise<void> {
+    const assets = [...new Set(breeds.map((breed) => getBreed(breed).sprite.asset))];
+    await Promise.all(assets.map((asset) => this.loadAsset(asset)));
   }
 
-  async load(): Promise<void> {
-    if (this.loaded) return;
+  private async loadAsset(asset: string): Promise<void> {
+    if (this.strips.has(asset)) return;
     const entries = await Promise.all(
-      ACTION_KEYS.map(async (action) => [action, await loadImage(assetUrl(action))] as const),
+      ACTION_KEYS.map(async (action) => [action, await loadImage(sourceUrl(asset, action))] as const),
     );
+    const strips = new Map<ActionKey, HTMLImageElement>();
+    this.strips.set(asset, strips);
 
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
-    if (!ctx) throw new Error('无法创建小米命中掩膜画布');
+    if (!ctx) throw new Error('无法创建猫咪命中掩膜画布');
     ctx.imageSmoothingEnabled = false;
 
     for (const [action, image] of entries) {
       const expectedWidth = XIAOMI_FRAME_W * XIAOMI_FRAME_COUNT;
       if (image.naturalWidth !== expectedWidth || image.naturalHeight !== XIAOMI_FRAME_H) {
         throw new Error(
-          `${action} 条带尺寸错误：${image.naturalWidth}×${image.naturalHeight}，期望 ${expectedWidth}×${XIAOMI_FRAME_H}`,
+          `${asset}/${action} 条带尺寸错误：${image.naturalWidth}×${image.naturalHeight}，` +
+            `期望 ${expectedWidth}×${XIAOMI_FRAME_H}`,
         );
       }
-      this.strips.set(action, image);
-
+      strips.set(action, image);
       const actionFrames: CachedFrame[] = [];
       for (let index = 0; index < XIAOMI_FRAME_COUNT; index++) {
         ctx.clearRect(0, 0, W, H);
@@ -106,28 +109,26 @@ export class XiaomiSprites {
         const pixels = new Uint8ClampedArray(data);
         const alphaMask = new Uint8Array(W * H);
         for (let pixel = 0; pixel < alphaMask.length; pixel++) {
-          // 去掉边缘极淡的抗锯齿像素，避免透明画面周围出现过宽的点击区。
           alphaMask[pixel] = pixels[pixel * 4 + 3]! >= 32 ? 255 : 0;
         }
         const normal: RenderResult = { width: W, height: H, pixels, alphaMask };
         actionFrames.push({ normal, mirrored: mirrored(normal) });
       }
-      this.frames.set(action, actionFrames);
+      this.frames.set(`${asset}/${action}`, actionFrames);
     }
-    this.loaded = true;
   }
 
-  frame(action: ActionKey, seconds: number, dir: 1 | -1): XiaomiFrame {
-    if (!this.loaded) throw new Error('小米动作素材尚未加载');
-    const index = xiaomiFrameIndex(action, seconds);
-    const strip = this.strips.get(action);
-    const cached = this.frames.get(action)?.[index];
-    if (!strip || !cached) throw new Error(`缺少小米动作帧：${action}/${index}`);
+  frameAt(breed: BreedKey, action: ActionKey, index: number, dir: 1 | -1): BreedSpriteFrame {
+    const asset = getBreed(breed).sprite.asset;
+    const strip = this.strips.get(asset)?.get(action);
+    const frameIndex = Math.min(XIAOMI_FRAME_COUNT - 1, Math.max(0, Math.floor(index)));
+    const cached = this.frames.get(`${asset}/${action}`)?.[frameIndex];
+    if (!strip || !cached) throw new Error(`缺少猫咪动作帧：${breed}/${action}/${frameIndex}`);
     return {
-      index,
+      index: frameIndex,
       visual: {
         source: strip,
-        sx: index * XIAOMI_FRAME_W,
+        sx: frameIndex * XIAOMI_FRAME_W,
         sy: 0,
         sw: XIAOMI_FRAME_W,
         sh: XIAOMI_FRAME_H,
@@ -136,5 +137,8 @@ export class XiaomiSprites {
       hit: dir < 0 ? cached.mirrored : cached.normal,
     };
   }
-}
 
+  frame(breed: BreedKey, action: ActionKey, seconds: number, dir: 1 | -1): BreedSpriteFrame {
+    return this.frameAt(breed, action, xiaomiFrameIndex(action, seconds), dir);
+  }
+}

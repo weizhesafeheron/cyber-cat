@@ -19,15 +19,10 @@ import { loadMemorial } from '../app/persist.js';
 import { emptyMemorial } from '../memorial/index.js';
 import type { Memorial } from '../memorial/index.js';
 import {
-  ACTIONS,
-  CatRenderer,
-  makeMicro,
-  materializeCat,
-  motionTuningFor,
-  stepMicro,
-  tuneMotionPose,
+  BREED_KEYS,
 } from '../render/index.js';
 import { CatDisplay } from '../app/display.js';
+import { BreedSprites } from '../app/breed-sprites.js';
 import { PORTRAIT_H, PORTRAIT_SCALE, PORTRAIT_W } from './constants.js';
 import { requestAnotherCat } from './handoff.js';
 import { archiveRows, companionLine, diaryByDay, lifeLine } from './text.js';
@@ -44,7 +39,7 @@ const ui = {
   again: $<HTMLButtonElement>('again'),
 };
 
-const renderer = new CatRenderer();
+const sprites = new BreedSprites();
 // 画布按遗照区域钳制放大倍数，不按整窗 - 与领养窗口同一条理由（见 display.ts 的
 // boxOf）：按整窗算会在分数 dpr 下算出更高的画布，猫的头会被裁掉。
 const display = new CatDisplay($<HTMLCanvasElement>('portrait'), PORTRAIT_SCALE, () => ({
@@ -77,13 +72,7 @@ function applyGeometry(): void {
  */
 function paintPortrait(): void {
   const identity = archive.cats[viewing]!.identity;
-  const { seed } = identity;
-  const cat = materializeCat(identity);
-  const micro = stepMicro(makeMicro(seed), 0, { blink: false, ear: false, tilt: false });
-  const tuning = motionTuningFor(identity.motion ? { motion: identity.motion } : undefined, 'sit');
-  display.paint(
-    renderer.render(cat, tuneMotionPose('sit', ACTIONS['sit'].make(0, cat, micro), tuning, cat)),
-  );
+  display.paintSprite(sprites.frameAt(identity.breed, 'sit', 0, 1).visual);
   display.place(PORTRAIT_W / 2);
 }
 
@@ -204,6 +193,7 @@ matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('cha
  */
 async function boot(): Promise<void> {
   try {
+    await sprites.load(BREED_KEYS);
     archive = (await loadMemorial()) ?? emptyMemorial();
   } catch (err) {
     console.error('[cyber-cat] 读猫的档案失败：', err);

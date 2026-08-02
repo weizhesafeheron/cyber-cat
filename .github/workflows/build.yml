@@ -44,6 +44,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # 动作资源不是 TypeScript，普通单测看不到尺寸、锚点、绿边与帧间跳变。
+      - run: sudo apt-get update && sudo apt-get install -y imagemagick
+      - run: npm run check:pet-art
 
   build:
     # tag 与手动触发才构建。push 到 main 只跑上面那个 test。

@@ -3,7 +3,14 @@ import { FORMS } from './poses.js';
 import { Raster } from './raster.js';
 import type { Cat, Pose, RenderResult } from './types.js';
 
-export { BREEDS, BREED_KEYS, getBreed, hasBreed, type BreedDef } from './breeds.js';
+export {
+  BREEDS,
+  BREED_KEYS,
+  getBreed,
+  hasBreed,
+  type BreedDef,
+  type BreedSpriteDef,
+} from './breeds.js';
 export {
   MARKING_VARIANTS,
   hasMarkingVariant,

@@ -29,7 +29,7 @@ import type {
   WorldActionKey,
 } from '../render/index.js';
 import { clamp } from '../render/rng.js';
-import { XiaomiSprites } from './xiaomi-sprites.js';
+import { BreedSprites } from './breed-sprites.js';
 import { MS_PER_HOUR, renderIntentOf, step, worldNow } from '../world/index.js';
 import type { CatStatus, RenderIntent, UserAction, World } from '../world/index.js';
 import { ADOPT_H, ADOPT_W } from '../adopt/constants.js';
@@ -205,8 +205,8 @@ const say = new SayCanvas(document.getElementById('say') as HTMLCanvasElement, E
  * 重启之后没人记得上一次摸猫冒了几颗心。
  */
 let hearts: readonly Heart[] = [];
-/** A 方案试运行：所有真实动作直接使用小米的高清完整帧。 */
-const xiaomiSprites = new XiaomiSprites();
+/** 小米定下的完整帧方案；具体外观由领养时选中的品种决定。 */
+const breedSprites = new BreedSprites();
 
 /**
  * 桌面可用区，屏幕逻辑坐标。
@@ -483,7 +483,7 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
   // 头在哪一列。台词气泡的尾巴尖按它对齐 - 由渲染层算，不在气泡那边拍一个偏移量
   // （头的列位取决于品种的体宽，拍死会在瘦品种上偏三四个精灵像素）。
   lastHeadX = headColumn(cat, posed, motion.dir);
-  const sprite = xiaomiSprites.frame(motion.playing, tunedT, motion.dir);
+  const sprite = breedSprites.frame(world.identity.breed, motion.playing, tunedT, motion.dir);
   const res = sprite.hit;
   lastFrame = res;
   display.paintSprite(sprite.visual);
@@ -1349,6 +1349,7 @@ async function adoptAnother(): Promise<void> {
   adopting = true;
   try {
     install(await adoptNewCat(gate));
+    await breedSprites.load([world.identity.breed]);
     // 让下一次死亡重新走一遍入档与告别页。
     farewell.reset();
     pending = [];
@@ -1398,14 +1399,13 @@ void onAdoptAnother(() => void adoptAnother());
  */
 async function boot(): Promise<void> {
   // 动作条带与存档读取可以并行。首帧之前必须全部解码完成，否则透明窗口会先出现。
-  const spritesReady = xiaomiSprites.load();
   // 开关要在第一帧之前读到：安静模式下猫应该一开始就趴着，
   // 而不是先站起来走两步再想起来现在该安静。
   settings = await loadSettings();
   void pushQuietMenu(settings.quiet);
 
   install(await ensureWorld(gate));
-  await spritesReady;
+  await breedSprites.load([world.identity.breed]);
 
   const intent = renderIntentOf(world, cat);
   primeMotion(intent.action);
