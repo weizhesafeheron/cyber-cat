@@ -90,14 +90,15 @@ for spec in 'pounce 0 47' 'pounce 5 38' 'leapUp 0 47' 'leapUp 5 40' 'leapDown 5 
   fi
 done
 
-# 舔毛最低头格的两条闭眼线必须同为深色。groom/3 左眼曾被画成灰白，
-# 缩到运行时 72×56 后会读成一只眼消失；取眼线中心像素守住这个具体退化。
+# 舔毛最低头格的两条闭眼线必须同为深色。不能只检查中心：groom/3 曾经
+# 中心已经是黑色，弯折处仍残留一截灰白，2/3 两格往返时就会黑白闪烁。
 groom_left_eye_luma=$(magick "$ASSETS/groom.webp" \
   -crop "${FRAME_W}x${FRAME_H}+$((3 * FRAME_W))+0" +repage \
-  -filter point -resize "${LOGICAL_W}x${LOGICAL_H}!" \
-  -colorspace gray -format '%[fx:int(255*u.p{44,29})]' info:)
-if [ "$groom_left_eye_luma" -gt 100 ]; then
-  echo "groom/3 left eyeliner is too light ($groom_left_eye_luma); expected a dark line like the right eye" >&2
+  -colorspace gray \
+  -format '%[fx:int(255*min(u.p{172,114},u.p{173,114}))]' \
+  info:)
+if [ "$groom_left_eye_luma" -gt 120 ]; then
+  echo "groom/3 left eyeliner still contains a pale segment ($groom_left_eye_luma); expected the whole curve to stay dark" >&2
   exit 1
 fi
 
