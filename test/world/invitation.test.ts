@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { step } from '../../src/world/index.js';
-import { TICK, findSeed, kinds, makeWorld, personalityOf, runTicks } from './helpers.js';
+import { BEAT, TICK, findSeed, kinds, makeWorld, personalityOf, runTicks } from './helpers.js';
 
 /**
  * 邀请式交互（CONTEXT.md）。
@@ -66,10 +66,10 @@ describe('添粮是邀请，不是命令', () => {
     expect(kinds(runTicks(picky, 12).events)).toContain('ate');
   });
 
-  it('添粮后不必然立即进食：饿着的猫也要等到下一个模拟步才动嘴', () => {
+  it('添粮不是立即加饱食度，但够饿的猫会在下一个行为节拍开吃', () => {
     // 「邀请式语义可被缝一测试断言」这条验收标准的正面形式。
-    // 添粮是即时的（碗里立刻有粮），进食不是 - 它发生在世界层自己的整步上。
-    // 这中间那段时间正是「猫走向食盆」的空间，也是这一票存在的理由。
+    // 添粮是即时的（碗里立刻有粮），进食不是同一个按钮的副作用；但是否开吃
+    // 属于短行为响应，不该被 30 分钟的需求结算粒度拖住。
     const w = makeWorld({
       seed: GREEDY_SEED,
       hour: 18,
@@ -85,8 +85,10 @@ describe('添粮是邀请，不是命令', () => {
     // 世界层已经在说「去食盆」了 - 邀请被接受了，只是还没吃上。
     expect(instant.renderIntent.anchor).toBe('bowl');
 
-    // 走完一个整步才吃。对照组，证明上面不是因为「压根不会吃」而通过。
-    const later = step(w, TICK, fill);
+    // 一个行为节拍还没走完时不吃；节拍一到就接受邀请。
+    const almost = step(instant.world, BEAT - 1);
+    expect(kinds(almost.events)).not.toContain('ate');
+    const later = step(almost.world, 1);
     expect(kinds(later.events).some((k) => k === 'ate' || k === 'ateGreedy')).toBe(true);
   });
 

@@ -274,20 +274,14 @@ describe('持续状态压过节拍', () => {
 
 describe('刚发生的事优先于抽签', () => {
   it('刚吃完那一拍就在吃，而不是等下一次抽签', () => {
-    // 饿到会吃、碗里有粮，把世界推到进食发生的那个整步。
+    // 饿到会吃、碗里有粮：进食由短行为节拍响应，不再等需求模拟步。
     const hungry = makeWorld({
       hour: 17,
       patch: { bowl: 2, needs: { hunger: 10, energy: 80, mood: 60 } },
     });
-    let w = hungry;
-    let ate = false;
-    for (let i = 0; i < 4 && !ate; i++) {
-      const r = step(w, TICK);
-      w = r.world;
-      ate = kinds(r.events).some((k) => k === 'ate' || k === 'ateGreedy');
-    }
-    expect(ate).toBe(true);
-    expect(w.activity).toBe('eat');
+    const result = step(hungry, BEAT);
+    expect(kinds(result.events).some((k) => k === 'ate' || k === 'ateGreedy')).toBe(true);
+    expect(result.world.activity).toBe('eat');
   });
 
   it('刚醒来那一拍在伸懒腰', () => {

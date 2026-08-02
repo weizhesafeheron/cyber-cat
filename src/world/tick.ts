@@ -87,14 +87,14 @@ import { draw } from './rng.js';
 import type { UserAction, World, WorldEvent, WorldEventKind } from './types.js';
 
 /**
- * 一个模拟步（30 分钟）的全部状态演化，以及用户动作的结算。
+ * 一个模拟步（30 分钟）的需求演化、短行为节拍，以及用户动作的结算。
  *
  * **这里是唯一改变世界的地方，且只被 step 调用。**
  * 离线补算与实时运行走的是同一个函数 - 不存在「离线版模拟器」（ADR 0001）。
  *
  * 不变量（写测试时依赖它们，改代码时不要破坏）：
- * - 所有状态变化都发生在整个模拟步内，没有任何按 elapsedMs 连续插值的量。
- *   一旦有，一次 24 小时补算就不再等于 48 次 30 分钟步进。
+ * - 所有状态变化只发生在离散的行为节拍或模拟步内，没有按 elapsedMs 连续插值的量。
+ *   因此一次 24 小时补算仍等于按任意时间切片推进。
  * - `dead = true` 只在 sick 分支里赋值，因此生病是死亡的必经前置状态。
  * - 猫死后世界不再变化。
  */
@@ -197,6 +197,25 @@ export function sleepPressure(hour: number, active: number): number {
  */
 export function eatThreshold(cat: Cat): number {
   return EAT_THRESHOLD_BASE + cat.personality.greedy * EAT_THRESHOLD_GREEDY_SPAN;
+}
+
+/**
+ * 在短行为节拍上判断是否开吃。
+ *
+ * 饱食度仍只在 30 分钟模拟步上自然下降；但碗已经有粮、猫也已经够饿时，
+ * “要不要动嘴”不应再等下一个模拟步。阈值继续由贪吃度决定，因此这是猫接受邀请，
+ * 不是用户点一下就直接加饱食度。
+ */
+export function advanceMeal(w: World, cat: Cat, events: WorldEvent[]): boolean {
+  if (w.sleeping || w.bowl <= 0 || w.needs.hunger >= eatThreshold(cat)) return false;
+
+  w.bowl--;
+  w.needs.hunger = Math.min(NEED_MAX, w.needs.hunger + MEAL_HUNGER_GAIN);
+  w.starveHours = 0;
+  const dashed =
+    cat.personality.greedy > EAT_DASH_GREEDY_THRESHOLD && roll(w) < EAT_DASH_CHANCE;
+  record(w, events, dashed ? 'ateGreedy' : 'ate');
+  return true;
 }
 
 function isZoomiesHour(hour: number): boolean {
@@ -373,18 +392,6 @@ export function advanceTick(w: World, cat: Cat, events: WorldEvent[]): TickUrge 
   const hungerBefore = w.needs.hunger;
   w.needs.hunger = Math.max(0, w.needs.hunger - HUNGER_DROP_PER_TICK);
 
-  // --- 进食：碗里有粮 + 醒着 + 够饿 ---
-  let ateThisTick = false;
-  if (!w.sleeping && w.bowl > 0 && w.needs.hunger < eatThreshold(cat)) {
-    w.bowl--;
-    w.needs.hunger = Math.min(NEED_MAX, w.needs.hunger + MEAL_HUNGER_GAIN);
-    w.starveHours = 0;
-    ateThisTick = true;
-    const dashed =
-      cat.personality.greedy > EAT_DASH_GREEDY_THRESHOLD && roll(w) < EAT_DASH_CHANCE;
-    record(w, events, dashed ? 'ateGreedy' : 'ate');
-  }
-
   // --- 心情：向基线趋近，不做无因漂移 ---
   const target =
     MOOD_BASELINE +
@@ -467,12 +474,12 @@ export function advanceTick(w: World, cat: Cat, events: WorldEvent[]): TickUrge 
     }
   }
 
-  // 刚吃完、刚醒来这两件事发生在「这一刻」，不进节拍的权重抽签 -
-  // 醒来先伸个懒腰是真猫的固定动作，不该交给概率。
+  // 刚醒来发生在「这一刻」，不进节拍的权重抽签 -
+  // 醒来先伸个懒腰是真猫的固定动作，不该交给概率。进食由每个短行为节拍判断，
+  // 见 advanceMeal；同一拍两者都发生时，step 让吃饭优先。
   // 但也不在这里直接改 activity：那样这一拍的持续时长会被 advanceBeat 当场
   // 减掉一拍，持续时长只有一拍的动作（打哈欠）根本来不及显示。
   // 交给 advanceBeat 落地，「持续 N 拍」在任何入口下都是同一个意思。
-  if (ateThisTick) return { urge: 'eat' };
   if (justWoke) return { urge: 'stretch' };
   return { urge: null };
 }

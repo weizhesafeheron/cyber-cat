@@ -3,7 +3,7 @@ import { materializeCat } from '../render/index.js';
 import { BEATS_PER_TICK, BEAT_MS } from './constants.js';
 import { draftOf } from './create.js';
 import { renderIntentOf } from './intent.js';
-import { advanceBeat, advanceTick, applyAction } from './tick.js';
+import { advanceBeat, advanceMeal, advanceTick, applyAction } from './tick.js';
 import type { StepResult, World, WorldEvent, WorldInputs } from './types.js';
 
 /**
@@ -55,8 +55,9 @@ export function step(world: World, elapsedMs: number, inputs: WorldInputs = {}):
       draft.beatsInTick = 0;
       urge = advanceTick(draft, cat, events).urge;
     }
-    // 模拟步之后再走节拍：这一步刚决定的睡/醒与刚吃完的饭要当场反映到动作上。
-    // 顺序颠倒的话，猫会晚 15 秒才躺下，刚吃完那一拍还在播上一个动作。
+    // 模拟步之后先判断进食、再走节拍：长期需求仍按半小时变化，但看到粮后是否开吃
+    // 按 5 秒行为节拍响应。刚吃完优先于刚醒来的伸懒腰，与原有顺序一致。
+    if (advanceMeal(draft, cat, events)) urge = 'eat';
     advanceBeat(draft, cat, urge);
   }
 

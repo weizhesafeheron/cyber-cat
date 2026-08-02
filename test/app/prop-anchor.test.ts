@@ -139,10 +139,10 @@ function gapTo(kind: PropKind, props: PropsState, catX: number): number {
 }
 
 /**
- * 一个刚被添过粮、还差四拍到下一个模拟步的世界。
+ * 一个碗里有粮、已经达到这只猫开吃阈值的世界。
  *
- * 四拍 = 20 秒，够猫从桌面一头走到另一头（走路约 60 CSS 像素每秒）。
- * 这正是真实情况：用户点食盆是在某个模拟步的中间，猫有那半步的时间走过去。
+ * 开吃意愿现在按 5 秒行为节拍响应；世界账本不读屏幕坐标，运动层仍负责先走到
+ * 食盆再播放吃饭。因此这个夹具同时覆盖“快速接受邀请”和“不隔空吃饭”。
  *
  * 黄昏 + 精力接近满格：这一段里猫既不会犯困去睡觉，也不会因为精力耗尽倒下 -
  * 否则「去食盆」会被睡眠这个持续状态压过去（advanceBeat 里睡眠优先于一切），
@@ -155,7 +155,6 @@ function aboutToEat(seed: number, hunger: number): World {
     patch: {
       bowl: 2,
       needs: { hunger, energy: 95, mood: 60 },
-      beatsInTick: BEATS_PER_TICK - 4,
     },
   });
 }
@@ -174,13 +173,31 @@ describe('猫走到食盆前才吃', () => {
     }
   });
 
-  it('世界层判定「吃了」的那一刻，猫已经在盆前站好了', () => {
-    // 有提前量才做得到：碗里有粮且已经够饿时，世界层的锚点就指向食盆了
-    // （见 world/intent.ts 的 anchorOf），猫在世界层动嘴之前就出发。
+  it('够饿时世界层按短节拍接受食物，画面仍然走到盆前才动嘴', () => {
+    // 世界账本不再为了屏幕上的路程等待半小时；屏幕坐标仍只归运动层，
+    // 所以账本可以先结算，但任何一帧吃饭画面都必须等到猫抵达。
     const { samples, props } = couple({ world: aboutToEat(GREEDY_SEED, 60) });
     const at = samples.findIndex((s) => s.ate);
     expect(at, '这段时间里世界层没有判定进食').toBeGreaterThan(0);
-    expect(gapTo('bowl', props, samples[at]!.x)).toBeLessThan(0);
+    expect(at, '进食仍然被 30 分钟模拟步拖住').toBeLessThanOrEqual(60 * 5);
+    expect(gapTo('bowl', props, samples[at]!.x)).toBeGreaterThan(0);
+
+    const visual = samples.findIndex((s) => s.playing === 'eat');
+    expect(visual, '画面没有播放吃饭动作').toBeGreaterThan(at);
+    expect(gapTo('bowl', props, samples[visual]!.x)).toBeLessThan(0);
+  });
+
+  it('世界已经接受进食邀请后，猫在盆前不会停成站立等待', () => {
+    const { samples, props } = couple({ world: aboutToEat(GREEDY_SEED, 60) });
+    const arrival = samples.findIndex(
+      (sample) => sample.anchor === 'bowl' && gapTo('bowl', props, sample.x) < 0,
+    );
+    expect(arrival, '猫没有走到食盆前').toBeGreaterThan(0);
+    const eating = samples.findIndex((sample, index) => index >= arrival && sample.playing === 'eat');
+    expect(eating, '猫到了食盆前仍没有播放吃饭').toBeGreaterThanOrEqual(arrival);
+    for (const sample of samples.slice(arrival, eating)) {
+      expect(sample.playing, '猫在走到精确落点之前先停成了站立等待').toBe('walk');
+    }
   });
 
   it('走过去的那段路真的走了 - 不是一开始就站在盆边', () => {

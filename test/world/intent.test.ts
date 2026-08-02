@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ACTIONS, makeCat, makeMicro, stepMicro } from '../../src/render/index.js';
 import { step } from '../../src/world/index.js';
-import { TICK, feedEvery, findSeed, makeWorld, runTicks } from './helpers.js';
+import { BEAT, TICK, feedEvery, findSeed, makeWorld, runTicks } from './helpers.js';
 
 /**
  * renderIntent 是世界层与渲染层之间的那道缝。
@@ -99,7 +99,7 @@ describe('renderIntent 能被渲染层直接消费', () => {
       hour: 18,
       patch: { bowl: 2, needs: { hunger: 20, energy: 80, mood: 60 } },
     });
-    expect(step(w, TICK).renderIntent.action).toBe('eat');
+    expect(step(w, BEAT).renderIntent.action).toBe('eat');
   });
 });
 
