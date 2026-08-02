@@ -42,4 +42,16 @@ describe('小米完整帧时间映射', () => {
     expect(xiaomiFrameIndex('pounce', end - 0.001)).toBe(0);
     expect(xiaomiFrameIndex('pounce', end)).toBe(0);
   });
+
+  it('一次舔毛循环会连续舔三次，而不是每舔一下就整套重来', () => {
+    const durationS = xiaomiActionDurationMs('groom') / 1000;
+    let previous = xiaomiFrameIndex('groom', 0);
+    let lickCount = 0;
+    for (let t = 0.001; t < durationS; t += 0.001) {
+      const frame = xiaomiFrameIndex('groom', t);
+      if (previous === 2 && frame === 3) lickCount += 1;
+      previous = frame;
+    }
+    expect(lickCount).toBe(3);
+  });
 });

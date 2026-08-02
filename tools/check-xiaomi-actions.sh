@@ -90,4 +90,15 @@ for spec in 'pounce 0 47' 'pounce 5 38' 'leapUp 0 47' 'leapUp 5 40' 'leapDown 5 
   fi
 done
 
+# 舔毛最低头格的两条闭眼线必须同为深色。groom/3 左眼曾被画成灰白，
+# 缩到运行时 72×56 后会读成一只眼消失；取眼线中心像素守住这个具体退化。
+groom_left_eye_luma=$(magick "$ASSETS/groom.webp" \
+  -crop "${FRAME_W}x${FRAME_H}+$((3 * FRAME_W))+0" +repage \
+  -filter point -resize "${LOGICAL_W}x${LOGICAL_H}!" \
+  -colorspace gray -format '%[fx:int(255*u.p{44,29})]' info:)
+if [ "$groom_left_eye_luma" -gt 100 ]; then
+  echo "groom/3 left eyeliner is too light ($groom_left_eye_luma); expected a dark line like the right eye" >&2
+  exit 1
+fi
+
 echo "xiaomi action geometry: ok"

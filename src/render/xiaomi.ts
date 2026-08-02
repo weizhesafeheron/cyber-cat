@@ -41,8 +41,8 @@ export const XIAOMI_POUNCE_MOTION = {
 } as const;
 
 type XiaomiTimeline = {
-  readonly order: readonly [number, number, number, number, number, number];
-  readonly durationsMs: readonly [number, number, number, number, number, number];
+  readonly order: readonly number[];
+  readonly durationsMs: readonly number[];
 };
 
 const SEQUENTIAL_ORDER = [0, 1, 2, 3, 4, 5] as const;
@@ -55,6 +55,12 @@ const SEQUENTIAL_ORDER = [0, 1, 2, 3, 4, 5] as const;
  * 450ms 周期内完成深压与回弹，不能沿用 120ms 等间隔（那会让后两格永远播不到）。
  */
 const PRECISE_TIMELINES: Partial<Record<ActionKey, XiaomiTimeline>> = {
+  // 抬爪一次，在低头的两格之间往返三次，再把爪放下。这样一次行为读成连续
+  // 梳理毛发，不会每舔一下就完整起身、抬爪、回正，产生机械重复感。
+  groom: {
+    order: [0, 1, 2, 3, 2, 3, 2, 3, 4, 5],
+    durationsMs: [240, 240, 180, 180, 180, 180, 180, 180, 240, 240],
+  },
   // 原始第 5 格是比常态猫窄约 20% 的坐姿，直接切回 idle 会像整只猫突然变大。
   // 收尾复用第 0 格站姿：猫已经由运动层送到新落点，画面只需恢复站稳。
   pounce: {
@@ -95,9 +101,9 @@ export function xiaomiFrameIndex(action: ActionKey, seconds: number): number {
   const localMs = ACTIONS[action].loop ? elapsedMs % totalMs : Math.min(elapsedMs, totalMs);
 
   let endMs = 0;
-  for (let step = 0; step < XIAOMI_FRAME_COUNT; step++) {
+  for (let step = 0; step < timeline.order.length; step++) {
     endMs += timeline.durationsMs[step]!;
     if (localMs < endMs) return timeline.order[step]!;
   }
-  return timeline.order[XIAOMI_FRAME_COUNT - 1]!;
+  return timeline.order[timeline.order.length - 1]!;
 }
