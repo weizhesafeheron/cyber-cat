@@ -81,6 +81,17 @@ width_of() {
   echo "${size%%x*}"
 }
 
+alpha_area_of() {
+  action=$1
+  frame=$2
+  x=$((frame * FRAME_W))
+  magick "$ASSETS/$action.webp" \
+    -crop "${FRAME_W}x${FRAME_H}+${x}+0" +repage \
+    -filter point -resize "${LOGICAL_W}x${LOGICAL_H}!" \
+    -alpha extract -threshold 12.5% \
+    -format '%[fx:int(mean*w*h)]' info:
+}
+
 for spec in 'pounce 0 47' 'pounce 5 38' 'leapUp 0 47' 'leapUp 5 40' 'leapDown 5 40'; do
   set -- $spec
   width=$(width_of "$1" "$2")
@@ -88,6 +99,20 @@ for spec in 'pounce 0 47' 'pounce 5 38' 'leapUp 0 47' 'leapUp 5 40' 'leapDown 5 
     echo "$1/$2 is only $width logical pixels wide; jump cat reads smaller than normal" >&2
     exit 1
   fi
+done
+
+# 站立是走路、扑跳和落地共同的收尾，比例不能比三个入口姿态突然大一圈。
+# 用有效轮廓面积而不是单看宽高：宽高只多一两格时，身体填充仍可能膨胀 10% 以上。
+entry_area=$((( $(alpha_area_of walk 0) + $(alpha_area_of pounce 0) + $(alpha_area_of land 0) ) / 3))
+idle_area_limit=$((entry_area * 105 / 100))
+frame=0
+while [ "$frame" -lt 6 ]; do
+  idle_area=$(alpha_area_of idle "$frame")
+  if [ "$idle_area" -gt "$idle_area_limit" ]; then
+    echo "idle/$frame area is $idle_area; transition poses average $entry_area (limit $idle_area_limit)" >&2
+    exit 1
+  fi
+  frame=$((frame + 1))
 done
 
 # 舔毛最低头格的两条闭眼线必须同为深色。不能只检查中心：groom/3 曾经
