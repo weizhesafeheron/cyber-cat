@@ -31,7 +31,7 @@ export const XIAOMI_FRAME_MS = {
 
 /**
  * 扑跳的物理位移窗口必须与完整帧里的腾空格一致。
- * 第 0 格站定、第 1 格蓄力、第 2–3 格腾空、第 4 格落地、第 5 格坐稳。
+ * 第 0 格站定、第 1 格蓄力、第 2–3 格腾空、第 4 格落地，最后回到站姿。
  */
 export const XIAOMI_POUNCE_MOTION = {
   startS: (XIAOMI_FRAME_MS.pounce * 2) / 1000,
@@ -55,6 +55,12 @@ const SEQUENTIAL_ORDER = [0, 1, 2, 3, 4, 5] as const;
  * 450ms 周期内完成深压与回弹，不能沿用 120ms 等间隔（那会让后两格永远播不到）。
  */
 const PRECISE_TIMELINES: Partial<Record<ActionKey, XiaomiTimeline>> = {
+  // 原始第 5 格是比常态猫窄约 20% 的坐姿，直接切回 idle 会像整只猫突然变大。
+  // 收尾复用第 0 格站姿：猫已经由运动层送到新落点，画面只需恢复站稳。
+  pounce: {
+    order: [0, 1, 2, 3, 4, 0],
+    durationsMs: [180, 180, 180, 180, 180, 180],
+  },
   land: {
     order: [2, 3, 2, 1, 0, 0],
     durationsMs: [45, 65, 75, 85, 90, 90],

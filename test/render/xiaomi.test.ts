@@ -36,4 +36,10 @@ describe('小米完整帧时间映射', () => {
     expect(xiaomiFrameIndex('land', 0.3)).toBe(0);
     expect(xiaomiFrameIndex('land', 0.449)).toBe(0);
   });
+
+  it('扑跳收尾回到与 idle 相同的站姿，不从偏小坐姿突然放大', () => {
+    const end = xiaomiActionDurationMs('pounce') / 1000;
+    expect(xiaomiFrameIndex('pounce', end - 0.001)).toBe(0);
+    expect(xiaomiFrameIndex('pounce', end)).toBe(0);
+  });
 });
