@@ -65,4 +65,13 @@ for expected in $pounce_bottoms; do
   frame=$((frame + 1))
 done
 
+# land/2 是运行时在物理接触那一刻选择的压缩格，必须明显低于直立姿态。
+land_contact_bounds=$(alpha_bounds land 2)
+land_contact_size=${land_contact_bounds%%+*}
+land_contact_height=${land_contact_size#*x}
+if [ "$land_contact_height" -gt 30 ]; then
+  echo "land contact frame is $land_contact_height logical pixels tall; expected impact compression" >&2
+  exit 1
+fi
+
 echo "xiaomi action geometry: ok"

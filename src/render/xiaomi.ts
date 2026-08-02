@@ -29,6 +29,37 @@ export const XIAOMI_FRAME_MS = {
   edge: 240,
 } as const satisfies Record<ActionKey, number>;
 
+type XiaomiTimeline = {
+  readonly order: readonly [number, number, number, number, number, number];
+  readonly durationsMs: readonly [number, number, number, number, number, number];
+};
+
+const SEQUENTIAL_ORDER = [0, 1, 2, 3, 4, 5] as const;
+
+/**
+ * 需要与物理事件精确咬合的动作使用独立时间线。
+ *
+ * land 的素材原始顺序是站立 → 下压 → 深压 → 最深 → 回升 → 坐稳；物理层在
+ * `liftY` 归零的同一帧才切进 land，因此入口必须直接取压缩格。随后在动作本身的
+ * 450ms 周期内完成深压与回弹，不能沿用 120ms 等间隔（那会让后两格永远播不到）。
+ */
+const PRECISE_TIMELINES: Partial<Record<ActionKey, XiaomiTimeline>> = {
+  land: {
+    order: [2, 3, 2, 1, 0, 0],
+    durationsMs: [45, 65, 75, 85, 90, 90],
+  },
+};
+
+function timelineFor(action: ActionKey): XiaomiTimeline {
+  const frameMs = XIAOMI_FRAME_MS[action];
+  return (
+    PRECISE_TIMELINES[action] ?? {
+      order: SEQUENTIAL_ORDER,
+      durationsMs: [frameMs, frameMs, frameMs, frameMs, frameMs, frameMs],
+    }
+  );
+}
+
 /**
  * 把动作局部时间映射到完整帧。
  *
@@ -36,9 +67,15 @@ export const XIAOMI_FRAME_MS = {
  * 又从第一格重播一次哈欠、扑跳或落地。
  */
 export function xiaomiFrameIndex(action: ActionKey, seconds: number): number {
-  const raw = Math.floor((Math.max(0, seconds) * 1000) / XIAOMI_FRAME_MS[action]);
-  return ACTIONS[action].loop
-    ? raw % XIAOMI_FRAME_COUNT
-    : Math.min(raw, XIAOMI_FRAME_COUNT - 1);
-}
+  const timeline = timelineFor(action);
+  const totalMs = timeline.durationsMs.reduce((sum, duration) => sum + duration, 0);
+  const elapsedMs = Math.max(0, seconds) * 1000;
+  const localMs = ACTIONS[action].loop ? elapsedMs % totalMs : Math.min(elapsedMs, totalMs);
 
+  let endMs = 0;
+  for (let step = 0; step < XIAOMI_FRAME_COUNT; step++) {
+    endMs += timeline.durationsMs[step]!;
+    if (localMs < endMs) return timeline.order[step]!;
+  }
+  return timeline.order[XIAOMI_FRAME_COUNT - 1]!;
+}

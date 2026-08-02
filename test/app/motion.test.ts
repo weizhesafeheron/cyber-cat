@@ -1118,6 +1118,17 @@ describe('拎起来、下落、落地反应', () => {
     expect(seen.slice(0, landIdx).every((k) => k === 'held')).toBe(true);
   });
 
+  it('接触地面的同一帧就切到落地动作，不会先贴地停一帧', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 200 }, 3);
+    const { seen, lifts } = release(held, 120);
+    const contact = lifts.findIndex((lift) => lift === 0);
+    expect(contact, '没有落到地面').toBeGreaterThan(0);
+    expect(lifts[contact - 1]).toBeGreaterThan(0);
+    expect(seen[contact]).toBe('land');
+  });
+
   it('落地之后甩尾巴 - 共通的不满表现', () => {
     const g = geom();
     const start = createMotion(g, centeredStage(g));

@@ -18,4 +18,13 @@ describe('小米完整帧时间映射', () => {
   it('负时间钳制到第一格', () => {
     expect(xiaomiFrameIndex('idle', -1)).toBe(0);
   });
+
+  it('落地时间线与物理接触对齐：接触即压缩，450ms 内回弹站稳', () => {
+    expect(xiaomiFrameIndex('land', 0)).toBe(2);
+    expect(xiaomiFrameIndex('land', 0.05)).toBe(3);
+    expect(xiaomiFrameIndex('land', 0.12)).toBe(2);
+    expect(xiaomiFrameIndex('land', 0.2)).toBe(1);
+    expect(xiaomiFrameIndex('land', 0.3)).toBe(0);
+    expect(xiaomiFrameIndex('land', 0.449)).toBe(0);
+  });
 });
