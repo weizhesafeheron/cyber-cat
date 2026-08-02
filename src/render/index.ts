@@ -33,6 +33,7 @@ export {
   XIAOMI_FRAME_H,
   XIAOMI_FRAME_MS,
   XIAOMI_FRAME_W,
+  XIAOMI_POUNCE_MOTION,
   xiaomiActionDurationMs,
   xiaomiFrameIndex,
 } from './xiaomi.js';

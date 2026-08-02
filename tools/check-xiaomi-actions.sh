@@ -74,4 +74,20 @@ if [ "$land_contact_height" -gt 30 ]; then
   exit 1
 fi
 
+# 跳跃入口与收尾不能比常态猫缩小一圈。阈值只锁明显失真，允许蓄力/蜷身自然变窄。
+width_of() {
+  bounds=$(alpha_bounds "$1" "$2")
+  size=${bounds%%+*}
+  echo "${size%%x*}"
+}
+
+for spec in 'pounce 0 47' 'pounce 5 38' 'leapUp 0 47' 'leapUp 5 40' 'leapDown 5 40'; do
+  set -- $spec
+  width=$(width_of "$1" "$2")
+  if [ "$width" -lt "$3" ]; then
+    echo "$1/$2 is only $width logical pixels wide; jump cat reads smaller than normal" >&2
+    exit 1
+  fi
+done
+
 echo "xiaomi action geometry: ok"

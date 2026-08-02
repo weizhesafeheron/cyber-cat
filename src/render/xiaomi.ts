@@ -29,6 +29,17 @@ export const XIAOMI_FRAME_MS = {
   edge: 240,
 } as const satisfies Record<ActionKey, number>;
 
+/**
+ * 扑跳的物理位移窗口必须与完整帧里的腾空格一致。
+ * 第 0 格站定、第 1 格蓄力、第 2–3 格腾空、第 4 格落地、第 5 格坐稳。
+ */
+export const XIAOMI_POUNCE_MOTION = {
+  startS: (XIAOMI_FRAME_MS.pounce * 2) / 1000,
+  endS: (XIAOMI_FRAME_MS.pounce * 4) / 1000,
+  periodS: (XIAOMI_FRAME_MS.pounce * XIAOMI_FRAME_COUNT) / 1000,
+  px: 16,
+} as const;
+
 type XiaomiTimeline = {
   readonly order: readonly [number, number, number, number, number, number];
   readonly durationsMs: readonly [number, number, number, number, number, number];

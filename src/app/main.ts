@@ -705,6 +705,15 @@ function frame(now: number): void {
     now,
     action: effective,
     restartAction: restartReaction,
+    pounceTimeScale: tuneMotionTime(
+      1,
+      motionTuningFor(
+        world.identity.motion ? { motion: world.identity.motion } : undefined,
+        'pounce',
+      ),
+      'pounce',
+      cat,
+    ),
     hold: holdAt,
     cursorX: cursorScreenX,
     // 安静模式与让开是逗猫棒的**第七道闸门**：不满足就连轨迹判定都不做

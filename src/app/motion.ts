@@ -1,4 +1,4 @@
-import { ACTIONS, LEAP_CROUCH_S, W } from '../render/index.js';
+import { ACTIONS, LEAP_CROUCH_S, W, XIAOMI_POUNCE_MOTION } from '../render/index.js';
 import type { ActionKey, WorldActionKey, Cat, MicroOpts, Pose } from '../render/index.js';
 import { clamp } from '../render/rng.js';
 import { GROUND_FROM_BOTTOM } from './stage.js';
@@ -234,6 +234,11 @@ export interface MotionInput {
    * stretch」。这个边沿由应用层提供；缺省 false，世界层持续投影的动作仍然只播一遍。
    */
   readonly restartAction?: boolean;
+  /**
+   * 扑跳图集的播放倍率。物理位移与画面必须共用它，否则用户调快/调慢动作后，
+   * 会重新出现「已经落地，猫还在往前滑」的错位。缺省 1。
+   */
+  readonly pounceTimeScale?: number;
   /**
    * 猫这一刻该待的屏幕 x（挂件跟前）。null = 没有空间诉求，照旧自己漫游。
    *
@@ -828,6 +833,7 @@ function stepPerch(
  */
 export function stepMotion(state: MotionState, input: MotionInput): MotionState {
   const { dt, now, cat, geom, rnd } = input;
+  const pounceTimeScale = clamp(input.pounceTimeScale ?? 1, 0.01, 10);
 
   if (input.action === null) {
     // 猫已离开。位置不再推进，爪印自然淡完；桌面上从此空着，
@@ -974,8 +980,8 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
       tease = { landingX: input.teaseLandingX, phase: 'approach', t: 0 };
     }
     if (tease !== null) {
-      const leap = ACTIONS.pounce.leap;
-      const leapPx = (leap?.px ?? 0) * geom.spriteScale;
+      const leap = XIAOMI_POUNCE_MOTION;
+      const leapPx = leap.px * geom.spriteScale;
       // 起跳点：落点往回退一个腾空距离。这样扑完刚好落在落点上，
       // 而不是「走到落点再原地跳一下」- 那读起来不是扑。
       const toRight = tease.landingX >= x;
@@ -1026,9 +1032,9 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
       }
 
       if (tease !== null && tease.phase === 'pounce') {
-        const period = ACTIONS.pounce.period ?? 0;
+        const period = leap.periodS;
         const wasT = tease.t;
-        const t = wasT + Math.max(0, dt);
+        const t = wasT + Math.max(0, dt) * pounceTimeScale;
         // 腾空那一段把猫真的送过去。与世界层自己的扑跳走同一套 leap 逻辑 -
         // 位移永远归运动层，动作库只管形体（见 ACTIONS 的 leap 注释）。
         if (leap !== undefined) {
@@ -1162,15 +1168,18 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
   } else if (!def.loop) {
     // 一次性动作：播一遍就完，之后站着等世界层改主意。
     const wasT = !input.restartAction && shot?.action === input.action ? shot.t : null;
-    const t = wasT === null ? 0 : wasT + Math.max(0, dt);
+    const actionDt = input.action === 'pounce' ? dt * pounceTimeScale : dt;
+    const t = wasT === null ? 0 : wasT + Math.max(0, actionDt);
     shot = { action: input.action, t };
-    const done = t >= (def.period ?? 0);
+    const period = input.action === 'pounce' ? XIAOMI_POUNCE_MOTION.periodS : (def.period ?? 0);
+    const done = t >= period;
     playing = done ? 'idle' : input.action;
 
     // 跳跃的位移记在真实位置上，不在姿态的 dx 里 - 见 ACTIONS 的 leap 注释。
     // 只推进落在腾空窗口内的那部分 dt，所以帧率高低不影响跳的距离。
-    if (def.leap !== undefined && wasT !== null) {
-      const { startS, endS, px } = def.leap;
+    const leap = input.action === 'pounce' ? XIAOMI_POUNCE_MOTION : def.leap;
+    if (leap !== undefined && wasT !== null) {
+      const { startS, endS, px } = leap;
       const from = Math.max(wasT, startS);
       const to = Math.min(t, endS);
       if (to > from && endS > startS) {
