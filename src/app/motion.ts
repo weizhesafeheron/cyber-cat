@@ -228,6 +228,13 @@ export interface MotionInput {
    */
   readonly action: WorldActionKey | null;
   /**
+   * 同一个一次性动作是否是一次新的显式触发。
+   *
+   * 单看 action 名无法区分「上一帧还在播 stretch」和「用户又摸了一次，要求从头播
+   * stretch」。这个边沿由应用层提供；缺省 false，世界层持续投影的动作仍然只播一遍。
+   */
+  readonly restartAction?: boolean;
+  /**
    * 猫这一刻该待的屏幕 x（挂件跟前）。null = 没有空间诉求，照旧自己漫游。
    *
    * 由应用层把世界层的 `renderIntent.anchor`（只有挂件名，没有坐标）经挂件层
@@ -749,7 +756,7 @@ function stepPerch(
       // 一次性动作（打哈欠、伸懒腰）在窗台上照样只播一遍，播完站着。
       // **不推进 leap 的位移**：扑跳那 16 个精灵像素会把猫顶到边缘钳制上，
       // 读起来是「扑了但没动」；窄边上本来也不该扑。
-      const wasT = state.shot?.action === action ? state.shot.t : null;
+      const wasT = !input.restartAction && state.shot?.action === action ? state.shot.t : null;
       const t = wasT === null ? 0 : wasT + dt;
       const done = t >= (def.period ?? 0);
       return out(done ? 'idle' : action, lift, { ...p, surface: offered, t: 0 }, {
@@ -1154,7 +1161,7 @@ export function stepMotion(state: MotionState, input: MotionInput): MotionState 
     shot = null;
   } else if (!def.loop) {
     // 一次性动作：播一遍就完，之后站着等世界层改主意。
-    const wasT = shot?.action === input.action ? shot.t : null;
+    const wasT = !input.restartAction && shot?.action === input.action ? shot.t : null;
     const t = wasT === null ? 0 : wasT + Math.max(0, dt);
     shot = { action: input.action, t };
     const done = t >= (def.period ?? 0);

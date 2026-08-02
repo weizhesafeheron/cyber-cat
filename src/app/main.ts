@@ -85,6 +85,7 @@ import {
 } from './motion.js';
 import type { MicroSwitches, MotionState, ScreenRect, StageGeometry } from './motion.js';
 import { PollingPassthrough } from './passthrough.js';
+import { reactionDurationMs } from './reaction.js';
 import { ForegroundWatcher } from './foreground.js';
 import {
   footScreenY,
@@ -191,8 +192,6 @@ const MAX_CATCHUP_MS = 400 * 24 * MS_PER_HOUR;
  * 掩膜变 - 伸懒腰时猫横向拉长，可点范围也该跟着变宽。
  */
 const REACTION: WorldActionKey = 'stretch';
-/** 播完整整一个周期。stretch 一个周期的首尾都是常态姿势，切回去不会跳。 */
-const REACTION_MS = (ACTIONS[REACTION].period ?? 1) * 1000;
 
 const canvas = document.getElementById('cat') as HTMLCanvasElement;
 const display = new CatDisplay(canvas, TARGET_SCALE);
@@ -306,6 +305,16 @@ function install(w: World): void {
   micro = makeMicro(world.identity.seed);
 }
 
+/** 当前猫的抚摸图集播完一轮需要多久；桃心与动作窗口共用这个结果。 */
+function petReactionDurationMs(): number {
+  const tuning = motionTuningFor(
+    world.identity.motion ? { motion: world.identity.motion } : undefined,
+    REACTION,
+  );
+  const worldTimeScale = renderIntentOf(world, cat).timeScale;
+  return reactionDurationMs(REACTION, tuning, cat, worldTimeScale);
+}
+
 /** 待结算的用户动作。托盘点击与鼠标点击都是异步来的，攒到下一帧一起交给 step。 */
 let pending: UserAction[] = [];
 
@@ -361,6 +370,8 @@ let lastHeadX = 0;
 let lastFrame: RenderResult | null = null;
 /** 即时反馈的截止时刻（performance.now 时间轴）。0 = 没在反应。 */
 let reactionUntilMs = 0;
+/** 下一帧是否要把同名的一次性动作当作一次新的抚摸重新开始。 */
+let reactionRestartPending = false;
 
 // --- 回归气泡（ADR 0011）-------------------------------------------------
 //
@@ -619,6 +630,7 @@ function frame(now: number): void {
   // 「一边伸懒腰一边横向漂移」 - 因为世界层还在说走路，位置照推。
   // 这么改之后「当前播什么动作」只有 motion.playing 一个来源。
   const reacting = now < reactionUntilMs;
+  if (!reacting) reactionRestartPending = false;
 
   // 即时反馈期间不给锚点：用户刚点了猫，猫在原地回应他，不该扭头就往食盆走。
   // 与上面「反馈要作为动作喂给运动层」是同一条理由 - 位移的开关只有一处。
@@ -630,6 +642,7 @@ function frame(now: number): void {
   // 就会出现「安静模式下猫仍然会扑光标」，而且没有一处测试碰得到。
   const allow = restraint(settings.quiet, presenting, intent.anchor !== null);
   const effective = restrainedAction(reacting ? REACTION : intent.action, allow.roam);
+  const restartReaction = reacting && reactionRestartPending && effective === REACTION;
 
   pollYield(now);
 
@@ -691,6 +704,7 @@ function frame(now: number): void {
     dt: animDt * intent.timeScale,
     now,
     action: effective,
+    restartAction: restartReaction,
     hold: holdAt,
     cursorX: cursorScreenX,
     // 安静模式与让开是逗猫棒的**第七道闸门**：不满足就连轨迹判定都不做
@@ -703,6 +717,7 @@ function frame(now: number): void {
     geom: g,
     rnd: Math.random,
   });
+  reactionRestartPending = false;
   requestStageMove();
   probeKeyboardIdle(now);
   // 从**轮询**那条路也喂光标轨迹：穿透开着时 webview 收不到 pointermove，
@@ -723,7 +738,7 @@ function frame(now: number): void {
   // 碗里的份数变了就推给食盆窗口。「视觉上能看到碗里有粮」就是这个数的投影。
   props.onBowlPortions(world.bowl);
 
-  if (motion.playing !== currentAction) {
+  if (motion.playing !== currentAction || restartReaction) {
     currentAction = motion.playing;
     animT = 0;
   } else {
@@ -1170,8 +1185,11 @@ window.addEventListener('pointerup', (e) => {
   if (start === null) return;
   // 没越过阈值：这是一次抚摸。两件事都要做，理由见 REACTION 的注释。
   enqueue({ type: 'pet' });
-  reactionUntilMs = performance.now() + REACTION_MS;
-  hearts = [...hearts, ...burstHearts(performance.now(), motion.x)];
+  const now = performance.now();
+  const durationMs = petReactionDurationMs();
+  reactionUntilMs = now + durationMs;
+  reactionRestartPending = true;
+  hearts = [...hearts, ...burstHearts(now, motion.x, durationMs)];
 });
 
 window.addEventListener('pointercancel', (e) => {
@@ -1326,6 +1344,7 @@ async function adoptAnother(): Promise<void> {
     farewell.reset();
     pending = [];
     reactionUntilMs = 0;
+    reactionRestartPending = false;
     animT = 0;
     lastWallMs = Date.now();
 

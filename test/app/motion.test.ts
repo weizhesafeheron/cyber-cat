@@ -263,6 +263,29 @@ describe('位置随时间推进', () => {
     }
   });
 
+  it('同一个一次性动作被再次显式触发时，会从第一帧重新播放', () => {
+    const g = geom();
+    const started = run(createMotion(g, centeredStage(g)), {
+      frames: 90,
+      action: 'stretch',
+    });
+    expect(started.end.shot?.t).toBeGreaterThan(1);
+
+    const restarted = stepMotion(started.end, {
+      dt: 0,
+      now: started.now,
+      action: 'stretch',
+      restartAction: true,
+      anchorX: null,
+      cat: NORMAL,
+      geom: g,
+      rnd: mulberry32(1),
+    });
+
+    expect(restarted.playing).toBe('stretch');
+    expect(restarted.shot).toEqual({ action: 'stretch', t: 0 });
+  });
+
   it('掉帧（dt 很大）不会把猫甩出活动范围', () => {
     const g = geom();
     const { frames } = run(createMotion(g, centeredStage(g)), {

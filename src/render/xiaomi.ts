@@ -60,6 +60,11 @@ function timelineFor(action: ActionKey): XiaomiTimeline {
   );
 }
 
+/** 一条完整帧时间线实际占用的毫秒数。应用层特效必须跟这一个时钟对齐。 */
+export function xiaomiActionDurationMs(action: ActionKey): number {
+  return timelineFor(action).durationsMs.reduce((sum, duration) => sum + duration, 0);
+}
+
 /**
  * 把动作局部时间映射到完整帧。
  *
@@ -68,7 +73,7 @@ function timelineFor(action: ActionKey): XiaomiTimeline {
  */
 export function xiaomiFrameIndex(action: ActionKey, seconds: number): number {
   const timeline = timelineFor(action);
-  const totalMs = timeline.durationsMs.reduce((sum, duration) => sum + duration, 0);
+  const totalMs = xiaomiActionDurationMs(action);
   const elapsedMs = Math.max(0, seconds) * 1000;
   const localMs = ACTIONS[action].loop ? elapsedMs % totalMs : Math.min(elapsedMs, totalMs);
 
