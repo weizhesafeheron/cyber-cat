@@ -186,6 +186,22 @@ check_asset() {
     done
   done
 
+  # 边缘步态只画猫，真实窗口上沿由桌面本身提供。AI 偶尔会把「窄边缘」
+  # 画成木板、窗台或瓷砖，并且因为爪子与平台相连而逃过最大连通组件清理。
+  # 正常猫爪在物理落脚线附近只有少量接触像素；横跨大半格的连续前景就是场景残留。
+  frame=0
+  while [ "$frame" -lt 6 ]; do
+    contact_pixels=$("$IM" "$ASSETS/edge.webp" \
+      -crop "${FRAME_W}x2+$((frame * FRAME_W))+$((GROUND * FRAME_H / LOGICAL_H + 2))" \
+      +repage -alpha extract -threshold 50% \
+      -format '%[fx:int(mean*w*h)]' info:)
+    if [ "$contact_pixels" -gt 128 ]; then
+      echo "$PET/edge/$frame has $contact_pixels foreground pixels along the foot line; likely contains a platform or board" >&2
+      exit 1
+    fi
+    frame=$((frame + 1))
+  done
+
   # 静态动作的下半身必须锁住；只允许呼吸/眨眼带来的 0.5 像素量化误差。
   assert_center_span idle 2
   assert_center_span lie 2

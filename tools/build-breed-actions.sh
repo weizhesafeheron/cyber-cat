@@ -5,6 +5,8 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SOURCE_ROOT=${1:-/private/tmp/cyber-cat-breed-art/generated/sheets}
 BREED_LIST=${2:-'orange black ragdoll devon amshort aby'}
+EDGE_SOURCE_ROOT=${3:-}
+EDGE_ONLY=${EDGE_ONLY:-0}
 FRAME_W=288
 FRAME_H=224
 SHEET_W=1728
@@ -169,6 +171,34 @@ build_group() {
   done
 }
 
+# 修复生成模型把“窄边缘”画成木板或窗台的情况。覆盖源只包含横向排列的
+# 六只猫，可以有任意画布尺寸；这里按六等分取格，再复用正式的去底、主体提取、
+# 安全边距与脚底锚定流程。这样修 edge 不会重写其他十四个已验收动作。
+build_edge_override() {
+  breed=$1
+  input="$EDGE_SOURCE_ROOT/$breed.png"
+  [ -f "$input" ] || { echo "missing clean edge strip: $input" >&2; exit 1; }
+
+  source_w=$("$IM" identify -format '%w' "$input")
+  source_h=$("$IM" identify -format '%h' "$input")
+  frame=0
+  while [ "$frame" -lt 6 ]; do
+    left=$((frame * source_w / 6))
+    right=$(((frame + 1) * source_w / 6))
+    cell_w=$((right - left))
+    "$IM" "$input" -crop "${cell_w}x${source_h}+${left}+0" +repage \
+      -alpha on -fuzz 18% -transparent '#ff00ff' \
+      -channel A -threshold 50% +channel "$WORK/edge-source-$frame.png"
+    normalise_frame "$WORK/edge-source-$frame.png" edge "$frame" "$WORK/edge-$frame.png"
+    frame=$((frame + 1))
+  done
+
+  mkdir -p "$ROOT/public/pets/$breed/actions"
+  "$IM" "$WORK/edge-0.png" "$WORK/edge-1.png" "$WORK/edge-2.png" \
+    "$WORK/edge-3.png" "$WORK/edge-4.png" "$WORK/edge-5.png" +append \
+    -define webp:lossless=true "$ROOT/public/pets/$breed/actions/edge.webp"
+}
+
 alpha_area() {
   action=$1
   frame=$2
@@ -268,10 +298,25 @@ ensure_min_width() {
     -define webp:lossless=true "$strip"
 }
 
+if [ "$EDGE_ONLY" -eq 1 ]; then
+  [ -n "$EDGE_SOURCE_ROOT" ] || {
+    echo 'EDGE_ONLY=1 requires a clean edge source directory as the third argument' >&2
+    exit 1
+  }
+  for breed in $BREED_LIST; do
+    build_edge_override "$breed"
+    echo "$breed edge asset: rebuilt"
+  done
+  exit 0
+fi
+
 for breed in $BREED_LIST; do
   build_group "$breed" daily 'idle sit lie sleep groom'
   build_group "$breed" motion 'walk pounce land leapUp leapDown'
   build_group "$breed" expressive 'eat yawn stretch held edge'
+  if [ -n "$EDGE_SOURCE_ROOT" ] && [ -f "$EDGE_SOURCE_ROOT/$breed.png" ]; then
+    build_edge_override "$breed"
+  fi
   normalise_idle_transition "$breed"
   for action in idle lie sleep yawn groom; do
     lock_lower_body "$breed" "$action"
