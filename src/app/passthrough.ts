@@ -1,5 +1,5 @@
 import { DEFAULT_HIT_CONFIG, initialHitState, stepHit } from './hit.js';
-import type { CursorSample, HitConfig, HitFrame, HitRect, HitState, Velocity } from './hit.js';
+import type { CursorSample, HitConfig, HitFrame, HitState, Velocity } from './hit.js';
 
 /**
  * 穿透控制器。
@@ -18,10 +18,8 @@ export interface PassthroughController {
    * 每帧调用一次。
    *
    * frame 必须是**当前帧**的掩膜，不能是上一帧的（ADR 0006）。
-   * `rects` 是掩膜之外还要算命中的矩形（当前只有回归气泡），**同样必须是当前帧的** -
-   * 气泡消失之后还留着它，猫头顶就会有一块看不见的命中区。
    */
-  update(frame: HitFrame, now: number, rects?: readonly HitRect[]): void;
+  update(frame: HitFrame, now: number): void;
   /** 当前是否穿透。用于诊断与测试。 */
   readonly passThrough: boolean;
 }
@@ -94,7 +92,7 @@ export class PollingPassthrough implements PassthroughController {
     this.apply(true);
   }
 
-  update(frame: HitFrame, now: number, rects: readonly HitRect[] = []): void {
+  update(frame: HitFrame, now: number): void {
     // 让开期间连判定都不做：那时画布是空的，掩膜里没有猫，
     // 拿它去跑判定只会把「光标在猫身上」的滞后状态清成一堆无意义的中间值。
     if (this.yielding) return;
@@ -103,7 +101,7 @@ export class PollingPassthrough implements PassthroughController {
       this.state = stepHit(
         this.state,
         frame,
-        { cursor: this.cursor.latest, velocity: this.cursor.velocity, now, rects },
+        { cursor: this.cursor.latest, velocity: this.cursor.velocity, now },
         this.cfg,
       );
       return;
@@ -111,7 +109,7 @@ export class PollingPassthrough implements PassthroughController {
     this.state = stepHit(
       this.state,
       frame,
-      { cursor: this.cursor.latest, velocity: this.cursor.velocity, now, rects },
+      { cursor: this.cursor.latest, velocity: this.cursor.velocity, now },
       this.cfg,
     );
     // 只在变化时下发。状态每秒最多变几次，但 update 每秒被调 60 次，

@@ -41,18 +41,11 @@ import {
   DIARY_MIN_H,
   DIARY_MIN_W,
   DIARY_W,
-  bubbleVisible,
-  bubbleBob,
-  bubbleSpriteRect,
-  bubbleStageRect,
-  hitsRect,
-  shouldOfferDiary,
 } from '../diary/index.js';
-import type { SpriteRect } from '../diary/index.js';
 import { adoptNewCat, ensureWorld, requestAdoption } from './adoption.js';
 import type { AdoptionGate } from './adoption.js';
-import { BubbleCanvas } from './bubble.js';
 import { CursorTracker } from './cursor.js';
+import { diaryAdvanced, newestDiaryAt } from './diary-unread.js';
 import { CatDisplay } from './display.js';
 import { FarewellHost, tauriFarewellPorts } from './farewell.js';
 import {
@@ -66,6 +59,7 @@ import {
   probeCursor,
   probePresenting,
   probeStage,
+  pushDiaryUnreadMenu,
   pushQuietMenu,
   setPassThrough,
   setTrayIcon,
@@ -128,7 +122,7 @@ import {
   saveWorld,
 } from './persist.js';
 import { restrainedAction, restraint } from './restraint.js';
-import { DEFAULT_SETTINGS, withQuiet } from './settings.js';
+import { DEFAULT_SETTINGS, withDiaryUnread, withQuiet } from './settings.js';
 import type { Settings } from './settings.js';
 import { PropsHost } from './props.js';
 import { TARGET_SCALE } from './stage.js';
@@ -197,7 +191,6 @@ const canvas = document.getElementById('cat') as HTMLCanvasElement;
 const display = new CatDisplay(canvas, TARGET_SCALE);
 const paws = new PawCanvas(document.getElementById('paws') as HTMLCanvasElement);
 const heartCanvas = new HeartCanvas(document.getElementById('hearts') as HTMLCanvasElement);
-const bubble = new BubbleCanvas(document.getElementById('bubble') as HTMLCanvasElement);
 const say = new SayCanvas(document.getElementById('say') as HTMLCanvasElement, EAT_SAY_SPRITE);
 
 /**
@@ -274,7 +267,6 @@ function applyGeometry(): void {
   display.applyScale();
   paws.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
   heartCanvas.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
-  bubble.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
   say.resize(window.innerWidth, window.innerHeight, display.pixelRatio);
 }
 
@@ -373,35 +365,28 @@ let reactionUntilMs = 0;
 /** 下一帧是否要把同名的一次性动作当作一次新的抚摸重新开始。 */
 let reactionRestartPending = false;
 
-// --- 回归气泡（ADR 0011）-------------------------------------------------
-//
-// 「离开超过阈值后回来，猫头顶冒一个可点的小气泡，点开才展开日记」。
-// **不弹窗、不拦用户** - 它只是舞台里多出来的一小块可点区域。
+/**
+ * 打开日记。窗口真正打开后才清未读；打开失败时保留圆点，避免把用户还没看见的内容
+ * 误标成已读。
+ */
+async function showDiary(): Promise<void> {
+  const opened = await openDiary(DIARY_W, withChrome(DIARY_H), DIARY_MIN_W, DIARY_MIN_H);
+  if (!opened || !settings.diaryUnread) return;
+  settings = withDiaryUnread(settings, false);
+  await pushDiaryUnreadMenu(false);
+  await saveSettings(settings).catch((err: unknown) => {
+    console.error('[cyber-cat] 保存日记已读状态失败，下次启动仍可能显示未读：', err);
+  });
+}
 
-/**
- * 气泡冒出来的时刻（帧时钟）。null = 这次启动不冒，或者已经收掉了。
- *
- * 要不要冒由 catchUp 里的补算结果决定（shouldOfferDiary）。
- * **不在这里读墙上时钟算「离开了多久」。** 那个数只有补算知道，而且读时钟的版本
- * 没法测（见 diary/bubble.ts 的注释）。
- */
-let bubbleArmedAt: number | null = null;
-/**
- * 气泡这一帧占的矩形，精灵像素。null = 此刻没有气泡。
- *
- * 由 draw() 每帧算出来，点击判定与穿透判定都读它 - **画的和判的必须是同一个矩形**，
- * 分成两份迟早差一像素，症状是「看起来点在气泡上但没反应」。
- */
-let bubbleRect: SpriteRect | null = null;
-
-/**
- * 打开日记。托盘菜单与气泡共用。
- *
- * 顺手把气泡收掉：点开了就算读过了。留着它不消失的话，用户会以为没点中而再点一次。
- */
-function showDiary(): void {
-  bubbleArmedAt = null;
-  void openDiary(DIARY_W, withChrome(DIARY_H), DIARY_MIN_W, DIARY_MIN_H);
+/** 新日志出现时只做一次 false → true，避免每帧重复写 settings.json。 */
+function markDiaryUnread(previousNewestAt: number | null): void {
+  if (settings.diaryUnread || !diaryAdvanced(previousNewestAt, world.diary)) return;
+  settings = withDiaryUnread(settings, true);
+  void pushDiaryUnreadMenu(true);
+  void saveSettings(settings).catch((err: unknown) => {
+    console.error('[cyber-cat] 保存日记未读状态失败，下次启动可能丢失圆点：', err);
+  });
 }
 
 /**
@@ -439,21 +424,19 @@ const passthrough = new PollingPassthrough(tracker, setPassThrough);
  *
  * 两条路都会走到这里：猫离开了（永久），以及让开规则生效（临时）。
  * 抽成一个函数是因为**漏掉任何一块画布都会留下一块残影**，而那两条路都不该留下
- * 任何痕迹 - 死掉的猫头顶飘着一个气泡，或者全屏演示时屏幕角上留着几个爪印。
+ * 任何痕迹 - 死掉的猫头顶飘着一句台词，或者全屏演示时屏幕角上留着几个爪印。
  */
 function blank(): void {
   display.clear();
   paws.clear();
   heartCanvas.clear();
-  bubbleRect = null;
-  bubble.clear();
   say.clear();
   lastFrame = null;
 }
 
 function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult | null {
   if (motion.playing === null) {
-    // 猫不在了，头顶也就没有气泡可冒。死掉的猫的日记由告别页承接（ticket 13）。
+    // 猫不在了，头顶也就没有台词可冒。死掉的猫的日记由告别页承接（ticket 13）。
     blank();
     return null;
   }
@@ -504,48 +487,20 @@ function draw(intent: RenderIntent, animDt: number, nowMs: number): RenderResult
     ),
     display.spriteScale,
   );
-  // 两种气泡都排在 display.place 之后：横向位置取自 display.originCss，
-  // 而那个值是 place() 写的（已对齐到整数物理像素）。顺序颠倒会让气泡慢猫一帧。
-  paintBubble(nowMs);
+  // 台词气泡排在 display.place 之后：横向位置取自 display.originCss，而那个值是
+  // place() 写的（已对齐到整数物理像素）。顺序颠倒会让台词慢猫一帧。
   paintSay(nowMs);
   return res;
-}
-
-/**
- * 画这一帧的回归气泡，并记下它的矩形。
- *
- * 气泡的位置用**精灵坐标**表达（相对精灵左上角），所以「跟着猫头顶走」是结构保证的：
- * 猫的画布靠 transform 在舞台里移动，气泡按同一个 originCss 换算，两者不可能脱节。
- * 没有任何逐帧跟随的代码。
- */
-function paintBubble(nowMs: number): void {
-  // 拎着或正在下落时不画：被拎起来的姿态会伸进气泡占的那几行，而且那时用户的手
-  // 正在猫身上，气泡的点击区会跟拖拽抢同一片像素（见 diary/bubble.ts）。
-  // 猫站在窗口上时（liftY > 0）同样不画 - 那个气泡是「我回来了」的招呼，
-  // 该在桌面上等着被点，而不是跟着猫飘到别人的标题栏上。它不会因此丢掉：
-  // bubbleArmedAt 还在，猫下来之后照样冒。
-  if (!bubbleVisible(bubbleArmedAt, nowMs, motion.held || motion.liftY > 0)) {
-    bubbleRect = null;
-    bubble.clear();
-    return;
-  }
-  const rect = bubbleSpriteRect(bubbleBob(nowMs / 1000));
-  bubbleRect = rect;
-  bubble.paint(
-    bubbleStageRect(rect, display.originCss, display.spriteScale, window.innerHeight),
-    display.pixelRatio,
-  );
 }
 
 /**
  * 画这一帧的台词气泡（吃饭时的「yummy...」）。
  *
  * 时机跟着**吃饭动作的时相**走，用的是渲染动作的那同一个 animT - 传别的值会让气泡
- * 与低头错开（见 say/bubble.ts）。回归气泡在的时候让位：两者位置重合，
- * 而那个是可点的入口。
+ * 与低头错开（见 say/bubble.ts）。
  */
 function paintSay(nowMs: number): void {
-  if (!sayVisible(motion.playing, animT, bubbleRect !== null)) {
+  if (!sayVisible(motion.playing, animT)) {
     say.clear();
     return;
   }
@@ -615,8 +570,10 @@ function frame(now: number): void {
   const elapsed = Math.max(0, wall - lastWallMs);
   lastWallMs = wall;
 
+  const previousDiaryAt = newestDiaryAt(world.diary);
   const r = step(world, elapsed, { actions: drain() });
   world = r.world;
+  markDiaryUnread(previousDiaryAt);
   const intent = r.renderIntent;
   // 刚吃饱犯困那条闸门要知道上次进食是什么时候。用帧时钟而不是世界时钟：
   // 它和爪印寿命、点猫的即时反馈同一族，都是 UI 时间。
@@ -756,9 +713,7 @@ function frame(now: number): void {
 
   const res = draw(intent, animDt, now);
   // 判定与渲染同一帧：掩膜是刚产出的那一份，不是上一帧的。
-  // 气泡的矩形一起传进去 - 不传的话光标压到气泡上时窗口仍然是穿透的，气泡点不动
-  // （穿透是整窗一刀切的，ADR 0006）。它由上面这次 draw 刚算出来，是同一帧的值。
-  if (res) passthrough.update(res, now, bubbleRect ? [bubbleRect] : []);
+  if (res) passthrough.update(res, now);
 
   // 生病发系统通知（只有这一级发，饿了不发），猫死了则入档并弹告别页。
   // 两件都不等返回：帧循环不能等一次跨进程调用（与 setPassThrough 同一条理由）。
@@ -935,26 +890,17 @@ function primeMotion(action: WorldActionKey | null): void {
 async function catchUp(): Promise<void> {
   const leftAt = worldNow(world);
   const away = Math.min(MAX_CATCHUP_MS, Math.max(0, Date.now() - leftAt));
+  const previousDiaryAt = newestDiaryAt(world.diary);
   const r = step(world, away, {});
   world = r.world;
+  markDiaryUnread(previousDiaryAt);
   lastWallMs = Date.now();
   lastSaveMs = lastWallMs;
   lastTrayMs = lastWallMs;
 
-  // 「离开了多久」只有这里知道，所以气泡的判定也只能在这里做一次
-  // （ADR 0011）。渲染层不读墙上时钟 - 读了的话这条判定就没法测了。
-  const offer = shouldOfferDiary({
-    awayMs: away,
-    since: leftAt,
-    diary: world.diary,
-    dead: world.dead,
-  });
-  bubbleArmedAt = offer ? performance.now() : null;
-
   if (away > 0) {
     console.info(
-      `[cyber-cat] 补算了 ${(away / MS_PER_HOUR).toFixed(1)} 小时的离线时段，产出 ${r.events.length} 条事件` +
-        (offer ? '，头顶冒了一个日记气泡' : ''),
+      `[cyber-cat] 补算了 ${(away / MS_PER_HOUR).toFixed(1)} 小时的离线时段，产出 ${r.events.length} 条事件`,
     );
   }
   await saveWorld(world);
@@ -1135,13 +1081,6 @@ window.addEventListener('pointerdown', (e) => {
     cancelPointerInteraction();
   }
   const p = toSprite(e.clientX, e.clientY);
-  // 气泡先判。它在猫头顶、与猫的掩膜不重叠（diary/constants.ts 的
-  // BUBBLE_BASE_SPRITE_Y 就是照这个量出来的），所以先后其实不冲突 -
-  // 写清顺序是为了日后再加覆盖层时不产生歧义。
-  if (bubbleRect && hitsRect(bubbleRect, p.x, p.y)) {
-    showDiary();
-    return;
-  }
   if (!lastFrame) return;
   if (!hitTest(lastFrame, p.x, p.y)) return;
   // 指针捕获让正常拖动即使暂时滑出窗口也能继续；系统截图若夺走捕获，
@@ -1261,9 +1200,8 @@ void onTrayAction((id) => {
       console.error('[cyber-cat] 打开告别页失败：', err);
     });
   }
-  // 日记的常驻入口。气泡只在离开够久之后出现一次，托盘里这条永远在
-  // （CONTEXT.md 的托盘菜单）。
-  else if (id === 'diary') showDiary();
+  // 日记的唯一入口。打开成功后会同时清掉菜单后的未读圆点。
+  else if (id === 'diary') void showDiary();
   // 托盘里的两个挂件开关。挂件可隐藏，但要能再打开，所以是勾选项而不是「隐藏」。
   else if (id === 'prop-bowl') void props.toggle('bowl');
   else if (id === 'prop-bed') void props.toggle('bed');
@@ -1403,6 +1341,7 @@ async function boot(): Promise<void> {
   // 而不是先站起来走两步再想起来现在该安静。
   settings = await loadSettings();
   void pushQuietMenu(settings.quiet);
+  void pushDiaryUnreadMenu(settings.diaryUnread);
 
   install(await ensureWorld(gate));
   await breedSprites.load([world.identity.breed]);

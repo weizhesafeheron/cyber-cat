@@ -4,9 +4,7 @@ import { GLYPH_H, GLYPH_W, textPixels, textWidth } from './font.js';
 /**
  * 台词气泡的像素画。
  *
- * 与回归气泡（diary/art.ts）是两件东西，刻意不共用：那个是**可点的入口**，
- * 尺寸下限由「点得中」决定、颜色要在任何壁纸上都显眼、形状固定；
- * 这个是纯装饰，宽度跟着台词长短变，而且**永远不进命中掩膜** -
+ * 这是纯装饰，宽度跟着台词长短变，而且**永远不进命中掩膜** -
  * 点在「yummy...」上不该有任何反应，那不是一个按钮。
  *
  * 共用的只有描边色与「先铺色块、最后统一描边」这个画法。共用描边色是必须的：
@@ -15,7 +13,7 @@ import { GLYPH_H, GLYPH_W, textPixels, textWidth } from './font.js';
  * 不依赖 DOM，输出是裸像素，因此可以在 node 里测。
  */
 
-/** 气泡内壁。与回归气泡同色 - 同一只猫的两种气泡不该看起来来自两套美术。 */
+/** 气泡内壁。 */
 const PANEL = '#161c34';
 
 /** 字的颜色。奶油白，比青色柔和 - 这是句闲话，不是要用户去点的提示。 */
@@ -78,7 +76,7 @@ export function saySprite(text: string): SaySprite {
   const color = new Array<string | undefined>(w * h);
   const at = (x: number, y: number): number =>
     x < 0 || y < 0 || x >= w || y >= h ? 0 : solid[y * w + x]!;
-  // 描边：形状内、四邻里有一个在形状外。与渲染层和回归气泡同一个画法 -
+  // 描边：形状内、四邻里有一个在形状外。与渲染层用同一个画法 -
   // 手工标每个边缘像素的话，调一次圆角就得全部重标。
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {

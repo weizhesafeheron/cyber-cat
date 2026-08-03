@@ -1,5 +1,5 @@
 /**
- * 用户的开关。这一版只有一个：安静模式。
+ * 用户的应用层状态：安静模式与日记未读标记。
  *
  * **单独一份存档**（settings.json，见 src-tauri/src/save.rs 里 SETTINGS_FILE 的注释）：
  * 开关不能塞进 world.json，因为世界层必须可离线回放（ADR 0001），而开关不是时间的函数。
@@ -12,9 +12,11 @@
 export interface Settings {
   /** 安静模式：猫只趴着休息，不响应光标、不爬前台窗口、不主动闲逛。 */
   readonly quiet: boolean;
+  /** 猫咪日记是否有尚未打开查看的新条目。 */
+  readonly diaryUnread: boolean;
 }
 
-export const DEFAULT_SETTINGS: Settings = { quiet: false };
+export const DEFAULT_SETTINGS: Settings = { quiet: false, diaryUnread: false };
 
 /**
  * 把读到的 JSON 变成 Settings。
@@ -25,11 +27,16 @@ export const DEFAULT_SETTINGS: Settings = { quiet: false };
  */
 export function parseSettings(raw: unknown): Settings {
   if (typeof raw !== 'object' || raw === null) return DEFAULT_SETTINGS;
-  const quiet = (raw as { quiet?: unknown }).quiet;
-  return { quiet: quiet === true };
+  const saved = raw as { quiet?: unknown; diaryUnread?: unknown };
+  return { quiet: saved.quiet === true, diaryUnread: saved.diaryUnread === true };
 }
 
 export function withQuiet(settings: Settings, quiet: boolean): Settings {
   if (settings.quiet === quiet) return settings;
   return { ...settings, quiet };
+}
+
+export function withDiaryUnread(settings: Settings, diaryUnread: boolean): Settings {
+  if (settings.diaryUnread === diaryUnread) return settings;
+  return { ...settings, diaryUnread };
 }

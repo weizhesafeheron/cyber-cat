@@ -178,6 +178,7 @@ pub fn run() {
             tray::update_tray,
             tray::update_prop_menu,
             tray::update_quiet_menu,
+            tray::update_diary_menu,
             tray::set_tray_icon
         ])
         .setup(|app| {

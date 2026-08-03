@@ -9,9 +9,7 @@ import type { SaySprite } from './art.js';
  * 「吃饭时头顶随着低头弹出 yummy」是产品负责人的要求。要点在于**与低头对齐** -
  * 时相不能在这里另抄一份，所以直接用渲染层导出的 EAT_CYCLE（见那里的注释）。
  *
- * 与回归气泡（src/diary/）的分工：那个是可点的入口、有寿命、由「离开够久」触发；
- * 这个是纯装饰，跟着动作的时相走，**永远不进命中掩膜**。
- * 两者位置重合，所以同一时刻只画一个 - 优先让位给可点的那个（见 sayVisible）。
+ * 这是纯装饰，跟着动作的时相走，**永远不进命中掩膜**。
  */
 
 /** 猫吃饭时说的那句。 */
@@ -23,9 +21,8 @@ export const EAT_SAY_SPRITE: SaySprite = saySprite(EAT_LINE);
 /**
  * 气泡下沿（尾巴尖）落在精灵缓冲的第几行。
  *
- * 与回归气泡取同一个值，理由也一样：把七个品种全部动作逐帧渲染过，猫本体最靠上的
- * 像素在第 7 行，取 5 留两行空隙，于是**任何姿态下都不会压到猫**。
- * 这个值在两处各写一遍是有意的 - 它们是两块独立的美术，将来一个改了另一个未必要跟。
+ * 把七个品种全部动作逐帧渲染过，猫本体最靠上的像素在第 7 行，取 5 留两行空隙，
+ * 于是**任何姿态下都不会压到猫**。
  */
 export const SAY_BASE_SPRITE_Y = 5;
 
@@ -53,14 +50,9 @@ export interface SpriteRect {
  * 这一帧要不要画台词气泡。
  *
  * `animT` 是当前动作的局部时间（秒），与渲染动作用的是同一个值 - 传别的会让气泡
- * 与低头错开。`diaryBubbleShowing` 为真时让位：两个气泡位置重合，而那个是可点的入口。
+ * 与低头错开。
  */
-export function sayVisible(
-  action: ActionKey | null,
-  animT: number,
-  diaryBubbleShowing: boolean,
-): boolean {
-  if (diaryBubbleShowing) return false;
+export function sayVisible(action: ActionKey | null, animT: number): boolean {
   if (action !== 'eat') return false;
   const k = (animT % EAT_CYCLE.seconds) / EAT_CYCLE.seconds;
   // 只在头真的埋下去的那一段里显示。抬头嚼的那一秒不显示，于是它是「隔几秒冒一次」
@@ -73,7 +65,7 @@ export function sayVisible(
  *
  * 用精灵坐标表达是「跟着猫走」的结构保证：猫的画布靠 transform 在舞台里移动，
  * 气泡按同一个原点换算，两者不可能脱节，没有任何逐帧跟随的代码
- * （与回归气泡同一条思路，见 ADR 0011）。
+ * （与所有舞台覆盖层同一条思路）。
  *
  * `dir` 是猫的朝向（1 朝右）。`bob` 是上下浮动的整数偏移。
  */
