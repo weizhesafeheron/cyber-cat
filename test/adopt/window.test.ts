@@ -15,6 +15,8 @@ const read = (path: string): string => readFileSync(new URL(path, import.meta.ur
 const adoptRs = read('../../src-tauri/src/adopt.rs');
 const libRs = read('../../src-tauri/src/lib.rs');
 const viteConfig = read('../../vite.config.ts');
+const adoptHtml = read('../../adopt.html');
+const adoptMain = read('../../src/adopt/main.ts');
 const capabilities = JSON.parse(read('../../src-tauri/capabilities/default.json')) as {
   windows: string[];
 };
@@ -35,6 +37,22 @@ describe('领养窗口是居中的小窗口', () => {
     // 两处各写一份数字的话，改了 adopt/constants.ts 而忘了改 Rust，
     // 症状是窗口里出现一条空白边或者按钮被切掉。
     expect(adoptRs).toContain('.inner_size(width, height)');
+  });
+});
+
+describe('领养只负责选猫', () => {
+  it('界面没有外观、动作或随机调参入口', () => {
+    for (const removed of ['tuning-fields', 'art-tab', 'motion-tab', 'action-dropdown', 'randomize', 'reroll']) {
+      expect(adoptHtml).not.toContain(`id="${removed}"`);
+    }
+    expect(adoptHtml).toContain('id="breed-grid"');
+    expect(adoptHtml).toContain('选一只猫');
+  });
+
+  it('预览使用与桌面相同的完整帧品种资源', () => {
+    expect(adoptMain).toContain('new BreedSprites()');
+    expect(adoptMain).toContain('sprites.frame(flow.candidate.breed');
+    expect(adoptMain).not.toContain('CatRenderer');
   });
 });
 

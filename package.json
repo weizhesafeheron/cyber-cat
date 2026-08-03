@@ -15,6 +15,7 @@
     "app:dev": "tauri dev",
     "app:build": "tauri build",
     "icons": "vite-node tools/make-icons.ts",
+    "check:pet-art": "sh tools/check-pet-actions.sh",
     "check:win": "sh tools/check-windows.sh"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HEART_COUNT,
+  HEART_BURST_MS,
   HEART_LIFE_MS,
   HEART_SIZE,
   burstHearts,
@@ -52,6 +53,19 @@ describe('寿命', () => {
     const atStart = heartsInStage(hs, 1000, STAGE, GROUND_Y, SCALE);
     // 第一颗已经出来，后面两颗还没到时候
     expect(atStart).toHaveLength(1);
+  });
+
+  it('指定实际动画时长后，最后一颗与动画在同一时刻消失', () => {
+    const duration = 1680;
+    const hs = burstHearts(1000, 100, duration);
+    expect(heartsInStage(hs, 1000 + duration - 1, STAGE, GROUND_Y, SCALE)).not.toHaveLength(0);
+    expect(stepHearts(hs, 1000 + duration)).toHaveLength(0);
+  });
+
+  it('默认整串时长仍由单颗寿命和错峰共同决定', () => {
+    const hs = burstHearts(0, 100);
+    expect(stepHearts(hs, HEART_BURST_MS - 1)).not.toHaveLength(0);
+    expect(stepHearts(hs, HEART_BURST_MS)).toHaveLength(0);
   });
 });
 

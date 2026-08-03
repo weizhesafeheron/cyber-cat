@@ -20,8 +20,7 @@ pub const DIARY_LABEL: &str = "diary";
 /// 尺寸由前端给：窗口该多大取决于里面放什么，那是呈现层的判断
 /// （src/diary/constants.ts）。这里只负责居中建窗。
 ///
-/// **两个入口共用这一个命令**：托盘菜单的「猫咪日记」，以及猫头顶那个可点的
-/// 回归气泡。两者点开的是同一页，不该有两套窗口生命周期。
+/// 托盘菜单的「猫咪日记」入口调用这个命令。未读状态由前端在窗口成功打开后清除。
 /// 尺寸**四个数全由前端给**，包括下限。日记页自绘了标题栏，而标题条的高度只在
 /// src/chrome/constants.ts 有一份 - 下限要把它算进去，写死在这里就成了第二份。
 // 原因同 adopt::open_adoption：Windows 的建窗命令不能占着 WebView2 IPC 回调。
@@ -34,7 +33,7 @@ pub fn open_diary(
     min_width: f64,
     min_height: f64,
 ) -> Result<(), String> {
-    // 已经开着就把它拿到前面来，不再建第二个。托盘与气泡可能被连着点两次。
+    // 已经开着就把它拿到前面来，不再建第二个。用户可能连续点两次托盘菜单。
     if let Some(existing) = app.get_webview_window(DIARY_LABEL) {
         let _ = existing.unminimize();
         let _ = existing.set_focus();

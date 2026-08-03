@@ -89,18 +89,21 @@ export function parseAdopted(raw: unknown): AdoptedIdentity {
   if (!hasProfile) return { breed, seed, name: checked.name };
 
   const personalityRaw = p['personality'];
-  if (typeof personalityRaw !== 'object' || personalityRaw === null || Array.isArray(personalityRaw)) {
-    throw new AdoptionPayloadError('personality 应为对象');
-  }
-  const personalitySource = personalityRaw as Record<string, unknown>;
-  const trait = (key: keyof Personality): number => {
-    const value = personalitySource[key];
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
-      throw new AdoptionPayloadError(`personality.${key} 应为 0 到 1`);
+  let personality: Personality | undefined;
+  if (personalityRaw !== undefined) {
+    if (typeof personalityRaw !== 'object' || personalityRaw === null || Array.isArray(personalityRaw)) {
+      throw new AdoptionPayloadError('personality 应为对象');
     }
-    return value;
-  };
-  const personality = { active: trait('active'), clingy: trait('clingy'), greedy: trait('greedy') };
+    const personalitySource = personalityRaw as Record<string, unknown>;
+    const trait = (key: keyof Personality): number => {
+      const value = personalitySource[key];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+        throw new AdoptionPayloadError(`personality.${key} 应为 0 到 1`);
+      }
+      return value;
+    };
+    personality = { active: trait('active'), clingy: trait('clingy'), greedy: trait('greedy') };
+  }
 
   const markingRaw = p['marking'];
   let marking: MarkingChoice | undefined;
@@ -126,50 +129,56 @@ export function parseAdopted(raw: unknown): AdoptedIdentity {
   }
 
   const artRaw = p['art'];
-  if (typeof artRaw !== 'object' || artRaw === null || Array.isArray(artRaw)) {
-    throw new AdoptionPayloadError('art 应为对象');
-  }
-  const artSource = artRaw as Record<string, unknown>;
-  for (const { key } of ART_TUNING_CONTROLS) {
-    const value = artSource[key];
-    // 新版本可以继续增加安全调参字段；旧档案缺少时按 0（品种原设定）迁移。
-    if (value === undefined) continue;
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < -1 || value > 1) {
-      throw new AdoptionPayloadError(`art.${key} 应为 -1 到 1`);
+  let art: CatArtTuning | undefined;
+  if (artRaw !== undefined) {
+    if (typeof artRaw !== 'object' || artRaw === null || Array.isArray(artRaw)) {
+      throw new AdoptionPayloadError('art 应为对象');
     }
-  }
-  const art = normalizeArtTuning(artSource as unknown as CatArtTuning);
-
-  const motionRaw = p['motion'];
-  if (typeof motionRaw !== 'object' || motionRaw === null || Array.isArray(motionRaw)) {
-    throw new AdoptionPayloadError('motion 应为对象');
-  }
-  const motion: MotionProfile = {};
-  for (const [action, rawTuning] of Object.entries(motionRaw as Record<string, unknown>)) {
-    if (!ACTION_KEYS.includes(action as ActionKey)) {
-      throw new AdoptionPayloadError(`motion 包含未知动作 ${JSON.stringify(action)}`);
-    }
-    if (typeof rawTuning !== 'object' || rawTuning === null || Array.isArray(rawTuning)) {
-      throw new AdoptionPayloadError(`motion.${action} 应为对象`);
-    }
-    const source = rawTuning as Record<string, unknown>;
-    for (const { key } of MOTION_TUNING_CONTROLS) {
-      const value = source[key];
+    const artSource = artRaw as Record<string, unknown>;
+    for (const { key } of ART_TUNING_CONTROLS) {
+      const value = artSource[key];
+      // 新版本可以继续增加安全调参字段；旧档案缺少时按 0（品种原设定）迁移。
       if (value === undefined) continue;
       if (typeof value !== 'number' || !Number.isFinite(value) || value < -1 || value > 1) {
-        throw new AdoptionPayloadError(`motion.${action}.${key} 应为 -1 到 1`);
+        throw new AdoptionPayloadError(`art.${key} 应为 -1 到 1`);
       }
     }
-    motion[action as ActionKey] = normalizeMotionTuning(source);
+    art = normalizeArtTuning(artSource as unknown as CatArtTuning);
+  }
+
+  const motionRaw = p['motion'];
+  let motion: MotionProfile | undefined;
+  if (motionRaw !== undefined) {
+    if (typeof motionRaw !== 'object' || motionRaw === null || Array.isArray(motionRaw)) {
+      throw new AdoptionPayloadError('motion 应为对象');
+    }
+    motion = {};
+    for (const [action, rawTuning] of Object.entries(motionRaw as Record<string, unknown>)) {
+      if (!ACTION_KEYS.includes(action as ActionKey)) {
+        throw new AdoptionPayloadError(`motion 包含未知动作 ${JSON.stringify(action)}`);
+      }
+      if (typeof rawTuning !== 'object' || rawTuning === null || Array.isArray(rawTuning)) {
+        throw new AdoptionPayloadError(`motion.${action} 应为对象`);
+      }
+      const source = rawTuning as Record<string, unknown>;
+      for (const { key } of MOTION_TUNING_CONTROLS) {
+        const value = source[key];
+        if (value === undefined) continue;
+        if (typeof value !== 'number' || !Number.isFinite(value) || value < -1 || value > 1) {
+          throw new AdoptionPayloadError(`motion.${action}.${key} 应为 -1 到 1`);
+        }
+      }
+      motion[action as ActionKey] = normalizeMotionTuning(source);
+    }
   }
 
   return {
     breed,
     seed,
     name: checked.name,
-    personality,
+    ...(personality ? { personality } : {}),
     ...(marking ? { marking } : {}),
-    art,
-    motion,
+    ...(art ? { art } : {}),
+    ...(motion ? { motion } : {}),
   };
 }

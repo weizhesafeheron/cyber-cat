@@ -185,6 +185,22 @@ export async function pushQuietMenu(quiet: boolean): Promise<void> {
   }
 }
 
+/**
+ * 刷新托盘里「猫咪日记」后的未读圆点。
+ *
+ * 它与安静模式一样由 settings.json 持久化，所以单独下发；不塞进每 5 秒刷一次的
+ * 猫咪状态，避免一个 UI 阅读状态混进世界状态。
+ */
+export async function pushDiaryUnreadMenu(unread: boolean): Promise<void> {
+  if (!inTauri) return;
+  try {
+    const invoke = await invoker();
+    await invoke<void>('update_diary_menu', { unread });
+  } catch (err) {
+    console.error('[cyber-cat] 刷新猫咪日记未读标记失败：', err);
+  }
+}
+
 /** 刷新托盘里两个挂件的显示/隐藏勾选状态。 */
 export async function pushPropMenu(bowl: boolean, bed: boolean): Promise<void> {
   if (!inTauri) return;
@@ -301,7 +317,7 @@ export async function onAdoptAnother(handler: () => void): Promise<void> {
 }
 
 /**
- * 打开猫咪日记窗口。托盘菜单与猫头顶的回归气泡共用这一条。
+ * 打开猫咪日记窗口。入口在托盘菜单。
  *
  * 失败只记录：日记打不开是「看不到日记」，不该连带影响猫的日常运行。
  * 浏览器里调试时直接跳过 - 没有第二个窗口可开。
@@ -311,16 +327,18 @@ export async function openDiary(
   height: number,
   minWidth: number,
   minHeight: number,
-): Promise<void> {
+): Promise<boolean> {
   if (!inTauri) {
     console.info('[cyber-cat] 浏览器调试模式：真机上这里会打开日记窗口');
-    return;
+    return true;
   }
   try {
     const invoke = await invoker();
     await invoke<void>('open_diary', { width, height, minWidth, minHeight });
+    return true;
   } catch (err) {
     console.error('[cyber-cat] 打开日记窗口失败：', err);
+    return false;
   }
 }
 

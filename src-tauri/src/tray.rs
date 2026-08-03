@@ -15,9 +15,21 @@ use tauri::{App, AppHandle, Emitter, Manager, Runtime, State};
 /// 前端点了托盘菜单里的动作项时发出的事件名。
 pub const TRAY_ACTION_EVENT: &str = "tray-action";
 
+const DIARY_LABEL: &str = "猫咪日记";
+const DIARY_UNREAD_LABEL: &str = "猫咪日记  ●";
+
+fn diary_label(unread: bool) -> &'static str {
+    if unread {
+        DIARY_UNREAD_LABEL
+    } else {
+        DIARY_LABEL
+    }
+}
+
 /// 需要随猫的状态改写的菜单项。
 struct TrayItems<R: Runtime> {
     summary: MenuItem<R>,
+    diary: MenuItem<R>,
     hunger: MenuItem<R>,
     energy: MenuItem<R>,
     mood: MenuItem<R>,
@@ -49,7 +61,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
     let summary = MenuItem::with_id(app, "summary", "读取存档中……", false, None::<&str>)?;
     // 猫咪日记排在最前（CONTEXT.md 的托盘菜单顺序）：它是「我不在时它也在过日子」
     // 的唯一常驻出口，比喂食这类操作项更该先被看到。
-    let diary = MenuItem::with_id(app, "diary", "猫咪日记", true, None::<&str>)?;
+    let diary = MenuItem::with_id(app, "diary", diary_label(false), true, None::<&str>)?;
     let feed = MenuItem::with_id(app, "feed", "喂食", true, None::<&str>)?;
     // 喂药只在生病时可用（mvp-scope 4）：界面不该常年挂一个用不到的入口。
     // 这里的 false 只是初值（托盘在 setup 里建，那时前端还没起来）；
@@ -95,6 +107,7 @@ pub fn build(app: &App) -> tauri::Result<()> {
 
     app.manage(TrayHandles(Mutex::new(Some(TrayItems {
         summary,
+        diary,
         hunger,
         energy,
         mood,
@@ -131,8 +144,8 @@ pub fn build(app: &App) -> tauri::Result<()> {
             }
             // 挂件的显示开关也交回前端：摆放存档在那边，而且勾选状态必须与它
             // 记的那份保持一致 - 在这里直接 show/hide 会让两边漂移。
-            // 日记与告别页也交回前端：窗口尺寸是呈现层的判断，而且日记还有第二个
-            // 入口（猫头顶的气泡），两个入口走同一条路才不会出现两套窗口生命周期。
+            // 日记与告别页也交回前端：窗口尺寸是呈现层的判断；日记的未读状态也在
+            // 前端 settings.json 里，打开时要由同一条路清掉标记。
             // 安静模式也交回前端：它要写 settings.json、要把勾选状态推回来，
             // 而且「安静时猫做什么」全在呈现层（src/app/restraint.ts）。
             // 在这里直接记一个布尔量会让两边漂移。
@@ -246,6 +259,34 @@ pub fn update_quiet_menu(handles: State<'_, TrayHandles>, quiet: bool) -> Result
         .quiet
         .set_checked(quiet)
         .map_err(|e| format!("勾选安静模式失败：{e}"))
+}
+
+/// 刷新「猫咪日记」后的未读圆点。
+///
+/// 用文本圆点而不是自绘菜单图标：这是系统原生菜单，在 macOS 与 Windows 上都能
+/// 保持当前主题的字号、行高和高亮方式，同时不会再往猫头顶叠一层 UI。
+#[tauri::command]
+pub fn update_diary_menu(handles: State<'_, TrayHandles>, unread: bool) -> Result<(), String> {
+    let guard = handles
+        .0
+        .lock()
+        .map_err(|_| "托盘状态锁已损坏".to_string())?;
+    let items = guard.as_ref().ok_or("托盘尚未初始化")?;
+    items
+        .diary
+        .set_text(diary_label(unread))
+        .map_err(|e| format!("刷新猫咪日记未读标记失败：{e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::diary_label;
+
+    #[test]
+    fn diary_menu_adds_only_the_unread_dot() {
+        assert_eq!(diary_label(false), "猫咪日记");
+        assert_eq!(diary_label(true), "猫咪日记  ●");
+    }
 }
 
 /// 把托盘里两个挂件的勾选状态对齐到前端记的那份摆放。

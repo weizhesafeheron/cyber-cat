@@ -117,35 +117,31 @@ describe('什么时候冒', () => {
 
   it('只在吃饭时冒', () => {
     const mid = cycle * 0.3;
-    expect(sayVisible('eat', mid, false)).toBe(true);
+    expect(sayVisible('eat', mid)).toBe(true);
     for (const other of ['idle', 'walk', 'sleep', 'groom', 'held'] as const) {
-      expect(sayVisible(other, mid, false), `${other} 时不该冒`).toBe(false);
+      expect(sayVisible(other, mid), `${other} 时不该冒`).toBe(false);
     }
-    expect(sayVisible(null, mid, false)).toBe(false);
+    expect(sayVisible(null, mid)).toBe(false);
   });
 
   it('跟着低头的那一段，抬头嚼的时候不冒 - 一直挂着就成了状态栏', () => {
     // 周期起点：头还没埋下去
-    expect(sayVisible('eat', 0, false)).toBe(false);
+    expect(sayVisible('eat', 0)).toBe(false);
     // 埋下去的中段
-    expect(sayVisible('eat', cycle * 0.3, false)).toBe(true);
+    expect(sayVisible('eat', cycle * 0.3)).toBe(true);
     // 抬起头之后
-    expect(sayVisible('eat', cycle * 0.85, false)).toBe(false);
+    expect(sayVisible('eat', cycle * 0.85)).toBe(false);
   });
 
   it('时相与渲染层是同一个来源 - 抄一份比例过去迟早会有一边忘了改', () => {
     // 恰好在窗口的两端上
-    expect(sayVisible('eat', cycle * EAT_CYCLE.downFrom, false)).toBe(true);
-    expect(sayVisible('eat', cycle * EAT_CYCLE.downTo, false)).toBe(false);
+    expect(sayVisible('eat', cycle * EAT_CYCLE.downFrom)).toBe(true);
+    expect(sayVisible('eat', cycle * EAT_CYCLE.downTo)).toBe(false);
   });
 
   it('下一个周期还会再冒 - 它是「隔几秒一次」', () => {
-    expect(sayVisible('eat', cycle * 1.3, false)).toBe(true);
-    expect(sayVisible('eat', cycle * 2.3, false)).toBe(true);
-  });
-
-  it('回归气泡在的时候让位 - 两者位置重合，那个是可点的入口', () => {
-    expect(sayVisible('eat', cycle * 0.3, true)).toBe(false);
+    expect(sayVisible('eat', cycle * 1.3)).toBe(true);
+    expect(sayVisible('eat', cycle * 2.3)).toBe(true);
   });
 });
 

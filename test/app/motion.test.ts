@@ -31,10 +31,12 @@ import {
   H,
   LEAP_CROUCH_S,
   W,
+  XIAOMI_POUNCE_MOTION,
   makeCat,
   makeMicro,
   mulberry32,
   stepMicro,
+  xiaomiFrameIndex,
 } from '../../src/render/index.js';
 import type { ActionKey, WorldActionKey, Cat } from '../../src/render/index.js';
 import { step } from '../../src/world/index.js';
@@ -80,6 +82,7 @@ interface RunOpts {
   now?: number;
   /** 随机源种子。 */
   seed?: number;
+  pounceTimeScale?: number;
   /**
    * 挂件锚点的屏幕 x。默认 null = 没有锚点，自由漫游。
    *
@@ -116,6 +119,7 @@ function run(
       dt,
       now,
       action: opts.action === undefined ? 'walk' : opts.action,
+      pounceTimeScale: opts.pounceTimeScale,
       anchorX: anchorOf(state),
       cat,
       geom: g,
@@ -228,8 +232,7 @@ describe('位置随时间推进', () => {
   });
 
   it('扑跳会把猫真的往前送一段，且只在腾空那一段推进', () => {
-    const leap = ACTIONS.pounce.leap;
-    if (leap === undefined) throw new Error('扑跳应当声明 leap');
+    const leap = XIAOMI_POUNCE_MOTION;
     const g = geom();
     const start = createMotion(g, centeredStage(g));
 
@@ -246,11 +249,40 @@ describe('位置随时间推进', () => {
     expect(later.end.x).toBeCloseTo(done.end.x, 6);
   });
 
+  it('扑跳的水平位移只发生在图集腾空格，不能让落地坐姿向前滑', () => {
+    const g = geom();
+    const frames = run(createMotion(g, centeredStage(g)), {
+      frames: 180,
+      action: 'pounce',
+    }).frames;
+    const moving = frames.filter((frame) => frame.moved > 0);
+    expect(moving.length).toBeGreaterThan(0);
+    for (const frame of moving) {
+      expect(xiaomiFrameIndex('pounce', frame.state.shot?.t ?? 0)).toBeGreaterThanOrEqual(2);
+      expect(xiaomiFrameIndex('pounce', frame.state.shot?.t ?? 0)).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it.each([0.55, 1.45])('扑跳调速为 %s 倍时，位移仍只发生在腾空格', (scale) => {
+    const g = geom();
+    const frames = run(createMotion(g, centeredStage(g)), {
+      frames: 240,
+      action: 'pounce',
+      pounceTimeScale: scale,
+    }).frames;
+    const moving = frames.filter((frame) => frame.moved > 0);
+    expect(moving.length).toBeGreaterThan(0);
+    for (const frame of moving) {
+      expect(xiaomiFrameIndex('pounce', frame.state.shot?.t ?? 0)).toBeGreaterThanOrEqual(2);
+      expect(xiaomiFrameIndex('pounce', frame.state.shot?.t ?? 0)).toBeLessThanOrEqual(4);
+    }
+  });
+
   it('一次性动作播一遍就停下来站着，不会一轮接一轮地循环', () => {
     // 用户实测：「跳完固定是蹲下的动作，然后会循环好几轮」。
     // 根因是世界层给一个动作分配十几秒，而扑跳只有 3.4 秒，被当成循环播了四五轮。
     for (const action of WORLD_KEYS.filter((k) => !ACTIONS[k].loop)) {
-      const period = ACTIONS[action].period ?? 0;
+      const period = action === 'pounce' ? XIAOMI_POUNCE_MOTION.periodS : (ACTIONS[action].period ?? 0);
       expect(period, `${action} 没有声明时长`).toBeGreaterThan(0);
       const g = geom();
       const start = createMotion(g, centeredStage(g));
@@ -261,6 +293,29 @@ describe('位置随时间推进', () => {
       const after = run(start, { frames: Math.ceil(period * 60) + 30, action });
       expect(after.end.playing, `${action} 播完了还在循环`).toBe('idle');
     }
+  });
+
+  it('同一个一次性动作被再次显式触发时，会从第一帧重新播放', () => {
+    const g = geom();
+    const started = run(createMotion(g, centeredStage(g)), {
+      frames: 90,
+      action: 'stretch',
+    });
+    expect(started.end.shot?.t).toBeGreaterThan(1);
+
+    const restarted = stepMotion(started.end, {
+      dt: 0,
+      now: started.now,
+      action: 'stretch',
+      restartAction: true,
+      anchorX: null,
+      cat: NORMAL,
+      geom: g,
+      rnd: mulberry32(1),
+    });
+
+    expect(restarted.playing).toBe('stretch');
+    expect(restarted.shot).toEqual({ action: 'stretch', t: 0 });
   });
 
   it('掉帧（dt 很大）不会把猫甩出活动范围', () => {
@@ -1116,6 +1171,17 @@ describe('拎起来、下落、落地反应', () => {
     expect(landIdx, '落地没有播压缩').toBeGreaterThan(0);
     // 压缩之前都在悬空
     expect(seen.slice(0, landIdx).every((k) => k === 'held')).toBe(true);
+  });
+
+  it('接触地面的同一帧就切到落地动作，不会先贴地停一帧', () => {
+    const g = geom();
+    const start = createMotion(g, centeredStage(g));
+    const held = hold(start, { x: start.x, y: groundScreenY(g) - 200 }, 3);
+    const { seen, lifts } = release(held, 120);
+    const contact = lifts.findIndex((lift) => lift === 0);
+    expect(contact, '没有落到地面').toBeGreaterThan(0);
+    expect(lifts[contact - 1]).toBeGreaterThan(0);
+    expect(seen[contact]).toBe('land');
   });
 
   it('落地之后甩尾巴 - 共通的不满表现', () => {

@@ -386,9 +386,6 @@ export const IDLE_EVENT_CHANCE = 0.07;
 export const SLEEP_DIARY_CHANCE = 0.25;
 export const WAKE_DIARY_CHANCE = 0.3;
 
-/** 离开超过这么久，回来时头顶冒气泡提示有日记可看。 */
-export const DIARY_BUBBLE_AWAY_HOURS = 2;
-
 // ---------------------------------------------------------------------------
 // 初始状态
 // ---------------------------------------------------------------------------

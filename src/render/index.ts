@@ -3,7 +3,14 @@ import { FORMS } from './poses.js';
 import { Raster } from './raster.js';
 import type { Cat, Pose, RenderResult } from './types.js';
 
-export { BREEDS, BREED_KEYS, getBreed, hasBreed, type BreedDef } from './breeds.js';
+export {
+  BREEDS,
+  BREED_KEYS,
+  getBreed,
+  hasBreed,
+  type BreedDef,
+  type BreedSpriteDef,
+} from './breeds.js';
 export {
   MARKING_VARIANTS,
   hasMarkingVariant,
@@ -28,6 +35,15 @@ export { GROUND, H, W } from './raster.js';
 export { headColumn } from './poses.js';
 export { earAttachment, type EarAttachment } from './parts.js';
 export { mulberry32 } from './rng.js';
+export {
+  XIAOMI_FRAME_COUNT,
+  XIAOMI_FRAME_H,
+  XIAOMI_FRAME_MS,
+  XIAOMI_FRAME_W,
+  XIAOMI_POUNCE_MOTION,
+  xiaomiActionDurationMs,
+  xiaomiFrameIndex,
+} from './xiaomi.js';
 export {
   ART_TUNING_CONTROLS,
   DEFAULT_ART_TUNING,

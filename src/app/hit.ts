@@ -21,30 +21,6 @@ export interface HitFrame {
   readonly alphaMask: Uint8Array;
 }
 
-/**
- * 一块额外的矩形命中区，精灵像素坐标，`x0/y0` 含、`x1/y1` 不含。
- *
- * 目前只有一个用户：猫头顶的回归气泡（src/diary/bubble.ts）。它必须进命中判定 -
- * 不进的话窗口在光标压到气泡上时仍然是穿透的，气泡根本点不动（ADR 0006 的整窗
- * 一刀切）。
- *
- * **为什么气泡用矩形而不是掩膜。** ADR 0006 否决「静态矩形热区」是针对猫的：
- * 猫的姿态差异极大，单一矩形要么漏身体要么覆盖大片空白。气泡本身就是个固定尺寸的
- * 矩形贴图，矩形是它的精确形状而不是近似，所以那条否决在这里不适用。
- * 代价是气泡的四个圆角（各 2×2 像素）也算命中，这点误差比为一块 22×18 的贴图
- * 再维护一份掩膜通道划算。
- *
- * **y 可以是负的**：气泡在猫头顶，也就是在 72×56 那个缓冲之上。
- * 与 diary/bubble.ts 的 `SpriteRect` 同形，两边刻意不互相 import -
- * 命中层不该认识气泡，气泡也不该依赖命中层的类型。
- */
-export interface HitRect {
-  readonly x0: number;
-  readonly y0: number;
-  readonly x1: number;
-  readonly y1: number;
-}
-
 /** 一次光标采样。x/y 是精灵像素坐标（可为小数、可越界），t 是毫秒时间戳。 */
 export interface CursorSample {
   readonly x: number;
@@ -167,36 +143,7 @@ export function nearMask(frame: HitFrame, x: number, y: number, margin: number):
 }
 
 /**
- * 点到矩形的距离是否不超过 margin。
- *
- * 与 nearMask 的距离语义一致（点到方格的欧氏距离），因此 margin = 0 时
- * 等价于「落在矩形内」，和 hitsRect 结果相同。
- */
-export function nearRect(rect: HitRect, x: number, y: number, margin: number): boolean {
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-  const m = Number.isFinite(margin) ? Math.max(0, margin) : 0;
-  const dx = Math.max(rect.x0 - x, x - rect.x1, 0);
-  const dy = Math.max(rect.y0 - y, y - rect.y1, 0);
-  return dx * dx + dy * dy <= m * m;
-}
-
-/** 掩膜或任意一块额外矩形。两者是并集：猫可点，气泡也可点。 */
-function nearAny(
-  frame: HitFrame,
-  rects: readonly HitRect[],
-  x: number,
-  y: number,
-  margin: number,
-): boolean {
-  if (nearMask(frame, x, y, margin)) return true;
-  for (const rect of rects) {
-    if (nearRect(rect, x, y, margin)) return true;
-  }
-  return false;
-}
-
-/**
- * 从当前位置沿运动方向前探一段，看这条线段上是否有点靠近掩膜或额外矩形。
+ * 从当前位置沿运动方向前探一段，看这条线段上是否有点靠近掩膜。
  *
  * **只沿运动方向前探，不等比例放大边距。** 等比例放大在高速时会把整个精灵
  * 都圈进命中区（36 px 的边距对 72x56 的精灵就是整窗），等于挖死区；
@@ -209,16 +156,15 @@ export function sweepNearMask(
   vel: Velocity,
   margin: number,
   lead: number,
-  rects: readonly HitRect[] = [],
 ): boolean {
-  if (nearAny(frame, rects, x, y, margin)) return true;
+  if (nearMask(frame, x, y, margin)) return true;
   if (lead <= 0 || vel.speed <= 0 || !Number.isFinite(vel.speed)) return false;
   const ux = vel.vx / vel.speed;
   const uy = vel.vy / vel.speed;
   const steps = Math.ceil(lead / SWEEP_STEP);
   for (let i = 1; i <= steps; i++) {
     const d = Math.min(lead, i * SWEEP_STEP);
-    if (nearAny(frame, rects, x + ux * d, y + uy * d, margin)) return true;
+    if (nearMask(frame, x + ux * d, y + uy * d, margin)) return true;
   }
   return false;
 }
@@ -230,13 +176,6 @@ export interface HitInput {
   readonly velocity: Velocity;
   /** 决策时刻，毫秒。只用于退出延迟计时。 */
   readonly now: number;
-  /**
-   * 掩膜之外还要算命中的矩形，精灵像素。缺省为空。
-   *
-   * **每帧传当前该有的那些**，不要缓存：气泡只在离开够久之后出现，点开就消失，
-   * 而留着一块不存在的命中区会在猫头顶偷走用户的点击。
-   */
-  readonly rects?: readonly HitRect[];
 }
 
 export interface HitState {
@@ -283,13 +222,5 @@ function isNear(frame: HitFrame, input: HitInput, passThrough: boolean, cfg: Hit
   // 关着穿透时用更大的边距，形成进入/退出的双阈值。
   const margin = passThrough ? cfg.baseMargin : cfg.baseMargin + cfg.exitExtra;
   const lead = leadDistance(input.velocity.speed, cfg);
-  return sweepNearMask(
-    frame,
-    input.cursor.x,
-    input.cursor.y,
-    input.velocity,
-    margin,
-    lead,
-    input.rects ?? [],
-  );
+  return sweepNearMask(frame, input.cursor.x, input.cursor.y, input.velocity, margin, lead);
 }

@@ -50,7 +50,10 @@ export const HEART_COUNT = 3;
 export const HEART_LIFE_MS = 900;
 
 /** 同一次抚摸里，后面的心比前面的晚出来这么多毫秒，形成一串而不是一坨。 */
-const HEART_STAGGER_MS = 130;
+export const HEART_STAGGER_MS = 130;
+
+/** 不指定动画时长时沿用的整串时长。最后一颗在这个时刻完全消失。 */
+export const HEART_BURST_MS = HEART_LIFE_MS + (HEART_COUNT - 1) * HEART_STAGGER_MS;
 
 /** 升起的高度，精灵像素。 */
 const HEART_RISE_SPRITE = 14;
@@ -68,16 +71,30 @@ export interface Heart {
   readonly x: number;
   /** 同一串里的序号，决定错开时间与飘移方向。 */
   readonly i: number;
+  /** 这一颗从出现到消失的时长。由整次抚摸动画的结束点反推。 */
+  readonly lifeMs: number;
 }
 
-/** 一次抚摸冒出的一串爱心。 */
-export function burstHearts(now: number, catX: number): Heart[] {
-  return Array.from({ length: HEART_COUNT }, (_, i) => ({ at: now + i * HEART_STAGGER_MS, x: catX, i }));
+/**
+ * 一次抚摸冒出的一串爱心。
+ *
+ * `durationMs` 是这次实际动画的总时长；最后一颗心与动画在同一时刻消失。
+ */
+export function burstHearts(now: number, catX: number, durationMs = HEART_BURST_MS): Heart[] {
+  const totalMs = Math.max(1, durationMs);
+  const staggerMs = Math.min(HEART_STAGGER_MS, totalMs / HEART_COUNT);
+  const lifeMs = Math.max(1, totalMs - (HEART_COUNT - 1) * staggerMs);
+  return Array.from({ length: HEART_COUNT }, (_, i) => ({
+    at: now + i * staggerMs,
+    x: catX,
+    i,
+    lifeMs,
+  }));
 }
 
 /** 淘汰已经散完的。与爪印同一个做法：寿命一到就不存在了，不留半透明的残骸。 */
 export function stepHearts(hearts: readonly Heart[], now: number): readonly Heart[] {
-  const alive = hearts.filter((h) => now - h.at < HEART_LIFE_MS);
+  const alive = hearts.filter((h) => now - h.at < h.lifeMs);
   return alive.length === hearts.length ? hearts : alive;
 }
 
@@ -104,8 +121,8 @@ export function heartsInStage(
   const out: StageHeart[] = [];
   for (const h of hearts) {
     const age = now - h.at;
-    if (age < 0 || age >= HEART_LIFE_MS) continue;
-    const k = age / HEART_LIFE_MS;
+    if (age < 0 || age >= h.lifeMs) continue;
+    const k = age / h.lifeMs;
     // 先快后慢地升起：刚冒出来那一下要有劲，末尾轻轻散掉。
     const rise = (1 - (1 - k) * (1 - k)) * HEART_RISE_SPRITE * spriteScale;
     // 左右交替飘，同一串三颗才不会重叠成一条竖线。

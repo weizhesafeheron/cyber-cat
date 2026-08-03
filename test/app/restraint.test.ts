@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { QUIET_ACTION, restrainedAction, restraint } from '../../src/app/restraint.js';
-import { DEFAULT_SETTINGS, parseSettings, withQuiet } from '../../src/app/settings.js';
+import {
+  DEFAULT_SETTINGS,
+  parseSettings,
+  withDiaryUnread,
+  withQuiet,
+} from '../../src/app/settings.js';
 import { trayIconState } from '../../src/app/status.js';
 import type { CatStatus } from '../../src/world/index.js';
 
@@ -101,6 +106,21 @@ describe('开关的存档', () => {
     expect(off.quiet).toBe(false);
     expect(on.quiet).toBe(true);
     expect(withQuiet(on, true)).toBe(on);
+  });
+
+  it('旧存档默认没有未读日记，只有字面的 true 才算未读', () => {
+    expect(DEFAULT_SETTINGS.diaryUnread).toBe(false);
+    expect(parseSettings({ quiet: true }).diaryUnread).toBe(false);
+    expect(parseSettings({ quiet: false, diaryUnread: true }).diaryUnread).toBe(true);
+    expect(parseSettings({ quiet: false, diaryUnread: 1 }).diaryUnread).toBe(false);
+  });
+
+  it('切换未读状态不改原对象，值没变时返回同一个引用', () => {
+    const read = DEFAULT_SETTINGS;
+    const unread = withDiaryUnread(read, true);
+    expect(read.diaryUnread).toBe(false);
+    expect(unread.diaryUnread).toBe(true);
+    expect(withDiaryUnread(unread, true)).toBe(unread);
   });
 });
 

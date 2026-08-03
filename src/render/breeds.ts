@@ -4,8 +4,19 @@ import type { BreedKey, MarkingAdapter, Palette } from './types.js';
 /** 参数范围 [最小值, 最大值]，由 Seed 在其间线性采样。 */
 type Range = readonly [number, number];
 
+/**
+ * 高清完整帧资源的品种外观配置。
+ *
+ * `asset` 是 `public/pets/<asset>/actions` 下的一整套独立动作。品种差异来自实际
+ * 美术资源里的头骨、耳位、体型、四肢、尾巴和被毛，运行时不做换色或形变伪装。
+ */
+export interface BreedSpriteDef {
+  readonly asset: string;
+}
+
 export interface BreedDef {
   key: BreedKey;
+  sprite: BreedSpriteDef;
   palette: Palette;
   /** 花纹生成与着色算法。新增同类品种只需复用一个已注册适配器。 */
   markingAdapter: MarkingAdapter;
@@ -46,6 +57,7 @@ export interface BreedDef {
 export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   orange: {
     key: 'orange',
+    sprite: { asset: 'orange' },
     palette: PALETTES.orange,
     markingAdapter: 'tabby',
     label: '橘猫',
@@ -64,6 +76,7 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   black: {
     key: 'black',
+    sprite: { asset: 'black' },
     palette: PALETTES.black,
     markingAdapter: 'solid',
     label: '黑猫',
@@ -84,6 +97,8 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   cow: {
     key: 'cow',
+    // 小米就是奶牛猫母版，也是所有完整帧资源的最终效果基线。
+    sprite: { asset: 'xiaomi' },
     palette: PALETTES.cow,
     markingAdapter: 'patches',
     label: '奶牛猫',
@@ -102,6 +117,7 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   ragdoll: {
     key: 'ragdoll',
+    sprite: { asset: 'ragdoll' },
     palette: PALETTES.ragdoll,
     markingAdapter: 'color-point',
     label: '布偶猫',
@@ -121,6 +137,7 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   devon: {
     key: 'devon',
+    sprite: { asset: 'devon' },
     palette: PALETTES.devon,
     markingAdapter: 'wavy',
     label: '德文卷毛',
@@ -146,6 +163,7 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   amshort: {
     key: 'amshort',
+    sprite: { asset: 'amshort' },
     palette: PALETTES.amshort,
     markingAdapter: 'classic-tabby',
     label: '美短',
@@ -165,6 +183,7 @@ export const BREEDS: Readonly<Record<BreedKey, BreedDef>> = {
   },
   aby: {
     key: 'aby',
+    sprite: { asset: 'aby' },
     palette: PALETTES.aby,
     markingAdapter: 'ticked',
     label: '阿比西尼亚',
